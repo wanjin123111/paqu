@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TikHub · 短剧账号报表</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --paper:#F4F5F8; --card:#FFFFFF; --ink:#14161D; --ink-soft:#5A6173; --ink-faint:#8A91A3;
+    --line:#E6E8EE; --line-strong:#D3D7E0;
+    --accent:#5546FF; --accent-press:#4536E6; --accent-soft:#ECEAFF;
+    --ok:#0E9F6E; --ok-soft:#E3F6EE; --warn:#C2740B; --warn-soft:#FBF0DD; --err:#D8392B; --err-soft:#FBE6E4;
+    --cockpit:#14161D; --cockpit-line:#2A2E3A; --cockpit-ink:#E6E8EE; --cockpit-faint:#7F8699;
+    --radius:13px; --radius-sm:9px;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:'Inter',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+    --display:'Space Grotesk','Inter',system-ui,sans-serif;
+    --shadow:0 1px 2px rgba(20,22,29,.04),0 6px 22px rgba(20,22,29,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--sans);background:var(--paper);color:var(--ink);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  button{font-family:inherit}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 22px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:40}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{width:34px;height:34px;border-radius:9px;background:var(--ink);color:#fff;display:grid;place-items:center;font-family:var(--mono);font-weight:600;font-size:17px;transform:translateY(-1px)}
+  .wordmark{font-family:var(--display);font-weight:700;font-size:18px;letter-spacing:-.01em;line-height:1}
+  .wordmark span{color:var(--accent);margin-left:6px;font-weight:600;font-size:15px}
+  .tagline{font-size:11.5px;color:var(--ink-faint);letter-spacing:.02em;margin-top:3px}
+  .topbar-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .host-select{position:relative}
+  .host-select select{appearance:none;font-family:var(--mono);font-size:12px;font-weight:500;background:var(--paper);border:1px solid var(--line-strong);border-radius:8px;padding:8px 28px 8px 11px;color:var(--ink);cursor:pointer}
+  .host-select::after{content:"▾";position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--ink-faint);pointer-events:none}
+  .key-pill{display:flex;align-items:center;gap:8px;border:1px solid var(--line-strong);background:var(--paper);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12.5px;font-weight:500;color:var(--ink)}
+  .key-pill:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .key-dot{width:8px;height:8px;border-radius:50%;background:var(--err)}
+  .key-pill.set .key-dot{background:var(--ok)}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .card-head{display:flex;align-items:center;justify-content:space-between;padding:15px 18px 12px;border-bottom:1px solid var(--line)}
+  .card-head h2{margin:0;font-family:var(--display);font-size:13px;font-weight:600;letter-spacing:.05em;color:var(--ink-soft)}
+  .card-head .sub{font-size:12px;color:var(--ink-faint)}
+  .card-body{padding:16px 18px 18px}
+
+  .cors-banner{display:none;background:#FFF8F7;border:1px solid var(--err-soft);border-radius:11px;padding:14px 16px;margin-bottom:4px}
+  .cors-banner.show{display:block}
+  .cors-banner h3{margin:0 0 6px;font-family:var(--display);font-size:14px;color:var(--err)}
+  .cors-banner p{margin:0 0 8px;font-size:13px;color:var(--ink-soft);line-height:1.55}
+  .cors-banner code{font-family:var(--mono);font-size:12px;background:var(--paper);padding:2px 6px;border-radius:5px}
+  .cors-banner pre{font-family:var(--mono);font-size:11.5px;background:var(--ink);color:#E6E8EE;padding:13px 15px;border-radius:9px;overflow:auto;line-height:1.6;margin:8px 0 0;white-space:pre}
+
+  label.fl{display:block;font-size:11.5px;font-weight:600;letter-spacing:.02em;color:var(--ink-soft);margin-bottom:6px}
+  label.fl .hint{font-weight:400;color:var(--ink-faint)}
+  textarea.accounts{width:100%;min-height:150px;resize:vertical;border:1px solid var(--line-strong);border-radius:var(--radius-sm);padding:12px 13px;font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--ink)}
+  textarea.accounts:focus,input.tf:focus,select.tf:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .input-foot{display:flex;align-items:center;justify-content:space-between;margin-top:10px;gap:12px;flex-wrap:wrap}
+  .acct-count{font-size:12.5px;color:var(--ink-faint)}
+  .acct-count b{color:var(--ink);font-family:var(--mono)}
+  .run-btns{display:flex;gap:9px}
+  .btn{border:none;border-radius:var(--radius-sm);font-family:var(--display);font-weight:600;font-size:14px;padding:12px 22px;cursor:pointer;display:flex;align-items:center;gap:9px;transition:background .14s,transform .06s}
+  .btn-go{background:var(--accent);color:#fff}
+  .btn-go:hover{background:var(--accent-press)}
+  .btn-go:active{transform:translateY(1px)}
+  .btn-go:disabled{opacity:.55;cursor:not-allowed}
+  .btn-stop{background:var(--err-soft);color:var(--err)}
+  .btn-stop:hover{background:#f7d4d0}
+  .spin{width:15px;height:15px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* settings */
+  details.settings summary{cursor:pointer;list-style:none;font-family:var(--display);font-size:13px;font-weight:600;letter-spacing:.05em;color:var(--ink-soft);display:flex;align-items:center;gap:7px;padding:15px 18px}
+  details.settings summary::-webkit-details-marker{display:none}
+  details.settings summary::before{content:"▸";font-size:10px;transition:transform .15s}
+  details.settings[open] summary::before{transform:rotate(90deg)}
+  .settings-body{padding:4px 18px 18px;border-top:1px solid var(--line)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:13px}
+  .field .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
+  select.tf{appearance:none}
+  .paths{margin-top:14px;border-top:1px dashed var(--line);padding-top:14px}
+  .paths .field{margin-bottom:10px}
+  .tag{font-family:var(--mono);font-size:10px;font-weight:600;padding:1px 6px;border-radius:5px;margin-left:6px}
+  .tag.ok{background:var(--ok-soft);color:var(--ok)}
+  .tag.draft{background:var(--warn-soft);color:var(--warn)}
+
+  /* run / log */
+  #runCard{display:none}
+  .progress-row{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+  .pbar{flex:1;height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+  .pbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+  .pcount{font-family:var(--mono);font-size:12.5px;color:var(--ink-soft);flex:none}
+  .console{background:var(--cockpit);border-radius:10px;padding:12px 14px;height:230px;overflow:auto;font-family:var(--mono);font-size:12px;line-height:1.65}
+  .console .ln{white-space:pre-wrap;word-break:break-word}
+  .c-head{color:#fff;font-weight:600;margin-top:6px}
+  .c-head:first-child{margin-top:0}
+  .c-ok{color:#9FE9C8}
+  .c-dim{color:var(--cockpit-faint)}
+  .c-err{color:#FF9C92}
+
+  /* results */
+  #resultCard{display:none}
+  .result-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .result-sum{font-size:13px;color:var(--ink-soft)}
+  .result-sum b{color:var(--ink);font-family:var(--mono)}
+  .exports{display:flex;gap:9px}
+  .mini-btn{border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:500;color:var(--ink);cursor:pointer;display:flex;align-items:center;gap:6px}
+  .mini-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .table-scroll{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:560px}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
+  thead th{position:sticky;top:0;background:#1F2733;color:#fff;font-weight:600;text-align:left;padding:10px 12px;font-size:12px;z-index:1}
+  tbody td{padding:9px 12px;border-bottom:1px solid var(--line)}
+  tbody tr:hover{background:var(--paper)}
+  td.num{text-align:right;font-family:var(--mono)}
+  td.name{white-space:normal;max-width:320px}
+  td.link a{font-family:var(--mono);font-size:11.5px}
+  .row-err td{background:var(--err-soft)}
+
+  .foot-note{font-size:12px;color:var(--ink-faint);line-height:1.6;padding:0 4px}
+
+  .note-banner{display:none;background:var(--warn-soft);border:1px solid #F0D9A8;border-radius:11px;padding:13px 16px}
+  .note-banner.show{display:block}
+  .note-banner h3{margin:0 0 5px;font-family:var(--display);font-size:14px;color:var(--warn)}
+  .note-banner p{margin:0;font-size:13px;color:var(--ink-soft);line-height:1.55}
+  .note-banner code{font-family:var(--mono);font-size:12px;background:#fff;padding:2px 6px;border-radius:5px}
+
+  /* modal + toast (shared) */
+  .modal-bg{position:fixed;inset:0;background:rgba(20,22,29,.42);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:90;padding:20px}
+  .modal-bg.show{display:flex}
+  .modal{background:var(--card);border-radius:16px;width:min(440px,100%);box-shadow:0 24px 60px rgba(20,22,29,.28);overflow:hidden}
+  .modal-head{padding:18px 20px 0}
+  .modal-head h3{margin:0;font-family:var(--display);font-size:17px}
+  .modal-head p{margin:6px 0 0;font-size:12.5px;color:var(--ink-soft);line-height:1.5}
+  .modal-body{padding:16px 20px 20px;display:flex;flex-direction:column;gap:13px}
+  .key-input-wrap{display:flex;border:1px solid var(--line-strong);border-radius:9px;overflow:hidden}
+  .key-input-wrap:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .key-input-wrap input{flex:1;border:none;padding:11px 13px;font-family:var(--mono);font-size:13px;color:var(--ink);min-width:0}
+  .key-input-wrap input:focus{outline:none}
+  .key-toggle{border:none;background:var(--paper);padding:0 13px;font-size:12px;color:var(--ink-soft);cursor:pointer;font-weight:500}
+  .remember{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--ink-soft);cursor:pointer}
+  .remember input{width:16px;height:16px;accent-color:var(--accent)}
+  .modal-actions{display:flex;gap:9px;justify-content:flex-end}
+  .btn-ghost{border:1px solid var(--line-strong);background:var(--card);border-radius:9px;padding:10px 16px;font-size:13px;font-weight:500;cursor:pointer;color:var(--ink)}
+  .btn-ghost:hover{background:var(--paper)}
+  .btn-solid{border:none;background:var(--accent);color:#fff;border-radius:9px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer}
+  .btn-solid:hover{background:var(--accent-press)}
+  .key-test{font-size:12px;min-height:16px}
+  .key-test.ok{color:var(--ok)} .key-test.err{color:var(--err)} .key-test.run{color:var(--ink-soft)}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:500;opacity:0;pointer-events:none;transition:.22s;z-index:99}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  @media (max-width:680px){ .wrap{padding:14px}.topbar{padding:12px 14px;flex-wrap:wrap}.tagline{display:none} }
+  @media (prefers-reduced-motion:reduce){ *{animation-duration:.001ms!important;transition-duration:.001ms!important} }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">▸</div>
+    <div>
+      <div class="wordmark">TikHub<span>短剧报表</span> <span style="font:600 11px ui-monospace,monospace;color:#16a34a;background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:1px 6px;vertical-align:middle">build: App&nbsp;V3 · appv3-6</span></div>
+      <div class="tagline">批量抓账号 → 一键出表</div>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="host-select">
+      <select id="hostSelect" aria-label="API host">
+        <option value="https://api.tikhub.io">api.tikhub.io</option>
+        <option value="https://api.tikhub.dev">api.tikhub.dev · 国内</option>
+      </select>
+    </div>
+    <button class="key-pill" id="keyPill"><span class="key-dot"></span><span id="keyPillText">未设置 Key</span></button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="note-banner" id="originBanner"></div>
+
+  <div class="cors-banner" id="corsBanner"></div>
+
+  <!-- 输入 -->
+  <div class="card">
+    <div class="card-head"><h2>账号列表</h2><span class="sub">@后面那部分,一行一个</span></div>
+    <div class="card-body">
+      <textarea class="accounts" id="accountsInput" spellcheck="false" placeholder="masturzo.clemen
+aidramalabs_pulse0
+shortdramatime"></textarea>
+      <div class="input-foot">
+        <div class="acct-count">共 <b id="acctCount">0</b> 个账号</div>
+        <div class="run-btns">
+          <button class="btn btn-stop" id="stopBtn" style="display:none" type="button">停止</button>
+          <button class="btn btn-go" id="goBtn" type="button">生成报表</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 定时监控 -->
+  <div class="card">
+    <details class="settings" id="schedDetails">
+      <summary>⏰ 定时监控 —— 每天自动抓一份存盘 <span id="schedBadge" style="font:600 11px ui-monospace,monospace;color:#9ca3af;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;padding:1px 7px;margin-left:6px">未启用</span></summary>
+      <div class="settings-body">
+        <div class="grid">
+          <div class="field">
+            <label class="fl">启用每天定时</label>
+            <label style="display:flex;align-items:center;gap:8px;height:38px;cursor:pointer"><input type="checkbox" id="schedEnabled" style="width:16px;height:16px"> <span id="schedEnabledTxt" style="font-size:13px;color:var(--ink-soft)">关闭</span></label>
+          </div>
+          <div class="field">
+            <label class="fl">每天几点跑 <span class="hint">— 24 小时制</span></label>
+            <input class="tf" id="schedTime" type="time" value="08:00" />
+          </div>
+        </div>
+        <div style="background:var(--bg-soft,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;color:var(--ink-soft);line-height:1.9;margin-top:4px">
+          下次运行:<b id="schedNext">—</b><br>
+          上次运行:<span id="schedLast">从未</span><br>
+          存盘位置:代理目录下的 <code>reports/</code> —— 每天一个 <code>report_日期.xlsx</code>(3 个表),并把每个账号当天的数据追加到 <code>monitor_history.csv</code>(用来看逐日变化)。
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:11px;flex-wrap:wrap">
+          <button class="mini-btn" id="schedNowBtn" type="button">▶ 立即抓一次并存盘(测试)</button>
+          <span class="hint" style="max-width:520px">⚠️ 定时生效需:① 本页标签开着 ② 电脑不关机/休眠 ③ 代理黑窗口开着。三者缺一,到点就不会跑。</span>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- 设置 -->
+  <div class="card">
+    <details class="settings" id="settings">
+      <summary>设置(代理 / 接口路径 / 抓取参数)</summary>
+      <div class="settings-body">
+        <div class="grid">
+          <div class="field">
+            <label class="fl">CORS 代理 <span class="hint">— 浏览器直连被拦时填</span></label>
+            <input class="tf" id="proxyInput" spellcheck="false" placeholder="https://你的代理/?url={url}" />
+          </div>
+          <div class="field">
+            <label class="fl">分剧方式</label>
+            <select class="tf" id="groupBy">
+              <option value="title">标题前缀(推荐,最稳)</option>
+              <option value="playlist">播放列表(需确认接口)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="fl">每个账号最多抓 <span class="hint">— 0=全部</span></label>
+            <input class="tf" id="maxVideos" type="number" min="0" value="0" />
+          </div>
+          <div class="field">
+            <label class="fl">每页条数</label>
+            <input class="tf" id="pageSize" type="number" min="1" max="50" value="30" />
+          </div>
+          <div class="field">
+            <label class="fl">请求间隔 (毫秒)</label>
+            <input class="tf" id="delayMs" type="number" min="0" value="300" />
+          </div>
+          <div class="field">
+            <label class="fl">并发账号数 <span class="hint">— 同时抓几个号,1~6</span></label>
+            <input class="tf" id="concurrency" type="number" min="1" max="10" value="3" />
+          </div>
+          <div class="field"></div>
+          <div class="field">
+            <label class="fl">失败重试次数</label>
+            <input class="tf" id="retries" type="number" min="1" max="10" value="6" />
+          </div>
+        </div>
+
+        <div class="paths">
+          <div class="field">
+            <label class="fl">用户资料接口<span class="tag ok">已验证</span></label>
+            <input class="tf" id="epProfile" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label class="fl">取 secUid 接口<span class="tag draft">404就改</span></label>
+            <input class="tf" id="epSecuid" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label class="fl">用户视频列表接口<span class="tag draft">404就改</span></label>
+            <input class="tf" id="epPosts" spellcheck="false" />
+          </div>
+          <div class="field" id="plField1" style="display:none">
+            <label class="fl">用户播放列表接口<span class="tag draft">404就改</span></label>
+            <input class="tf" id="epPlaylists" spellcheck="false" />
+          </div>
+          <div class="field" id="plField2" style="display:none">
+            <label class="fl">播放列表内视频接口<span class="tag draft">404就改</span></label>
+            <input class="tf" id="epPlaylistVideos" spellcheck="false" />
+          </div>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- 运行 -->
+  <div class="card" id="runCard">
+    <div class="card-head"><h2>运行进度</h2><span class="sub" id="runSub"></span></div>
+    <div class="card-body">
+      <div class="progress-row">
+        <div class="pbar"><i id="pbarFill"></i></div>
+        <div class="pcount" id="pcount">0 / 0</div>
+      </div>
+      <div class="console" id="console"></div>
+    </div>
+  </div>
+
+  <!-- 结果 -->
+  <div class="card" id="resultCard">
+    <div class="card-head"><h2>报表</h2></div>
+    <div class="card-body">
+      <div class="result-top">
+        <div class="result-sum" id="resultSum"></div>
+        <div class="exports">
+          <button class="mini-btn" id="csvBtn" type="button">导出 CSV</button>
+          <button class="mini-btn" id="xlsxBtn" type="button">导出 Excel</button>
+          <button class="mini-btn" id="docBtn" type="button">导出 Word</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table id="resultTable"><thead></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot-note">
+    说明:浏览器直连 TikHub 受 CORS 限制,直连失败时请在“设置”里填本地代理。抓“全部视频”很费请求(一个几千集的账号≈数百次),会消耗 TikHub 余额——建议先用 1~2 个账号、把“最多抓”设成 100 跑通再放开。“短剧数 / 最高观看短剧”按标题前缀自动归类,属估算;数字与你预期差太多多半是该账号分剧写法特殊。
+  </p>
+</div>
+
+<!-- KEY 弹窗 -->
+<div class="modal-bg" id="keyModal">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h3>API Key</h3>
+      <p>粘贴你在 <a href="https://user.tikhub.io" target="_blank" rel="noopener">user.tikhub.io</a> → API Keys 里的密钥。只会作为 Bearer 令牌发给 TikHub。</p>
+    </div>
+    <div class="modal-body">
+      <div class="key-input-wrap">
+        <input id="keyInput" type="password" spellcheck="false" placeholder="粘贴 API Key" autocomplete="off" />
+        <button class="key-toggle" id="keyToggle" type="button">显示</button>
+      </div>
+      <label class="remember"><input type="checkbox" id="rememberKey" /> 记住在本机(本地浏览器)</label>
+      <div class="key-test" id="keyTest"></div>
+      <div class="modal-actions">
+        <button class="btn-ghost" id="testKeyBtn" type="button">测试 Key</button>
+        <button class="btn-solid" id="saveKeyBtn" type="button">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ---------- 安全存储(沙箱里自动退化为内存) ---------- */
+const store=(()=>{let ok=false;try{localStorage.setItem("__t","1");localStorage.removeItem("__t");ok=true;}catch(e){}const mem={};
+  return{get:k=>{try{return ok?localStorage.getItem(k):(k in mem?mem[k]:null);}catch(e){return null;}},
+         set:(k,v)=>{try{ok?localStorage.setItem(k,v):(mem[k]=v);}catch(e){mem[k]=v;}},
+         del:k=>{try{ok?localStorage.removeItem(k):delete mem[k];}catch(e){}}};})();
+
+const $=id=>document.getElementById(id);
+
+/* ---------- 默认接口路径 ---------- */
+const DEFAULTS={
+  epProfile:"/api/v1/tiktok/app/v3/handler_user_profile",
+  epSecuid:"/api/v1/tiktok/app/v3/get_user_id_and_sec_user_id_by_username",
+  epPosts:"/api/v1/tiktok/app/v3/fetch_user_post_videos",
+  epPlaylists:"/api/v1/tiktok/web/fetch_user_play_list",
+  epPlaylistVideos:"/api/v1/tiktok/web/fetch_play_list_videos",
+};
+const EP_VER="appv3-1";   /* 端点方案版本;改了就强制把老用户的设置刷成上面的默认值 */
+
+/* ---------- 字段名候选(容错提取) ---------- */
+const PLAY_KEYS=["play_count","playCount","play_cnt"];
+const DESC_KEYS=["desc","title","content","aweme_title","text"];
+const ID_KEYS=["aweme_id","awemeId","id","item_id","itemId"];
+const FOLLOWER_KEYS=["followerCount","follower_count","fans_count","total_follower","followers"];
+const HEART_KEYS=["heartCount","heart_count","total_favorited","favoriting_count","likes"];
+const NICK_KEYS=["nickname","nick_name","nick"];
+const VCOUNT_KEYS=["videoCount","aweme_count","video_count"];
+const SECUID_KEYS=["secUid","sec_uid","sec_user_id","secUserId"];
+
+const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
+const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
+
+const state={ apiKey:store.get("thr_key")||"", host:store.get("thr_host")||"https://api.tikhub.io" };
+let cfg={};                 // 运行时从设置读取
+let rows=[];                // 结果行(账号汇总)
+let dramaRows=[];           // 全部短剧明细(用于 All Drama List / Top Dramas 两个表)
+let running=false, cancelled=false;
+let corsShown=false;
+
+/* ---------- ApiError ---------- */
+class ApiError extends Error{
+  constructor(message,opts={}){super(message);this.corsLike=!!opts.corsLike;this.fatal=!!opts.fatal;this.notFound=!!opts.notFound;}
+}
+
+/* ---------- 工具 ---------- */
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const fmt=n=>(typeof n==="number"?n:Number(n)||0).toLocaleString("en-US");
+function toInt(x){if(x==null)return 0;const n=Number(String(x).replace(/,/g,"").trim());return isFinite(n)?Math.trunc(n):0;}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+
+function deepFind(obj,keys,d=0){
+  if(d>9||obj==null)return null;
+  if(Array.isArray(obj)){for(const v of obj){const r=deepFind(v,keys,d+1);if(r!=null)return r;}return null;}
+  if(typeof obj==="object"){
+    for(const k of keys){if(k in obj && typeof obj[k]!=="object")return obj[k];}
+    for(const k in obj){const r=deepFind(obj[k],keys,d+1);if(r!=null)return r;}
+  }
+  return null;
+}
+function looksLikeVideo(d){
+  if(!d||typeof d!=="object")return false;
+  const hasId=ID_KEYS.some(k=>k in d);
+  const hasPlay=deepFind(d,PLAY_KEYS)!=null||"stats"in d||"statistics"in d;
+  return hasId&&hasPlay;
+}
+function findVideoList(obj,d=0){
+  let best=[];
+  if(d>9||obj==null)return best;
+  if(Array.isArray(obj)){
+    if(obj.length&&obj.filter(looksLikeVideo).length>=Math.max(1,Math.floor(obj.length/2)))return obj;
+    for(const v of obj){const r=findVideoList(v,d+1);if(r.length>best.length)best=r;}
+  }else if(typeof obj==="object"){
+    for(const k in obj){const r=findVideoList(obj[k],d+1);if(r.length>best.length)best=r;}
+  }
+  return best;
+}
+function getPlayCount(v){
+  for(const ck of["statistics","stats"]){const c=v&&v[ck];if(c&&typeof c==="object"){for(const k of PLAY_KEYS)if(k in c)return toInt(c[k]);}}
+  return toInt(deepFind(v,PLAY_KEYS));
+}
+function getDesc(v){if(v&&typeof v==="object"){for(const k of DESC_KEYS)if(typeof v[k]==="string")return v[k];}const r=deepFind(v,DESC_KEYS);return typeof r==="string"?r:"";}
+function getAwemeId(v){if(v&&typeof v==="object"){for(const k of ID_KEYS)if(k in v&&typeof v[k]!=="object")return String(v[k]);}const r=deepFind(v,ID_KEYS);return r!=null?String(r):"";}
+function readPagination(data){
+  const cs=[];
+  if(data&&typeof data==="object"){cs.push(data);for(const ck of["data","aweme_list","itemList"])if(data[ck]&&typeof data[ck]==="object")cs.push(data[ck]);}
+  let hasMore=null,cursor=null;
+  for(const c of cs){if(c&&typeof c==="object"){
+    for(const hk of["has_more","hasMore","hasMorePosts","has_more_posts"])if(hk in c)hasMore=c[hk];
+    for(const ck of["max_cursor","cursor","maxCursor","next_cursor"])if(ck in c&&c[ck]!=null&&c[ck]!=="")cursor=c[ck];
+  }}
+  return[hasMore,cursor];
+}
+
+/* ---------- HTTP ---------- */
+function applyProxy(url){const p=(cfg.proxy||"").trim();if(!p)return url;return p.includes("{url}")?p.replace("{url}",encodeURIComponent(url)):p+url;}
+async function apiGet(path,params,label){
+  const qs=new URLSearchParams(Object.entries(params).filter(([k,v])=>v!==undefined&&v!=="")).toString();
+  const direct=cfg.host.replace(/\/$/,"")+path+(qs?"?"+qs:"");
+  const url=applyProxy(direct);
+  const headers={"Authorization":"Bearer "+state.apiKey,"Accept":"application/json"};
+  let last=null;
+  for(let attempt=1;attempt<=cfg.retries;attempt++){
+    let resp;
+    try{resp=await fetch(url,{headers});}
+    catch(e){throw new ApiError("浏览器无法连到 API(多半是 CORS)。",{corsLike:true});}
+    if(resp.status===200){const t=await resp.text();try{return JSON.parse(t);}catch(_){return null;}}
+    let detail="";try{detail=(await resp.text()||"").slice(0,400);}catch(_){}
+    if(resp.status===401)throw new ApiError("401:API Key 被拒绝(检查右上角的 Key)。"+(detail?" TikHub 原话:"+detail:""),{fatal:true});
+    if(resp.status===403)throw new ApiError("403:TikHub 拒绝访问 —— 通常是【邮箱未验证 / 该 Key 权限不足 / 账号被禁用】,与余额无关。"+(detail?" TikHub 原话:"+detail:""),{fatal:true});
+    if(resp.status===402)throw new ApiError("402:余额不足(此接口需付费)。请充值。"+(detail?" TikHub 原话:"+detail:""),{fatal:true});
+    if(resp.status===404)throw new ApiError("404:接口路径不对 → "+path+"("+label+")。去 docs.tikhub.io 核对后在设置里改。"+(detail?" TikHub 原话:"+detail:""),{fatal:true,notFound:true});
+    if(resp.status===429){last="429 限流";await sleep(cfg.delay*attempt*2);continue;}
+    if(resp.status>=500){last=resp.status+" 服务器错误"+(detail?":"+detail:"");await sleep(cfg.delay*attempt);continue;}
+    if(resp.status===400 && attempt<cfg.retries && /retry|请重试|Request failed|请求失败/i.test(detail)){last="400 请求失败,自动重试中…";await sleep(Math.round(cfg.delay*attempt*1.5));continue;}
+    last="HTTP "+resp.status+(detail?":"+detail:"");break;
+  }
+  throw new ApiError(last||"未知错误");
+}
+
+/* ---------- 抓取流程 ---------- */
+async function getProfile(uid,secUid){
+  const data=await apiGet(cfg.epProfile,{sec_user_id:secUid,secUid:secUid,unique_id:uid},"用户资料接口");
+  return{
+    nickname:String(deepFind(data,NICK_KEYS)||uid),
+    followers:toInt(deepFind(data,FOLLOWER_KEYS)),
+    hearts:toInt(deepFind(data,HEART_KEYS)),
+    videoCount:toInt(deepFind(data,VCOUNT_KEYS)),
+  };
+}
+async function resolveSecuid(uid,fallback){
+  if(fallback)return fallback;
+  try{const data=await apiGet(cfg.epSecuid,{username:uid,unique_id:uid},"取 secUid 接口");
+    const s=deepFind(data,SECUID_KEYS);if(s)return String(s);if(typeof data==="string")return data;
+  }catch(e){if(e.fatal)throw e;}
+  return"";
+}
+const POST_EP_CANDIDATES=[
+  "/api/v1/tiktok/app/v3/fetch_user_post_videos",
+  "/api/v1/tiktok/app/v3/fetch_user_post_videos_v2",
+  "/api/v1/tiktok/app/v3/fetch_user_post_videos_v3",
+  "/api/v1/tiktok/web/fetch_user_post",
+];
+async function fetchPostsPage(epList,params,onResolve){
+  let lastErr=null;
+  for(const ep of epList){
+    try{const data=await apiGet(ep,params,"用户视频列表接口");onResolve&&onResolve(ep);return{data,ep};}
+    catch(e){if(e instanceof ApiError&&e.notFound){lastErr=e;continue;}throw e;}
+  }
+  throw lastErr||new ApiError("没有可用的视频列表接口");
+}
+async function getAllVideos(secUid,uid,onPage){
+  const videos=[],seen=new Set();let cursor="0",stats=null,lockedEp=null,stall=0,stop="";
+  const epList=[cfg.epPosts,...POST_EP_CANDIDATES.filter(e=>e!==cfg.epPosts)];
+  const MAX_PAGES=4000;
+  for(let page=1;page<=MAX_PAGES;page++){
+    if(cancelled){stop="已停止";break;}
+    const params={secUid,sec_user_id:secUid,unique_id:uid,count:String(cfg.pageSize),cursor:String(cursor),max_cursor:String(cursor)};
+    let data;
+    if(lockedEp){data=await apiGet(lockedEp,params,"用户视频列表接口");}
+    else{const r=await fetchPostsPage(epList,params,ep=>{lockedEp=ep;if(ep!==cfg.epPosts)log("视频接口改用 "+ep,"c-dim");});data=r.data;}
+    if(!stats){stats={nickname:(deepFind(data,NICK_KEYS)||"")+"",followers:toInt(deepFind(data,FOLLOWER_KEYS)),hearts:toInt(deepFind(data,HEART_KEYS)),videoCount:toInt(deepFind(data,VCOUNT_KEYS))};}
+    const batch=findVideoList(data);let added=0;
+    for(const v of batch){const id=getAwemeId(v);if(id&&!seen.has(id)){seen.add(id);videos.push({id,desc:getDesc(v)||"",views:getPlayCount(v)});added++;}}
+    onPage(page,added,videos.length);
+    if(cfg.maxVideos&&videos.length>=cfg.maxVideos){stop="达到设置的上限 "+cfg.maxVideos;break;}
+    const[hasMore,next]=readPagination(data);
+    const moreFalse=(hasMore===false||hasMore===0||hasMore==="0");
+    const advanced=(next!=null&&String(next)!==""&&String(next)!=="0"&&String(next)!==String(cursor));
+    if(moreFalse){stop="接口返回 has_more=false(已到该接口末尾)";break;}
+    if(advanced){cursor=String(next);stall=added===0?stall:0;await sleep(cfg.delay);continue;}
+    // 游标没前进/缺失:TikTok 偶发空页或重复游标 —— 多试几次再放弃,别一遇空页就停
+    stall++;
+    if(stall>=6){stop="游标停滞/连续空页(已抓 "+videos.length+"。这通常是 TikTok 对单账号可翻取深度的平台限制)";break;}
+    await sleep(cfg.delay*(1+stall));
+  }
+  if(stop)log("翻页结束 → "+stop,"c-dim");
+  const out=cfg.maxVideos?videos.slice(0,cfg.maxVideos):videos;
+  out._stats=stats||{};
+  return out;
+}
+
+/* ---------- 标题分剧 ---------- */
+const SUBS=[
+  /https?:\/\/\S+/g,/[@#]\S+/g,
+  /\b(?:ep|episode|part|pt|chapter|ch|e|season)\s*\.?\s*\d+\b/gi,
+  /第\s*\d+\s*[集話话部季]/g,/\d+\s*[集話话]/g,
+  /\bfull\s+(?:episode|movie|series|drama|story)\b/gi,
+];
+const TRAIL=/[\(\[【\|\-\s]*\d+\s*[\)\]】]*\s*$/;
+function cleanCommon(t){t=t||"";for(const p of SUBS)t=t.replace(p," ");for(let i=0;i<3;i++){const t2=t.replace(TRAIL,"").trim();if(t2===t)break;t=t2;}return t.replace(/\s+/g," ").trim().replace(/^[\-\|·,.~!\s]+|[\-\|·,.~!\s]+$/g,"");}
+function titleKey(t){let k=cleanCommon(t).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu," ").replace(/\s+/g," ").trim();return k.split(" ").slice(0,8).join(" ");}
+function prettyName(t){return cleanCommon(t).slice(0,60).trim();}
+function groupByTitle(videos){
+  const g=new Map();
+  for(const v of videos){const key=titleKey(v.desc)||("__"+v.id);if(!g.has(key))g.set(key,[]);g.get(key).push(v);}
+  const dramas=[];
+  for(const[key,eps]of g){const total=eps.reduce((s,e)=>s+e.views,0);const top=eps.reduce((a,b)=>b.views>a.views?b:a);const name=prettyName(top.desc)||top.desc.slice(0,40)||key;dramas.push({name,episodes:eps.length,views:total});}
+  return dramas;
+}
+
+/* ---------- 播放列表分剧(可选) ---------- */
+async function groupByPlaylist(secUid,uid,onLog){
+  const dramas=[];let cursor="0",prev=null;
+  function findLists(o,d=0){let out=[];if(d>8||o==null)return out;
+    if(Array.isArray(o)){if(o.length&&o.every(x=>x&&typeof x==="object")&&o.some(x=>deepFind(x,["mixId","mix_id","playlist_id","playlistId"])))return o;for(const x of o)out=out.concat(findLists(x,d+1));}
+    else if(typeof o==="object"){for(const k in o)out=out.concat(findLists(o[k],d+1));}return out;}
+  for(let page=1;page<=200;page++){
+    if(cancelled)break;
+    const data=await apiGet(cfg.epPlaylists,{secUid,sec_user_id:secUid,unique_id:uid,count:"20",cursor:String(cursor),max_cursor:String(cursor)},"用户播放列表接口");
+    const lists=findLists(data);if(!lists.length)break;
+    for(const pl of lists){
+      if(cancelled)break;
+      const mixId=deepFind(pl,["mixId","mix_id","playlist_id","playlistId"]);
+      const nm=deepFind(pl,["mixName","mix_name","name","playlist_name"])||String(mixId);
+      let total=0,cnt=0,c2="0",p2=null;
+      for(let i=0;i<200;i++){
+        if(cancelled)break;
+        const pv=await apiGet(cfg.epPlaylistVideos,{mixId,mix_id:mixId,playlistId:mixId,count:"30",cursor:String(c2),max_cursor:String(c2)},"播放列表内视频接口");
+        const vids=findVideoList(pv);if(!vids.length)break;
+        for(const v of vids){total+=getPlayCount(v);cnt++;}
+        const[hm,nc]=readPagination(pv);if(hm===false||hm===0||hm==="0"||nc==null||String(nc)===String(p2))break;p2=c2;c2=nc;await sleep(cfg.delay);
+      }
+      onLog("播放列表《"+String(nm).slice(0,26)+"》集"+cnt+" 观看"+fmt(total),"c-dim");
+      dramas.push({name:prettyName(String(nm))||String(nm),episodes:cnt,views:total});
+    }
+    const[hm,nc]=readPagination(data);if(hm===false||hm===0||hm==="0"||nc==null||String(nc)===String(prev))break;prev=cursor;cursor=nc;await sleep(cfg.delay);
+  }
+  return dramas;
+}
+
+/* ---------- 组装行 ---------- */
+function buildRow(uid,prof,videos,dramas){
+  const totalEps=videos.length;
+  const totalViews=videos.reduce((s,v)=>s+v.views,0);
+  const dn=dramas.length;
+  const avg=dn?Math.round(totalViews/dn):0;
+  let topName="",topViews=0;
+  if(dramas.length){const t=dramas.reduce((a,b)=>b.views>a.views?b:a);topName=t.name;topViews=t.views;}
+  return{"截图名称":prof.nickname,"账号":uid,"昵称":prof.nickname,"粉丝":prof.followers,"点赞":prof.hearts,
+    "短剧数":dn,"总集数":totalEps,"累计观看":totalViews,"单剧均观看":avg,
+    "最高观看短剧":topName,"最高观看":topViews,"主页链接":"https://www.tiktok.com/@"+uid};
+}
+
+/* ---------- 运行 ---------- */
+function readCfg(){
+  cfg={
+    host:state.host,
+    proxy:$("proxyInput").value.trim(),
+    groupBy:$("groupBy").value,
+    maxVideos:Math.max(0,parseInt($("maxVideos").value)||0),
+    pageSize:Math.min(50,Math.max(1,parseInt($("pageSize").value)||30)),
+    delay:Math.max(0,parseInt($("delayMs").value)||300),
+    concurrency:Math.max(1,Math.min(10,parseInt($("concurrency").value)||3)),
+    retries:Math.min(8,Math.max(1,parseInt($("retries").value)||4)),
+    epProfile:$("epProfile").value.trim()||DEFAULTS.epProfile,
+    epSecuid:$("epSecuid").value.trim()||DEFAULTS.epSecuid,
+    epPosts:$("epPosts").value.trim()||DEFAULTS.epPosts,
+    epPlaylists:$("epPlaylists").value.trim()||DEFAULTS.epPlaylists,
+    epPlaylistVideos:$("epPlaylistVideos").value.trim()||DEFAULTS.epPlaylistVideos,
+  };
+}
+function parseAccounts(){return $("accountsInput").value.split("\n").map(s=>s.trim().replace(/^@/,"")).filter(Boolean);}
+
+async function run(){
+  if(running)return;
+  const accounts=parseAccounts();
+  if(!state.apiKey){openKeyModal();return;}
+  if(!accounts.length){toast("先填账号");return;}
+  readCfg();
+  running=true;cancelled=false;rows=[];dramaRows=[];corsShown=false;
+  $("corsBanner").classList.remove("show");
+  clearResults();clearConsole();
+  $("runCard").style.display="block";
+  $("goBtn").disabled=true;$("goBtn").innerHTML='<span class="spin"></span>抓取中…';
+  $("stopBtn").style.display="flex";
+  setProgress(0,accounts.length);
+  const failed=[];
+  const conc=Math.max(1,Math.min(10,cfg.concurrency||1));
+  if(conc>1)logHead("并发抓取:同时 "+conc+" 个账号(同一账号内部仍是串行翻页)");
+  let next=0,done=0;
+  async function worker(){
+    while(!cancelled){
+      const i=next++;
+      if(i>=accounts.length)break;
+      const acc=accounts[i];
+      const tag="["+(i+1)+"/"+accounts.length+"] "+acc;
+      const plog=(msg,cls)=>log((conc>1?tag+" · ":"")+msg,cls);
+      if(conc>1)logHead(tag+" ▶ 开始");else logHead(tag);
+      try{
+        await scrapeAccount(acc,plog);
+      }catch(e){
+        if(e instanceof ApiError&&e.corsLike){showCors();cancelled=true;break;}
+        plog("❌ "+(e.message||e),"c-err");
+        if(e instanceof ApiError&&e.fatal){plog("这是影响所有账号的错误,已停止。修好后重跑。","c-err");cancelled=true;break;}
+        failed.push(acc);
+      }
+      done++;setProgress(done,accounts.length);
+    }
+  }
+  await Promise.all(Array.from({length:conc},()=>worker()));
+
+  running=false;
+  $("goBtn").disabled=false;$("goBtn").textContent="生成报表";
+  $("stopBtn").style.display="none";
+  $("runSub").textContent=cancelled?"已停止":"完成";
+  updateSummary(failed);
+  if(rows.length)toast("完成 "+rows.length+" 个账号");
+}
+
+async function scrapeAccount(acc,log){
+  const sec=await resolveSecuid(acc,"");
+  if(!sec){throw new ApiError("没拿到 secUid,跳过(账号名是否写错?)");}
+  log("secUid ✓","c-dim");
+  let prof;
+  try{prof=await getProfile(acc,sec);log("资料 ✓ 粉丝 "+fmt(prof.followers)+" 点赞 "+fmt(prof.hearts),"c-ok");}
+  catch(e){if(e instanceof ApiError&&e.corsLike)throw e;prof={nickname:acc,followers:0,hearts:0,videoCount:0};log("资料接口没返回,改从视频作者信息补全","c-dim");}
+  const videos=await getAllVideos(sec,acc,(p,a,t)=>log("第"+p+"页 +"+a+" (累计 "+t+")","c-dim"));
+  const st=videos._stats||{};
+  const realTotal=prof.videoCount||st.videoCount||0;
+  log("已抓视频 "+videos.length+(realTotal?" / 账号共约 "+fmt(realTotal):"")+" 条"+(realTotal&&videos.length<realTotal*0.9?"(未抓全——多为平台翻页深度限制)":""),realTotal&&videos.length<realTotal*0.9?"c-dim":"c-ok");
+  prof.followers=prof.followers||st.followers||0;
+  prof.hearts=prof.hearts||st.hearts||0;
+  prof.videoCount=prof.videoCount||st.videoCount||0;
+  if((!prof.nickname||prof.nickname===acc)&&st.nickname)prof.nickname=st.nickname;
+  let dramas;
+  if(cfg.groupBy==="playlist"){
+    dramas=await groupByPlaylist(sec,acc,log);
+    if(!dramas.length){log("播放列表为空/未取到,改用标题分剧","c-dim");dramas=groupByTitle(videos);}
+  }else dramas=groupByTitle(videos);
+  const row=buildRow(acc,prof,videos,dramas);
+  addRow(row);
+  for(const d of dramas){dramaRows.push({"账号":acc,"昵称":prof.nickname,"短剧名":d.name,"集数":d.episodes,"累计观看":d.views,"单集均观看":d.episodes?Math.round(d.views/d.episodes):0,"主页链接":"https://www.tiktok.com/@"+acc});}
+  log("完成 → 短剧 "+row.短剧数+" 总集 "+row.总集数+" 累计观看 "+fmt(row.累计观看)+" 最高《"+row.最高观看短剧.slice(0,20)+"》"+fmt(row.最高观看),"c-ok");
+}
+
+/* ---------- 控制台 / 进度 ---------- */
+const con=()=>$("console");
+function clearConsole(){con().innerHTML="";}
+function logHead(t){const d=document.createElement("div");d.className="ln c-head";d.textContent=t;con().appendChild(d);con().scrollTop=con().scrollHeight;}
+function log(t,cls){const d=document.createElement("div");d.className="ln"+(cls?" "+cls:"");d.textContent="   "+t;con().appendChild(d);con().scrollTop=con().scrollHeight;}
+function setProgress(done,total){$("pcount").textContent=done+" / "+total;$("pbarFill").style.width=(total?Math.round(done/total*100):0)+"%";$("runSub").textContent="抓取中 "+done+"/"+total;}
+
+/* ---------- 结果表 ---------- */
+function clearResults(){$("resultCard").style.display="none";$("resultTable").querySelector("thead").innerHTML="";$("resultTable").querySelector("tbody").innerHTML="";$("resultSum").textContent="";}
+function ensureHeader(){
+  const thead=$("resultTable").querySelector("thead");
+  if(thead.children.length)return;
+  const tr=document.createElement("tr");
+  for(const c of COLUMNS){const th=document.createElement("th");th.textContent=c;tr.appendChild(th);}
+  thead.appendChild(tr);
+}
+function addRow(row){
+  $("resultCard").style.display="block";
+  ensureHeader();
+  const tb=$("resultTable").querySelector("tbody");
+  const tr=document.createElement("tr");
+  for(const c of COLUMNS){
+    const td=document.createElement("td");
+    if(NUM_COLS.has(c)){td.className="num";td.textContent=fmt(row[c]);}
+    else if(c==="主页链接"){td.className="link";const a=document.createElement("a");a.href=row[c];a.target="_blank";a.rel="noopener";a.textContent="@"+row["账号"];td.appendChild(a);}
+    else if(c==="最高观看短剧"){td.className="name";td.textContent=row[c];}
+    else td.textContent=row[c];
+    tr.appendChild(td);
+  }
+  tb.appendChild(tr);
+  rows.push(row);
+}
+function updateSummary(failed){
+  let s="已完成 <b>"+rows.length+"</b> 个账号";
+  if(failed&&failed.length)s+=" · 失败 <b>"+failed.length+"</b>("+failed.map(esc).join(", ")+")";
+  $("resultSum").innerHTML=s;
+}
+
+/* ---------- 导出 ---------- */
+function downloadBlob(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();URL.revokeObjectURL(a.href);}
+function exportCSV(){
+  if(!rows.length){toast("还没有数据");return;}
+  const head=COLUMNS.join(",");
+  const body=rows.map(r=>COLUMNS.map(c=>{let v=r[c];if(typeof v==="string"&&/[",\n]/.test(v))v='"'+v.replace(/"/g,'""')+'"';return v;}).join(",")).join("\n");
+  downloadBlob(new Blob(["\ufeff"+head+"\n"+body],{type:"text/csv;charset=utf-8"}),"tikhub_report.csv");
+  toast("已导出 CSV");
+}
+const DRAMA_COLS=["账号","昵称","短剧名","集数","累计观看","单集均观看","主页链接"];
+const TOP_COLS=["排名","短剧名","账号","昵称","累计观看","集数","单集均观看"];
+function topDramas(limit){
+  return [...dramaRows].sort((a,b)=>b["累计观看"]-a["累计观看"]).slice(0,limit)
+    .map((d,i)=>({"排名":i+1,"短剧名":d["短剧名"],"账号":d["账号"],"昵称":d["昵称"],"累计观看":d["累计观看"],"集数":d["集数"],"单集均观看":d["单集均观看"]}));
+}
+function buildWorkbook(){
+  const wb=XLSX.utils.book_new();
+  const ws1=XLSX.utils.json_to_sheet(rows,{header:COLUMNS});
+  ws1["!cols"]=[{wch:16},{wch:20},{wch:16},{wch:11},{wch:12},{wch:8},{wch:9},{wch:14},{wch:12},{wch:32},{wch:13},{wch:40}];
+  XLSX.utils.book_append_sheet(wb,ws1,"Account Summary");
+  const ws2=XLSX.utils.json_to_sheet(dramaRows.length?dramaRows:[Object.fromEntries(DRAMA_COLS.map(c=>[c,""]))],{header:DRAMA_COLS});
+  ws2["!cols"]=[{wch:20},{wch:18},{wch:36},{wch:7},{wch:14},{wch:12},{wch:40}];
+  XLSX.utils.book_append_sheet(wb,ws2,"All Drama List");
+  const top=topDramas(200);
+  const ws3=XLSX.utils.json_to_sheet(top.length?top:[Object.fromEntries(TOP_COLS.map(c=>[c,""]))],{header:TOP_COLS});
+  ws3["!cols"]=[{wch:6},{wch:36},{wch:20},{wch:18},{wch:14},{wch:7},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,ws3,"Top Dramas");
+  return wb;
+}
+function exportXLSX(){
+  if(!rows.length){toast("还没有数据");return;}
+  if(typeof XLSX==="undefined"){toast("Excel 库未加载,请改用 CSV 导出");return;}
+  XLSX.writeFile(buildWorkbook(),"tikhub_report.xlsx");
+  toast("已导出 Excel(3 个表)");
+}
+
+/* ---------- 定时监控 ---------- */
+const HIST_COLS=["日期时间","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","最高观看短剧","最高观看"];
+function pad2(n){return String(n).padStart(2,"0");}
+function dayStr(d){d=d||new Date();return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate());}
+function nowStamp(){const d=new Date();return dayStr(d)+" "+pad2(d.getHours())+":"+pad2(d.getMinutes());}
+function schedCfg(){return {enabled:store.get("thr_sched_on")==="1",time:store.get("thr_sched_time")||"08:00",last:store.get("thr_sched_last")||""};}
+function computeNext(){
+  const c=schedCfg();if(!c.enabled)return null;
+  const p=c.time.split(":");const hh=+p[0]||0,mm=+p[1]||0;
+  const now=new Date();const next=new Date();next.setHours(hh,mm,0,0);
+  if(next<=now&&c.last===dayStr(now))next.setDate(next.getDate()+1);
+  else if(next<=now&&c.last!==dayStr(now))return now; // 今天已过点且没跑 → 开页就补跑
+  return next;
+}
+function fmtDT(d){return d?dayStr(d)+" "+pad2(d.getHours())+":"+pad2(d.getMinutes()):"—";}
+function refreshSchedUI(){
+  const c=schedCfg();
+  $("schedEnabled").checked=c.enabled;
+  $("schedEnabledTxt").textContent=c.enabled?"已开启":"关闭";
+  $("schedTime").value=c.time;
+  const b=$("schedBadge");
+  if(c.enabled){b.textContent="已启用";b.style.color="#16a34a";b.style.background="#dcfce7";b.style.borderColor="#86efac";}
+  else{b.textContent="未启用";b.style.color="#9ca3af";b.style.background="#f3f4f6";b.style.borderColor="#e5e7eb";}
+  const nx=computeNext();
+  $("schedNext").textContent=c.enabled?(nx&&dayStr(nx)===dayStr()&&nx<=new Date()?"开页将补跑今天":fmtDT(nx)):"(未启用)";
+  $("schedLast").textContent=c.last?(c.last+" 已完成"):"从未";
+}
+async function saveToProxy(filename,content,opts){
+  opts=opts||{};
+  const body={filename:filename,content:content,base64:!!opts.base64,append:!!opts.append};
+  if(opts.header)body.header=opts.header;
+  const r=await fetch("/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok)throw new Error("存盘失败 HTTP "+r.status+"(代理是否在运行?是否从 localhost 打开?)");
+  return r.json();
+}
+async function saveReports(){
+  if(!rows.length)throw new Error("没有数据可存");
+  if(typeof XLSX!=="undefined"){
+    const b64=XLSX.write(buildWorkbook(),{type:"base64",bookType:"xlsx"});
+    await saveToProxy("report_"+dayStr()+".xlsx",b64,{base64:true});
+  }
+  const stamp=nowStamp();
+  const esc2=s=>{s=String(s==null?"":s);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  const lines=rows.map(r=>HIST_COLS.map(c=>c==="日期时间"?stamp:esc2(r[c])).join(",")).join("\n")+"\n";
+  await saveToProxy("monitor_history.csv",lines,{append:true,header:HIST_COLS.join(",")});
+}
+let schedBusy=false;
+async function runScheduled(manual){
+  if(running||schedBusy){if(manual)toast("正在抓取中,请稍候");return;}
+  schedBusy=true;
+  try{
+    if(!manual)store.set("thr_sched_last",dayStr()); // 自动跑先占当天,避免每30秒重复触发
+    logHead("⏰ "+(manual?"手动测试":"定时")+"任务启动 "+nowStamp());
+    await run();
+    if(cancelled){log("任务被中断,未存盘","c-err");return;}
+    await saveReports();
+    store.set("thr_sched_last",dayStr());
+    log("✅ 已存盘:reports/report_"+dayStr()+".xlsx + monitor_history.csv","c-ok");
+    toast("定时任务完成,已存盘到 reports/");
+  }catch(e){
+    log("⏰ 定时任务出错:"+(e.message||e),"c-err");
+    if(manual)toast("出错:"+(e.message||e));
+  }finally{schedBusy=false;refreshSchedUI();}
+}
+function tickScheduler(){
+  const c=schedCfg();
+  if(!c.enabled||running||schedBusy)return;
+  const now=new Date();
+  if(c.last===dayStr(now))return;
+  const p=c.time.split(":");const sched=new Date();sched.setHours(+p[0]||0,+p[1]||0,0,0);
+  if(now>=sched)runScheduled(false);
+}
+function exportWord(){
+  if(!rows.length){toast("还没有数据");return;}
+  const e=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const fmtN=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看","集数","单集均观看","排名"]);
+  const cell=(c,v)=>{const num=fmtN.has(c);if(num&&typeof v==="number")v=v.toLocaleString("en-US");return "<td style=\"border:1px solid #cbd5e1;padding:3px 6px;font-size:9pt;"+(num?"text-align:right;":"")+"\">"+e(v)+"</td>";};
+  const table=(cols,data)=>{
+    let h="<table style=\"border-collapse:collapse;width:100%\"><tr>"+cols.map(c=>"<td style=\"border:1px solid #0f172a;padding:3px 6px;background:#1f2937;color:#fff;font-weight:bold;font-size:9pt\">"+e(c)+"</td>").join("")+"</tr>";
+    for(const r of data)h+="<tr>"+cols.map(c=>cell(c,r[c])).join("")+"</tr>";
+    return h+"</table>";
+  };
+  const top=topDramas(200);
+  const doc=
+    "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>"+
+    "<head><meta charset='utf-8'><title>TikHub 短剧报表</title>"+
+    "<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>90</w:Zoom></w:WordDocument></xml><![endif]-->"+
+    "<style>@page{size:A4 landscape;margin:1.2cm} body{font-family:Calibri,'Microsoft YaHei',Arial} h1{font-size:16pt} h2{font-size:13pt;margin-top:18pt;border-bottom:2px solid #6366f1;padding-bottom:3px}</style></head><body>"+
+    "<h1>TikHub 短剧账号报表</h1>"+
+    "<p style='color:#64748b;font-size:9pt'>账号 "+rows.length+" 个 · 短剧 "+dramaRows.length+" 部 · 生成于 "+e(new Date().toLocaleString())+"</p>"+
+    "<h2>① 账号汇总 / Account Summary</h2>"+table(COLUMNS,rows)+
+    "<h2>② 热门短剧榜 / Top Dramas（前 200）</h2>"+table(TOP_COLS,top)+
+    "<h2>③ 全部短剧明细 / All Drama List</h2>"+table(DRAMA_COLS,dramaRows)+
+    "</body></html>";
+  downloadBlob(new Blob(["\ufeff"+doc],{type:"application/msword"}),"tikhub_report.doc");
+  toast("已导出 Word");
+}
+
+/* ---------- CORS 提示 ---------- */
+function showCors(){
+  if(corsShown)return;corsShown=true;
+  const b=$("corsBanner");
+  b.innerHTML='<h3>浏览器连不到 API(CORS)</h3>'+
+    '<p>浏览器在当前页面直接请求 <code>'+esc(state.host)+'</code> 被拦了——这通常不是你的 Key 或路径问题。两个办法:</p>'+
+    '<p><b>① 本地起个小代理</b>,然后把“设置 → CORS 代理”填成 <code>http://localhost:8787/?url={url}</code>:</p>'+
+    '<pre>// proxy.js  →  node proxy.js\n'+
+    'const http=require("http"),{request}=require("https"),{URL}=require("url");\n'+
+    'http.createServer((req,res)=>{\n'+
+    '  res.setHeader("Access-Control-Allow-Origin","*");\n'+
+    '  res.setHeader("Access-Control-Allow-Headers","*");\n'+
+    '  const t=new URL(req.url,"http://x").searchParams.get("url"); if(!t)return res.end();\n'+
+    '  const u=new URL(t), p=request(u,{method:req.method,headers:{...req.headers,host:u.host}},r=>{\n'+
+    '    res.writeHead(r.statusCode,r.headers); r.pipe(res);\n'+
+    '  }); req.pipe(p);\n'+
+    '}).listen(8787,()=>console.log("proxy on :8787"));</pre>'+
+    '<p style="margin-top:10px"><b>② 用后端跑</b>:同样的请求带 <code>Authorization: Bearer</code> 头从服务器发,就没有 CORS。批量抓量大时本来也更稳。</p>';
+  b.classList.add("show");
+  b.scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+/* ---------- Key 弹窗 ---------- */
+function openKeyModal(){$("keyInput").value=state.apiKey;$("keyInput").type="password";$("keyToggle").textContent="显示";$("keyTest").textContent="";$("keyTest").className="key-test";$("keyModal").classList.add("show");$("keyInput").focus();}
+function closeKeyModal(){$("keyModal").classList.remove("show");}
+function saveKey(){state.apiKey=$("keyInput").value.trim();if($("rememberKey").checked)store.set("thr_key",state.apiKey);else store.del("thr_key");refreshKeyPill();closeKeyModal();toast(state.apiKey?"Key 已保存":"Key 已清除");}
+async function testKey(){
+  const key=$("keyInput").value.trim();
+  if(!key){$("keyTest").className="key-test err";$("keyTest").textContent="先填 Key。";return;}
+  $("keyTest").className="key-test run";$("keyTest").textContent="正在用 @tiktok 测试…";
+  let url=state.host.replace(/\/$/,"")+"/api/v1/tiktok/app/v3/get_user_id_and_sec_user_id_by_username?username=tiktok";
+  const px=$("proxyInput").value.trim();if(px)url=px.includes("{url}")?px.replace("{url}",encodeURIComponent(url)):px+url;
+  try{const r=await fetch(url,{headers:{"Authorization":"Bearer "+key,"Accept":"application/json"}});
+    if(r.status===401){$("keyTest").className="key-test err";$("keyTest").textContent="401 —— Key 被拒绝。";}
+    else if(r.ok){$("keyTest").className="key-test ok";$("keyTest").textContent="可用 —— 返回 "+r.status+"。";}
+    else if(r.status===402||r.status===403){$("keyTest").className="key-test ok";$("keyTest").textContent="Key 有效,但 "+r.status+"(余额/套餐)。鉴权没问题。";}
+    else{$("keyTest").className="key-test run";$("keyTest").textContent="已连到 API —— 状态 "+r.status+"。";}
+  }catch(e){$("keyTest").className="key-test err";$("keyTest").textContent="连不到(多半 CORS)。请在设置里填代理,或用后端测。";}
+}
+function refreshKeyPill(){const p=$("keyPill");if(state.apiKey){p.classList.add("set");$("keyPillText").textContent="Key ••"+state.apiKey.slice(-4);}else{p.classList.remove("set");$("keyPillText").textContent="未设置 Key";}}
+
+/* ---------- toast ---------- */
+let tt=null;function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("show"),1900);}
+
+/* ---------- init ---------- */
+function checkOrigin(){
+  const local = location.protocol==="http:" && (location.hostname==="localhost"||location.hostname==="127.0.0.1");
+  const b=$("originBanner");
+  if(local){
+    b.classList.remove("show");
+    // 通过本地代理打开 → 自动配置代理地址,省得手填
+    if(!store.get("thr_proxy")){ store.set("thr_proxy","/?url={url}"); }
+  }else{
+    b.innerHTML='<h3>请通过本地代理打开本页面</h3>'+
+      '<p>当前是直接打开的方式('+esc(location.protocol)+'),浏览器会拦截抓取。请先双击 <code>启动代理.bat</code> 启动代理,'+
+      '再在浏览器地址栏访问 <code>http://localhost:8787/</code> 打开本页(<b>不要</b>直接双击 html,也不要在对话框预览里用)。</p>';
+    b.classList.add("show");
+  }
+  return local;
+}
+function init(){
+  checkOrigin();
+  $("hostSelect").value=state.host;
+  $("proxyInput").value=store.get("thr_proxy")||"";
+  if(store.get("thr_ep_ver")!==EP_VER){for(const k of["epProfile","epSecuid","epPosts","epPlaylists","epPlaylistVideos"]){store.set("thr_"+k,DEFAULTS[k]);}store.set("thr_ep_ver",EP_VER);}
+  for(const k of["epProfile","epSecuid","epPosts","epPlaylists","epPlaylistVideos"]) $(k).value=store.get("thr_"+k)||DEFAULTS[k];
+  if(state.apiKey)$("rememberKey").checked=true;
+  refreshKeyPill();
+  updateAcctCount();
+
+  $("accountsInput").addEventListener("input",updateAcctCount);
+  $("accountsInput").addEventListener("input",()=>store.set("thr_accounts",$("accountsInput").value));
+  if(store.get("thr_accounts")){$("accountsInput").value=store.get("thr_accounts");updateAcctCount();}
+  $("schedEnabled").addEventListener("change",()=>{store.set("thr_sched_on",$("schedEnabled").checked?"1":"0");if($("schedEnabled").checked){toast("已开启每天定时");$("schedDetails").open=true;}refreshSchedUI();});
+  $("schedTime").addEventListener("change",()=>{store.set("thr_sched_time",$("schedTime").value||"08:00");refreshSchedUI();});
+  $("schedNowBtn").addEventListener("click",()=>runScheduled(true));
+  refreshSchedUI();
+  setInterval(tickScheduler,30000);
+  setTimeout(tickScheduler,4000);
+  $("goBtn").addEventListener("click",run);
+  $("stopBtn").addEventListener("click",()=>{cancelled=true;toast("正在停止…");});
+  $("hostSelect").addEventListener("change",()=>{state.host=$("hostSelect").value;store.set("thr_host",state.host);});
+  $("proxyInput").addEventListener("input",()=>store.set("thr_proxy",$("proxyInput").value.trim()));
+  $("groupBy").addEventListener("change",()=>{const pl=$("groupBy").value==="playlist";$("plField1").style.display=pl?"":"none";$("plField2").style.display=pl?"":"none";});
+  for(const k of["epProfile","epSecuid","epPosts","epPlaylists","epPlaylistVideos"]) $(k).addEventListener("input",()=>store.set("thr_"+k,$(k).value.trim()));
+  $("csvBtn").addEventListener("click",exportCSV);
+  $("xlsxBtn").addEventListener("click",exportXLSX);
+  $("docBtn").addEventListener("click",exportWord);
+
+  $("keyPill").addEventListener("click",openKeyModal);
+  $("keyToggle").addEventListener("click",()=>{const t=$("keyInput").type==="password";$("keyInput").type=t?"text":"password";$("keyToggle").textContent=t?"隐藏":"显示";});
+  $("saveKeyBtn").addEventListener("click",saveKey);
+  $("testKeyBtn").addEventListener("click",testKey);
+  $("keyModal").addEventListener("click",e=>{if(e.target===$("keyModal"))closeKeyModal();});
+  document.addEventListener("keydown",e=>{if(e.key==="Escape")closeKeyModal();});
+}
+function updateAcctCount(){$("acctCount").textContent=parseAccounts().length;}
+
+init();
+</script>
+</body>
+</html>
