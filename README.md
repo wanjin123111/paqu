@@ -50,6 +50,23 @@ https://paqu-tikhub-proxy.onrender.com/?url={url}
 
 如果 Render 生成的地址不是上面这个，把域名换成 Render 实际给你的域名即可。
 
+### 让访问者不用填写 TikHub API Key
+
+不要把 TikHub API Key 写进 GitHub 代码或前端页面。请放到 Render 后台环境变量里：
+
+```text
+TIKHUB_API_KEY=你的 TikHub API Key
+```
+
+设置路径：
+
+1. 打开 Render 服务 `paqu-tikhub-proxy`。
+2. 左侧进入 **Environment**。
+3. 添加环境变量 `TIKHUB_API_KEY`。
+4. 保存后手动 redeploy 一次服务。
+
+这样前端不带 `Authorization` 时，代理会在服务端自动补上你的 Key。访问者不需要知道 Key，但他们的抓取会消耗你的 TikHub 余额。
+
 免费服务 15 分钟没访问会休眠，第一次唤醒可能需要约 1 分钟。这个代理只允许转发到 `api.tikhub.io` 和 `api.tikhub.dev`，避免被别人当成通用公开代理滥用。
 
 ### 方式二：让别人本地运行

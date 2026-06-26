@@ -8,3 +8,5 @@ services:
     envVars:
       - key: ALLOWED_PROXY_HOSTS
         value: api.tikhub.io,api.tikhub.dev
+      - key: TIKHUB_API_KEY
+        sync: false

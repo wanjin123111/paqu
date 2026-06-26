@@ -38,6 +38,7 @@ ALLOWED_PROXY_HOSTS = {
     for h in os.environ.get("ALLOWED_PROXY_HOSTS", "api.tikhub.io,api.tikhub.dev").split(",")
     if h.strip()
 }
+SERVER_API_KEY = os.environ.get("TIKHUB_API_KEY", "").strip()
 # 伪装成正常浏览器,绕过 Cloudflare 的 "browser_signature_banned"(Error 1010)
 DEFAULT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
@@ -136,6 +137,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send_bytes(403, b'{"error":"proxy target not allowed"}', "application/json")
             return
         fwd = {h: self.headers[h] for h in FORWARD_HEADERS if h in self.headers}
+        auth = fwd.get("Authorization", "").strip()
+        if SERVER_API_KEY and (not auth or auth.lower() == "bearer"):
+            fwd["Authorization"] = "Bearer " + SERVER_API_KEY
         if "User-Agent" not in fwd or "python" in fwd.get("User-Agent", "").lower():
             fwd["User-Agent"] = DEFAULT_UA   # 关键:避免 Cloudflare 1010 封锁脚本特征
         body = None

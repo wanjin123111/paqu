@@ -458,7 +458,8 @@ async function apiGet(path,params,label){
   const qs=new URLSearchParams(Object.entries(params).filter(([k,v])=>v!==undefined&&v!=="")).toString();
   const direct=cfg.host.replace(/\/$/,"")+path+(qs?"?"+qs:"");
   const url=applyProxy(direct);
-  const headers={"Authorization":"Bearer "+state.apiKey,"Accept":"application/json"};
+  const headers={"Accept":"application/json"};
+  if(state.apiKey)headers.Authorization="Bearer "+state.apiKey;
   let last=null;
   for(let attempt=1;attempt<=cfg.retries;attempt++){
     let resp;
@@ -625,9 +626,9 @@ function parseAccounts(){return $("accountsInput").value.split("\n").map(s=>s.tr
 async function run(){
   if(running)return;
   const accounts=parseAccounts();
-  if(!state.apiKey){openKeyModal();return;}
   if(!accounts.length){toast("先填账号");return;}
   readCfg();
+  if(!state.apiKey && !cfg.proxy){openKeyModal();return;}
   running=true;cancelled=false;rows=[];dramaRows=[];corsShown=false;
   $("corsBanner").classList.remove("show");
   clearResults();clearConsole();
