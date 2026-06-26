@@ -59,10 +59,11 @@ TIKHUB_HOST = os.environ.get("TIKHUB_HOST", "https://api.tikhub.io").rstrip("/")
 SCHEDULE_SECRET = os.environ.get("SCHEDULE_SECRET", "").strip()
 SCHEDULE_ACCOUNTS = os.environ.get("SCHEDULE_ACCOUNTS", "")
 SCHEDULE_MAX_VIDEOS = _env_int("SCHEDULE_MAX_VIDEOS", 100, 0, 20000)
-SCHEDULE_MAX_PAGES = _env_int("SCHEDULE_MAX_PAGES", 4000, 1, 20000)
+SCHEDULE_MAX_PAGES = _env_int("SCHEDULE_MAX_PAGES", 80, 1, 20000)
 SCHEDULE_PAGE_SIZE = _env_int("SCHEDULE_PAGE_SIZE", 30, 1, 50)
 SCHEDULE_DELAY_MS = _env_int("SCHEDULE_DELAY_MS", 300, 0, 60000)
 SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
+SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
 
 DEFAULT_ENDPOINTS = {
     "profile": "/api/v1/tiktok/app/v3/handler_user_profile",
@@ -298,8 +299,11 @@ def _fetch_posts_page(ep_list, params):
 def _get_all_videos(secuid, uid):
     videos, seen = [], set()
     cursor, locked_endpoint, stall = "0", None, 0
+    started = time.time()
     ep_list = [DEFAULT_ENDPOINTS["posts"]] + [ep for ep in POST_EP_CANDIDATES if ep != DEFAULT_ENDPOINTS["posts"]]
     for _page in range(1, SCHEDULE_MAX_PAGES + 1):
+        if time.time() - started > SCHEDULE_MAX_RUNTIME_SECONDS:
+            break
         params = {
             "secUid": secuid,
             "sec_user_id": secuid,
@@ -330,6 +334,8 @@ def _get_all_videos(secuid, uid):
         if advanced:
             cursor = str(next_cursor)
             stall = 0 if added else stall + 1
+            if stall >= 6:
+                break
             time.sleep(SCHEDULE_DELAY_MS / 1000.0)
             continue
         stall += 1
