@@ -64,6 +64,7 @@ SCHEDULE_PAGE_SIZE = _env_int("SCHEDULE_PAGE_SIZE", 30, 1, 50)
 SCHEDULE_DELAY_MS = _env_int("SCHEDULE_DELAY_MS", 300, 0, 60000)
 SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
 SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
+PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 
 DEFAULT_ENDPOINTS = {
     "profile": "/api/v1/tiktok/app/v3/handler_user_profile",
@@ -572,6 +573,11 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
+    def _allow_report_read(self, qs):
+        if PUBLIC_REPORTS:
+            return True
+        return self._require_schedule_secret(qs)
+
     def _run_scheduled_endpoint(self, qs):
         if not self._require_schedule_secret(qs):
             return
@@ -607,7 +613,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(202, {"ok": True, "started": True, "accounts": len(accounts), "job": LAST_JOB})
 
     def _list_reports(self, qs):
-        if not self._require_schedule_secret(qs):
+        if not self._allow_report_read(qs):
             return
         if not os.path.isdir(REPORTS_DIR):
             self._send_json(200, {"ok": True, "reports": []})
@@ -626,7 +632,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True, "reports": reports})
 
     def _serve_report(self, path, qs):
-        if not self._require_schedule_secret(qs):
+        if not self._allow_report_read(qs):
             return
         name = os.path.basename(urllib.parse.unquote(path[len("/reports/"):]))
         full = os.path.normpath(os.path.join(REPORTS_DIR, name))

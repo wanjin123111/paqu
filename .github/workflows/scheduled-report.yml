@@ -6,12 +6,91 @@ on:
     # 00:00 UTC = 08:00 Asia/Shanghai
     - cron: "0 0 * * *"
 
+permissions:
+  contents: write
+
 jobs:
   trigger-render:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Trigger Render scheduled scraper
         run: |
           curl --fail --show-error --silent --max-time 900 \
             -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
-            "https://paqu-tikhub-proxy.onrender.com/run-scheduled?wait=1"
+            "https://paqu-tikhub-proxy.onrender.com/run-scheduled?wait=1" \
+            -o run_result.json
+
+      - name: Download generated reports
+        run: |
+          mkdir -p tmp_reports
+          curl --fail --show-error --silent --max-time 120 \
+            -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
+            "https://paqu-tikhub-proxy.onrender.com/reports/latest_report.json" \
+            -o tmp_reports/latest_report.json
+          curl --fail --show-error --silent --max-time 120 \
+            -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
+            "https://paqu-tikhub-proxy.onrender.com/reports/latest_report.csv" \
+            -o tmp_reports/latest_report.csv
+          curl --fail --show-error --silent --max-time 120 \
+            -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
+            "https://paqu-tikhub-proxy.onrender.com/reports/latest_dramas.csv" \
+            -o tmp_reports/latest_dramas.csv
+
+      - name: Publish report history
+        run: |
+          python3 - <<'PY'
+          import datetime, json, pathlib, shutil
+
+          out = pathlib.Path("public_reports")
+          tmp = pathlib.Path("tmp_reports")
+          out.mkdir(exist_ok=True)
+
+          payload = json.loads((tmp / "latest_report.json").read_text(encoding="utf-8-sig"))
+          generated_at = payload.get("generated_at") or datetime.datetime.utcnow().isoformat(timespec="seconds")
+          try:
+              dt = datetime.datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+          except Exception:
+              dt = datetime.datetime.utcnow()
+          stamp = dt.strftime("%Y%m%d-%H%M%S")
+
+          json_name = f"scheduled_report_{stamp}.json"
+          summary_name = f"scheduled_report_{stamp}.csv"
+          dramas_name = f"scheduled_dramas_{stamp}.csv"
+
+          shutil.copyfile(tmp / "latest_report.json", out / json_name)
+          shutil.copyfile(tmp / "latest_report.csv", out / summary_name)
+          shutil.copyfile(tmp / "latest_dramas.csv", out / dramas_name)
+          shutil.copyfile(tmp / "latest_report.json", out / "latest_report.json")
+          shutil.copyfile(tmp / "latest_report.csv", out / "latest_report.csv")
+          shutil.copyfile(tmp / "latest_dramas.csv", out / "latest_dramas.csv")
+
+          manifest_path = out / "manifest.json"
+          if manifest_path.exists():
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          else:
+              manifest = {"reports": []}
+          entry = {
+              "name": json_name,
+              "summary_url": summary_name,
+              "dramas_url": dramas_name,
+              "generated_at": generated_at,
+              "title": dt.strftime("%Y-%m-%d %H:%M:%S"),
+              "accounts": payload.get("accounts", 0),
+              "dramas": payload.get("dramas", 0),
+          }
+          reports = [r for r in manifest.get("reports", []) if r.get("name") != json_name]
+          reports.insert(0, entry)
+          manifest["reports"] = sorted(reports, key=lambda r: r.get("name", ""), reverse=True)[:120]
+          manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+          PY
+
+      - name: Commit report history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public_reports
+          git commit -m "Update scheduled TikHub reports" || exit 0
+          git push

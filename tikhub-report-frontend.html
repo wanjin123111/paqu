@@ -124,6 +124,19 @@
 
   .foot-note{font-size:12px;color:var(--ink-faint);line-height:1.6;padding:0 4px}
 
+  body.public-mode .topbar-right,
+  body.public-mode #manualCard,
+  body.public-mode #schedCard,
+  body.public-mode #settingsCard{display:none!important}
+  .history-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
+  .history-list{margin-top:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+  .history-empty{padding:14px 16px;color:var(--ink-faint);font-size:13px}
+  .history-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border-top:1px solid var(--line)}
+  .history-item:first-child{border-top:0}
+  .history-title{font-family:var(--mono);font-size:12.5px;color:var(--ink)}
+  .history-meta{font-size:12px;color:var(--ink-faint);margin-top:2px}
+  .history-links{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+
   .note-banner{display:none;background:var(--warn-soft);border:1px solid #F0D9A8;border-radius:11px;padding:13px 16px}
   .note-banner.show{display:block}
   .note-banner h3{margin:0 0 5px;font-family:var(--display);font-size:14px;color:var(--warn)}
@@ -159,7 +172,7 @@
   @media (prefers-reduced-motion:reduce){ *{animation-duration:.001ms!important;transition-duration:.001ms!important} }
 </style>
 </head>
-<body>
+<body class="public-mode">
 
 <header class="topbar">
   <div class="brand">
@@ -186,30 +199,22 @@
 
   <div class="cors-banner" id="corsBanner"></div>
 
-  <!-- 后端账号 -->
-  <div class="card">
-    <div class="card-head"><h2>后端账号报表</h2><span class="sub">账号名单读取 Render 的 SCHEDULE_ACCOUNTS</span></div>
+  <!-- 公开报表 -->
+  <div class="card" id="backendCard">
+    <div class="card-head"><h2>抓取记录</h2><span class="sub" id="backendStatus">正在读取云端报表...</span></div>
     <div class="card-body">
-      <div class="grid">
-        <div class="field">
-          <label class="fl">任务密码 <span class="hint">— SCHEDULE_SECRET</span></label>
-          <input class="tf" id="backendSecret" type="password" spellcheck="false" autocomplete="off" placeholder="填你在 Render 里设置的密码" />
-        </div>
-        <div class="field">
-          <label class="fl">后端状态</label>
-          <div class="tf" id="backendStatus" style="min-height:38px;color:var(--ink-soft);display:flex;align-items:center">未连接</div>
-        </div>
+      <input id="backendSecret" type="hidden" value="" />
+      <div class="history-actions">
+        <button class="mini-btn" id="backendLoadBtn" type="button">刷新最新结果</button>
+        <button class="mini-btn" id="backendReportsBtn" type="button">刷新历史记录</button>
+        <button class="mini-btn" id="backendRunBtn" type="button" style="display:none">启动后端抓取</button>
       </div>
-      <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:12px">
-        <button class="mini-btn" id="backendRunBtn" type="button">启动后端抓取</button>
-        <button class="mini-btn" id="backendLoadBtn" type="button">加载最新结果</button>
-        <button class="mini-btn" id="backendReportsBtn" type="button">报告列表</button>
-      </div>
+      <div class="history-list" id="historyList"><div class="history-empty">正在加载历史记录...</div></div>
     </div>
   </div>
 
   <!-- 输入 -->
-  <div class="card">
+  <div class="card" id="manualCard">
     <div class="card-head"><h2>账号列表</h2><span class="sub">@后面那部分,一行一个</span></div>
     <div class="card-body">
       <textarea class="accounts" id="accountsInput" spellcheck="false" placeholder="masturzo.clemen
@@ -226,7 +231,7 @@ shortdramatime"></textarea>
   </div>
 
   <!-- 定时监控 -->
-  <div class="card">
+  <div class="card" id="schedCard">
     <details class="settings" id="schedDetails">
       <summary>⏰ 定时监控 —— 每天自动抓一份存盘 <span id="schedBadge" style="font:600 11px ui-monospace,monospace;color:#9ca3af;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;padding:1px 7px;margin-left:6px">未启用</span></summary>
       <div class="settings-body">
@@ -254,7 +259,7 @@ shortdramatime"></textarea>
   </div>
 
   <!-- 设置 -->
-  <div class="card">
+  <div class="card" id="settingsCard">
     <details class="settings" id="settings">
       <summary>设置(代理 / 接口路径 / 抓取参数)</summary>
       <div class="settings-body">
@@ -791,15 +796,17 @@ function exportXLSX(){
   toast("已导出 Excel(3 个表)");
 }
 
-/* ---------- 后端账号报表 ---------- */
+/* ---------- 公开云端报表 ---------- */
 function backendBase(){
   return location.hostname==="paqu-tikhub-proxy.onrender.com" ? "" : "https://paqu-tikhub-proxy.onrender.com";
 }
 function backendSecret(){
-  return $("backendSecret").value.trim() || store.get("thr_backend_secret") || "";
+  const el=$("backendSecret");
+  return (el&&el.value?el.value.trim():"") || store.get("thr_backend_secret") || "";
 }
 function backendSetStatus(text, ok){
   const el=$("backendStatus");
+  if(!el)return;
   el.textContent=text;
   el.style.color=ok?"var(--ok)":"var(--ink-soft)";
 }
@@ -809,13 +816,22 @@ function backendUrl(path, params){
   return backendBase()+path+(qs?"?"+qs:"");
 }
 async function backendFetchJson(path, params, opts){
-  const secret=backendSecret();
-  if(!secret){toast("先填任务密码");$("backendSecret").focus();throw new Error("missing SCHEDULE_SECRET");}
   params=Object.assign({}, params||{});
   opts=opts||{};
-  if(!opts.headerSecret)params.secret=secret;
-  const headers=opts.headerSecret?{"X-Schedule-Secret":secret}:{};
+  const secret=backendSecret();
+  if(opts.requireSecret&&!secret)throw new Error("missing SCHEDULE_SECRET");
+  if(secret&&opts.sendSecret!==false){
+    if(opts.headerSecret){}else params.secret=secret;
+  }
+  const headers=(opts.headerSecret&&secret)?{"X-Schedule-Secret":secret}:{};
   const r=await fetch(backendUrl(path,params),{headers});
+  const text=await r.text();
+  let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
+  if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
+  return data;
+}
+async function fetchJsonUrl(url){
+  const r=await fetch(url,{cache:"no-store"});
   const text=await r.text();
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
@@ -831,17 +847,108 @@ function loadBackendPayload(payload){
   const failed=(payload.errors||[]).map(e=>e.account||e.error||"未知");
   updateSummary(failed);
   backendSetStatus("已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧", true);
-  if(summary.length)toast("已加载后端最新结果");
+  if(summary.length)toast("已加载最新结果");
 }
 async function loadBackendLatest(){
   backendSetStatus("正在加载最新结果…");
-  const payload=await backendFetchJson("/reports/latest_report.json",{});
+  let payload=null;
+  try{
+    payload=await fetchJsonUrl("public_reports/latest_report.json");
+  }catch(_){
+    payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+  }
   loadBackendPayload(payload);
   return payload;
 }
+function reportStamp(name){
+  const m=String(name||"").match(/scheduled_report_(\d{8}-\d{6})\.json$/);
+  if(!m)return name||"";
+  return m[1].replace(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/,"$1-$2-$3 $4:$5:$6");
+}
+function renderHistoryList(items, source){
+  const box=$("historyList");
+  if(!box)return;
+  if(!items||!items.length){
+    box.innerHTML='<div class="history-empty">还没有历史记录。等云端定时任务跑完后会自动出现在这里。</div>';
+    return;
+  }
+  box.innerHTML=items.map(item=>{
+    const jsonUrl=item.url||item.path||"";
+    const csvUrl=item.summary_url||item.summaryPath||"";
+    const dramasUrl=item.dramas_url||item.dramasPath||"";
+    return '<div class="history-item">'+
+      '<div><div class="history-title">'+esc(item.title||reportStamp(item.name))+'</div>'+
+      '<div class="history-meta">'+esc(source||"云端记录")+(item.generated_at?" · "+esc(item.generated_at):"")+'</div></div>'+
+      '<div class="history-links">'+
+        '<button class="mini-btn" type="button" data-report-json="'+esc(jsonUrl)+'">查看</button>'+
+        (csvUrl?'<button class="mini-btn" type="button" data-report-download="'+esc(csvUrl)+'">账号CSV</button>':"")+
+        (dramasUrl?'<button class="mini-btn" type="button" data-report-download="'+esc(dramasUrl)+'">短剧CSV</button>':"")+
+      '</div></div>';
+  }).join("");
+  box.querySelectorAll("[data-report-json]").forEach(btn=>btn.addEventListener("click",async()=>{
+    try{
+      backendSetStatus("正在加载历史记录…");
+      const url=btn.getAttribute("data-report-json");
+      const payload=url.startsWith("http")||url.startsWith("public_reports/")?await fetchJsonUrl(url):await backendFetchJson(url,{}, {sendSecret:false});
+      loadBackendPayload(payload);
+    }catch(e){backendSetStatus("加载历史失败:"+(e.message||e));toast("加载历史失败");}
+  }));
+  box.querySelectorAll("[data-report-download]").forEach(btn=>btn.addEventListener("click",()=>{
+    const url=btn.getAttribute("data-report-download");
+    window.open(url.startsWith("http")||url.startsWith("public_reports/")?url:backendBase()+url,"_blank","noopener");
+  }));
+}
+async function loadPublishedHistory(){
+  const manifest=await fetchJsonUrl("public_reports/manifest.json");
+  const items=(manifest.reports||[]).map(r=>({
+    name:r.name,
+    title:r.title||reportStamp(r.name),
+    generated_at:r.generated_at||"",
+    url:"public_reports/"+r.name,
+    summary_url:r.summary_url?("public_reports/"+r.summary_url):"",
+    dramas_url:r.dramas_url?("public_reports/"+r.dramas_url):"",
+  }));
+  if(!items.length)throw new Error("empty published history");
+  renderHistoryList(items,"历史存档");
+  return items;
+}
+async function loadRenderHistory(){
+  const data=await backendFetchJson("/reports",{}, {sendSecret:false});
+  const reports=data.reports||[];
+  const jsonReports=reports.filter(r=>/^scheduled_report_.*\.json$/.test(r.name));
+  const items=jsonReports.map(r=>{
+    const stamp=(r.name.match(/scheduled_report_(.*)\.json$/)||[])[1]||"";
+    return {
+      name:r.name,
+      title:reportStamp(r.name),
+      generated_at:r.modified||"",
+      path:r.path,
+      summaryPath:"/reports/scheduled_report_"+stamp+".csv",
+      dramasPath:"/reports/scheduled_dramas_"+stamp+".csv",
+    };
+  });
+  renderHistoryList(items,"Render 当前记录");
+  return items;
+}
+async function loadBackendReports(){
+  backendSetStatus("正在刷新历史记录…");
+  try{
+    const items=await loadPublishedHistory();
+    backendSetStatus("已加载 "+items.length+" 条历史记录", true);
+    return items;
+  }catch(_){
+    const items=await loadRenderHistory();
+    backendSetStatus("已加载 "+items.length+" 条当前记录", true);
+    return items;
+  }
+}
+async function loadPublicDashboard(){
+  try{await loadBackendLatest();}catch(e){backendSetStatus("暂时没有最新结果:"+(e.message||e));}
+  try{await loadBackendReports();}catch(e){renderHistoryList([], "");}
+}
 async function pollBackendJob(){
   for(let i=0;i<180;i++){
-    const data=await backendFetchJson("/schedule-status",{});
+    const data=await backendFetchJson("/schedule-status",{}, {requireSecret:true});
     const job=data.job||{};
     if(job.running){
       const started=job.started_at?(" · "+job.started_at):"";
@@ -869,7 +976,7 @@ async function runBackendJob(manual){
     logHead("后端账号任务启动 "+nowStamp());
     let started=false;
     try{
-      await backendFetchJson("/run-scheduled",{});
+      await backendFetchJson("/run-scheduled",{}, {requireSecret:true});
       started=true;
     }catch(e){
       if(!/already running/i.test(e.message||""))throw e;
@@ -886,9 +993,7 @@ async function runBackendJob(manual){
   }finally{schedBusy=false;refreshSchedUI();}
 }
 async function openBackendReports(){
-  const secret=backendSecret();
-  if(!secret){toast("先填任务密码");$("backendSecret").focus();return;}
-  window.open(backendUrl("/reports",{secret}),"_blank","noopener");
+  loadBackendReports().catch(e=>{backendSetStatus("刷新历史失败:"+(e.message||e));toast("刷新历史失败");});
 }
 
 /* ---------- 定时监控 ---------- */
@@ -896,7 +1001,8 @@ const HIST_COLS=["日期时间","账号","昵称","粉丝","点赞","短剧数",
 function pad2(n){return String(n).padStart(2,"0");}
 function dayStr(d){d=d||new Date();return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate());}
 function nowStamp(){const d=new Date();return dayStr(d)+" "+pad2(d.getHours())+":"+pad2(d.getMinutes());}
-function schedCfg(){return {enabled:store.get("thr_sched_on")==="1",time:store.get("thr_sched_time")||"08:00",last:store.get("thr_sched_last")||""};}
+function isPublicMode(){return document.body.classList.contains("public-mode");}
+function schedCfg(){return {enabled:!isPublicMode()&&store.get("thr_sched_on")==="1",time:store.get("thr_sched_time")||"08:00",last:store.get("thr_sched_last")||""};}
 function computeNext(){
   const c=schedCfg();if(!c.enabled)return null;
   const p=c.time.split(":");const hh=+p[0]||0,mm=+p[1]||0;
@@ -1098,6 +1204,7 @@ function init(){
   $("testKeyBtn").addEventListener("click",testKey);
   $("keyModal").addEventListener("click",e=>{if(e.target===$("keyModal"))closeKeyModal();});
   document.addEventListener("keydown",e=>{if(e.key==="Escape")closeKeyModal();});
+  setTimeout(loadPublicDashboard,600);
 }
 function updateAcctCount(){$("acctCount").textContent=parseAccounts().length;}
 
