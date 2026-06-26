@@ -10,3 +10,13 @@ services:
         value: api.tikhub.io,api.tikhub.dev
       - key: TIKHUB_API_KEY
         sync: false
+      - key: SCHEDULE_SECRET
+        sync: false
+      - key: SCHEDULE_ACCOUNTS
+        sync: false
+      - key: SCHEDULE_MAX_VIDEOS
+        value: 100
+      - key: SCHEDULE_PAGE_SIZE
+        value: 30
+      - key: SCHEDULE_DELAY_MS
+        value: 300

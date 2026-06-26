@@ -1,0 +1,17 @@
+name: Scheduled TikHub report
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 00:00 UTC = 08:00 Asia/Shanghai
+    - cron: "0 0 * * *"
+
+jobs:
+  trigger-render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render scheduled scraper
+        run: |
+          curl --fail --show-error --silent --max-time 900 \
+            -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
+            "https://paqu-tikhub-proxy.onrender.com/run-scheduled?wait=1"
