@@ -754,8 +754,9 @@ function addRow(row){
   tb.appendChild(tr);
   rows.push(row);
 }
-function updateSummary(failed){
-  let s="已完成 <b>"+rows.length+"</b> 个账号";
+function updateSummary(failed, dataTime){
+  let s=dataTime?("数据时间:<b>"+esc(dataTime)+"</b> · "):"";
+  s+="已完成 <b>"+rows.length+"</b> 个账号";
   if(failed&&failed.length)s+=" · 失败 <b>"+failed.length+"</b>("+failed.map(esc).join(", ")+")";
   $("resultSum").innerHTML=s;
 }
@@ -837,6 +838,28 @@ async function fetchJsonUrl(url){
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
   return data;
 }
+function parseReportDate(value){
+  const s=String(value||"").trim();
+  if(!s)return null;
+  const iso=s.replace(" ","T");
+  if(/[zZ]|[+-]\d\d:?\d\d$/.test(iso)){
+    const d=new Date(iso);
+    return Number.isNaN(d.getTime())?null:d;
+  }
+  const m=iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if(m)return new Date(Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6]||0)));
+  const compact=s.match(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/);
+  if(compact)return new Date(Date.UTC(+compact[1],+compact[2]-1,+compact[3],+compact[4],+compact[5],+compact[6]));
+  const d=new Date(s);
+  return Number.isNaN(d.getTime())?null:d;
+}
+function reportTimeLabel(value){
+  const d=parseReportDate(value);
+  if(!d)return value?String(value):"";
+  const bj=new Date(d.getTime()+8*60*60*1000);
+  return bj.getUTCFullYear()+"-"+pad2(bj.getUTCMonth()+1)+"-"+pad2(bj.getUTCDate())+" "+
+    pad2(bj.getUTCHours())+":"+pad2(bj.getUTCMinutes())+":"+pad2(bj.getUTCSeconds())+" 北京时间";
+}
 function loadBackendPayload(payload){
   rows=[];dramaRows=[];
   clearResults();
@@ -845,8 +868,9 @@ function loadBackendPayload(payload){
   for(const row of summary)addRow(row);
   dramaRows=dramas;
   const failed=(payload.errors||[]).map(e=>e.account||e.error||"未知");
-  updateSummary(failed);
-  backendSetStatus("已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧", true);
+  const dataTime=reportTimeLabel(payload.generated_at);
+  updateSummary(failed, dataTime);
+  backendSetStatus("数据时间 "+dataTime+" · 已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧", true);
   if(summary.length)toast("已加载最新结果");
 }
 async function loadBackendLatest(){
@@ -876,9 +900,11 @@ function renderHistoryList(items, source){
     const jsonUrl=item.url||item.path||"";
     const csvUrl=item.summary_url||item.summaryPath||"";
     const dramasUrl=item.dramas_url||item.dramasPath||"";
+    const displayTime=reportTimeLabel(item.generated_at)||reportTimeLabel(reportStamp(item.name))||item.title||reportStamp(item.name);
+    const stats=(item.accounts||item.dramas)?(" · "+(item.accounts||0)+" 个账号 / "+(item.dramas||0)+" 条短剧"):"";
     return '<div class="history-item">'+
-      '<div><div class="history-title">'+esc(item.title||reportStamp(item.name))+'</div>'+
-      '<div class="history-meta">'+esc(source||"云端记录")+(item.generated_at?" · "+esc(item.generated_at):"")+'</div></div>'+
+      '<div><div class="history-title">'+esc(displayTime)+'</div>'+
+      '<div class="history-meta">'+esc(source||"云端记录")+stats+'</div></div>'+
       '<div class="history-links">'+
         '<button class="mini-btn" type="button" data-report-json="'+esc(jsonUrl)+'">查看</button>'+
         (csvUrl?'<button class="mini-btn" type="button" data-report-download="'+esc(csvUrl)+'">账号CSV</button>':"")+
@@ -904,6 +930,8 @@ async function loadPublishedHistory(){
     name:r.name,
     title:r.title||reportStamp(r.name),
     generated_at:r.generated_at||"",
+    accounts:r.accounts||0,
+    dramas:r.dramas||0,
     url:"public_reports/"+r.name,
     summary_url:r.summary_url?("public_reports/"+r.summary_url):"",
     dramas_url:r.dramas_url?("public_reports/"+r.dramas_url):"",
@@ -922,6 +950,8 @@ async function loadRenderHistory(){
       name:r.name,
       title:reportStamp(r.name),
       generated_at:r.modified||"",
+      accounts:0,
+      dramas:0,
       path:r.path,
       summaryPath:"/reports/scheduled_report_"+stamp+".csv",
       dramasPath:"/reports/scheduled_dramas_"+stamp+".csv",

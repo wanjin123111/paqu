@@ -54,6 +54,9 @@ jobs:
               dt = datetime.datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
           except Exception:
               dt = datetime.datetime.utcnow()
+          if dt.tzinfo is None:
+              dt = dt.replace(tzinfo=datetime.timezone.utc)
+          beijing_dt = dt.astimezone(datetime.timezone(datetime.timedelta(hours=8)))
           stamp = dt.strftime("%Y%m%d-%H%M%S")
 
           json_name = f"scheduled_report_{stamp}.json"
@@ -77,7 +80,7 @@ jobs:
               "summary_url": summary_name,
               "dramas_url": dramas_name,
               "generated_at": generated_at,
-              "title": dt.strftime("%Y-%m-%d %H:%M:%S"),
+              "title": beijing_dt.strftime("%Y-%m-%d %H:%M:%S 北京时间"),
               "accounts": payload.get("accounts", 0),
               "dramas": payload.get("dramas", 0),
           }
