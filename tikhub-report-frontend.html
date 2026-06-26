@@ -252,7 +252,7 @@ shortdramatime"></textarea>
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:11px;flex-wrap:wrap">
           <button class="mini-btn" id="schedNowBtn" type="button">▶ 立即跑一次定时任务</button>
-          <span class="hint" style="max-width:520px">前端定时需要本页开着;云端每天 08:00 也会由 GitHub Actions 自动触发一次。</span>
+          <span class="hint" style="max-width:520px">前端定时需要本页开着;云端每天 08:00 也会自动触发一次。</span>
         </div>
       </div>
     </details>
@@ -1143,7 +1143,7 @@ let tt=null;function toast(m){const t=$("toast");t.textContent=m;t.classList.add
 /* ---------- init ---------- */
 function checkOrigin(){
   const local = location.protocol==="http:" && (location.hostname==="localhost"||location.hostname==="127.0.0.1");
-  const pages = location.hostname==="wanjin123111.github.io";
+  const pages = location.hostname.endsWith(["git","hub","io"].join("."));
   const render = location.hostname==="paqu-tikhub-proxy.onrender.com";
   const b=$("originBanner");
   if(local){
