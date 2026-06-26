@@ -915,6 +915,7 @@ let tt=null;function toast(m){const t=$("toast");t.textContent=m;t.classList.add
 function checkOrigin(){
   const local = location.protocol==="http:" && (location.hostname==="localhost"||location.hostname==="127.0.0.1");
   const pages = location.hostname==="wanjin123111.github.io";
+  const render = location.hostname==="paqu-tikhub-proxy.onrender.com";
   const b=$("originBanner");
   if(local){
     b.classList.remove("show");
@@ -922,16 +923,17 @@ function checkOrigin(){
     if(!store.get("thr_proxy")){ store.set("thr_proxy","/?url={url}"); }
   }else if(pages){
     if(!store.get("thr_proxy")){ store.set("thr_proxy",DEFAULT_RENDER_PROXY); }
-    b.innerHTML='<h3>公网页面已打开</h3>'+
-      '<p>当前页面托管在 GitHub Pages。抓取时会通过“设置 → CORS 代理”里的 Render 代理转发 TikHub API；如果刚访问代理服务,首次唤醒可能需要约 1 分钟。</p>';
-    b.classList.add("show");
+    b.classList.remove("show");
+  }else if(render){
+    if(!store.get("thr_proxy")){ store.set("thr_proxy","/?url={url}"); }
+    b.classList.remove("show");
   }else{
     b.innerHTML='<h3>请通过本地代理打开本页面</h3>'+
       '<p>当前是直接打开的方式('+esc(location.protocol)+'),浏览器会拦截抓取。请先双击 <code>启动代理.bat</code> 启动代理,'+
       '再在浏览器地址栏访问 <code>http://localhost:8787/</code> 打开本页(<b>不要</b>直接双击 html,也不要在对话框预览里用)。</p>';
     b.classList.add("show");
   }
-  return local;
+  return local || pages || render;
 }
 function init(){
   checkOrigin();
