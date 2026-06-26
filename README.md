@@ -27,6 +27,31 @@ https://你的GitHub用户名.github.io/仓库名/
 
 注意：GitHub Pages 只能托管静态页面，不能运行 `tikhub_proxy.py`。如果 TikHub 接口被浏览器 CORS 拦截，访问者仍需要在自己的电脑上运行本地代理，或者你需要把代理部署到一个后端平台。
 
+## 免费部署代理到 Render
+
+仓库已包含 `render.yaml`，可以用 Render 免费 Web Service 部署 Python 代理。
+
+1. 打开 <https://dashboard.render.com/> 并用 GitHub 登录。
+2. 点击 **New +**，选择 **Blueprint**。
+3. 选择这个仓库：`wanjin123111/paqu`。
+4. Render 会读取 `render.yaml`，创建服务 `paqu-tikhub-proxy`。
+5. 计划选择 **Free**，然后点击部署。
+6. 部署完成后，Render 会给一个地址，通常类似：
+
+```text
+https://paqu-tikhub-proxy.onrender.com
+```
+
+然后在网页的“设置 → CORS 代理”里填：
+
+```text
+https://paqu-tikhub-proxy.onrender.com/?url={url}
+```
+
+如果 Render 生成的地址不是上面这个，把域名换成 Render 实际给你的域名即可。
+
+免费服务 15 分钟没访问会休眠，第一次唤醒可能需要约 1 分钟。这个代理只允许转发到 `api.tikhub.io` 和 `api.tikhub.dev`，避免被别人当成通用公开代理滥用。
+
 ### 方式二：让别人本地运行
 
 把仓库地址发给别人，对方下载后双击 `启动代理.bat`，再打开：

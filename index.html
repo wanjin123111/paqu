@@ -390,6 +390,7 @@ const SECUID_KEYS=["secUid","sec_uid","sec_user_id","secUserId"];
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 
+const DEFAULT_RENDER_PROXY="https://paqu-tikhub-proxy.onrender.com/?url={url}";
 const state={ apiKey:store.get("thr_key")||"", host:store.get("thr_host")||"https://api.tikhub.io" };
 let cfg={};                 // 运行时从设置读取
 let rows=[];                // 结果行(账号汇总)
@@ -912,11 +913,17 @@ let tt=null;function toast(m){const t=$("toast");t.textContent=m;t.classList.add
 /* ---------- init ---------- */
 function checkOrigin(){
   const local = location.protocol==="http:" && (location.hostname==="localhost"||location.hostname==="127.0.0.1");
+  const pages = location.hostname==="wanjin123111.github.io";
   const b=$("originBanner");
   if(local){
     b.classList.remove("show");
     // 通过本地代理打开 → 自动配置代理地址,省得手填
     if(!store.get("thr_proxy")){ store.set("thr_proxy","/?url={url}"); }
+  }else if(pages){
+    if(!store.get("thr_proxy")){ store.set("thr_proxy",DEFAULT_RENDER_PROXY); }
+    b.innerHTML='<h3>公网页面已打开</h3>'+
+      '<p>当前页面托管在 GitHub Pages。抓取时会通过“设置 → CORS 代理”里的 Render 代理转发 TikHub API；如果刚访问代理服务,首次唤醒可能需要约 1 分钟。</p>';
+    b.classList.add("show");
   }else{
     b.innerHTML='<h3>请通过本地代理打开本页面</h3>'+
       '<p>当前是直接打开的方式('+esc(location.protocol)+'),浏览器会拦截抓取。请先双击 <code>启动代理.bat</code> 启动代理,'+

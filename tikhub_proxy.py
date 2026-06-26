@@ -24,12 +24,20 @@ import os, posixpath, mimetypes, base64, json, datetime
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-PORT = 8787
-ROOT = os.getcwd()                       # 托管当前文件夹
+PORT = int(os.environ.get("PORT", "8787"))
+HOST = os.environ.get("HOST", "127.0.0.1")
+if os.environ.get("RENDER") or os.environ.get("PORT"):
+    HOST = "0.0.0.0"
+ROOT = os.path.dirname(os.path.abspath(__file__))  # 托管脚本所在文件夹
 DEFAULT_PAGE = "tikhub-report-frontend.html"
 REPORTS_DIR = os.path.join(ROOT, "reports")   # 定时监控存盘目录
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
 ALLOW_HEADERS = "Authorization, Content-Type, Accept"
+ALLOWED_PROXY_HOSTS = {
+    h.strip().lower()
+    for h in os.environ.get("ALLOWED_PROXY_HOSTS", "api.tikhub.io,api.tikhub.dev").split(",")
+    if h.strip()
+}
 # 伪装成正常浏览器,绕过 Cloudflare 的 "browser_signature_banned"(Error 1010)
 DEFAULT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
@@ -122,6 +130,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- 转发到 TikHub ----
     def _proxy(self, method, target):
+        parsed = urllib.parse.urlparse(target)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https" or host not in ALLOWED_PROXY_HOSTS:
+            self._send_bytes(403, b'{"error":"proxy target not allowed"}', "application/json")
+            return
         fwd = {h: self.headers[h] for h in FORWARD_HEADERS if h in self.headers}
         if "User-Agent" not in fwd or "python" in fwd.get("User-Agent", "").lower():
             fwd["User-Agent"] = DEFAULT_UA   # 关键:避免 Cloudflare 1010 封锁脚本特征
@@ -176,10 +189,11 @@ if __name__ == "__main__":
     print(" 1) 浏览器打开:  http://localhost:%d/" % PORT)
     print(" 2) 网页 设置 → CORS 代理 填:  /?url={url}")
     print(" 托管目录:%s" % ROOT)
+    print(" 监听地址:%s:%d" % (HOST, PORT))
     print(" 保持本窗口开着;停止按 Ctrl+C")
     print("=" * 56)
     try:
-        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
     except KeyboardInterrupt:
         print("\n已停止。")
     except OSError as e:

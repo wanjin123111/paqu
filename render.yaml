@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: paqu-tikhub-proxy
+    runtime: python
+    plan: free
+    buildCommand: ""
+    startCommand: python tikhub_proxy.py
+    envVars:
+      - key: ALLOWED_PROXY_HOSTS
+        value: api.tikhub.io,api.tikhub.dev
