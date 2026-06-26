@@ -27,6 +27,8 @@ SCHEDULE_SECRET=和 Render 里完全一样的密码
 
 ## 手动触发和查看
 
+前端页面现在有“后端账号报表”区域。只需要在前端填 `SCHEDULE_SECRET` 的值，然后点“启动后端抓取”或“加载最新结果”。账号名单不会显示在前端，仍然只从 Render 的 `SCHEDULE_ACCOUNTS` 读取。
+
 手动触发：
 
 ```text

@@ -186,6 +186,28 @@
 
   <div class="cors-banner" id="corsBanner"></div>
 
+  <!-- 后端账号 -->
+  <div class="card">
+    <div class="card-head"><h2>后端账号报表</h2><span class="sub">账号名单读取 Render 的 SCHEDULE_ACCOUNTS</span></div>
+    <div class="card-body">
+      <div class="grid">
+        <div class="field">
+          <label class="fl">任务密码 <span class="hint">— SCHEDULE_SECRET</span></label>
+          <input class="tf" id="backendSecret" type="password" spellcheck="false" autocomplete="off" placeholder="填你在 Render 里设置的密码" />
+        </div>
+        <div class="field">
+          <label class="fl">后端状态</label>
+          <div class="tf" id="backendStatus" style="min-height:38px;color:var(--ink-soft);display:flex;align-items:center">未连接</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:12px">
+        <button class="mini-btn" id="backendRunBtn" type="button">启动后端抓取</button>
+        <button class="mini-btn" id="backendLoadBtn" type="button">加载最新结果</button>
+        <button class="mini-btn" id="backendReportsBtn" type="button">报告列表</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 输入 -->
   <div class="card">
     <div class="card-head"><h2>账号列表</h2><span class="sub">@后面那部分,一行一个</span></div>
@@ -221,11 +243,11 @@ shortdramatime"></textarea>
         <div style="background:var(--bg-soft,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;color:var(--ink-soft);line-height:1.9;margin-top:4px">
           下次运行:<b id="schedNext">—</b><br>
           上次运行:<span id="schedLast">从未</span><br>
-          存盘位置:代理目录下的 <code>reports/</code> —— 每天一个 <code>report_日期.xlsx</code>(3 个表),并把每个账号当天的数据追加到 <code>monitor_history.csv</code>(用来看逐日变化)。
+          填了上方任务密码时,这里会调用后端账号名单并把结果加载到前端表格;没填任务密码时,才使用本页账号列表本地抓取。
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:11px;flex-wrap:wrap">
-          <button class="mini-btn" id="schedNowBtn" type="button">▶ 立即抓一次并存盘(测试)</button>
-          <span class="hint" style="max-width:520px">⚠️ 定时生效需:① 本页标签开着 ② 电脑不关机/休眠 ③ 代理黑窗口开着。三者缺一,到点就不会跑。</span>
+          <button class="mini-btn" id="schedNowBtn" type="button">▶ 立即跑一次定时任务</button>
+          <span class="hint" style="max-width:520px">前端定时需要本页开着;云端每天 08:00 也会由 GitHub Actions 自动触发一次。</span>
         </div>
       </div>
     </details>
@@ -769,6 +791,106 @@ function exportXLSX(){
   toast("已导出 Excel(3 个表)");
 }
 
+/* ---------- 后端账号报表 ---------- */
+function backendBase(){
+  return location.hostname==="paqu-tikhub-proxy.onrender.com" ? "" : "https://paqu-tikhub-proxy.onrender.com";
+}
+function backendSecret(){
+  return $("backendSecret").value.trim() || store.get("thr_backend_secret") || "";
+}
+function backendSetStatus(text, ok){
+  const el=$("backendStatus");
+  el.textContent=text;
+  el.style.color=ok?"var(--ok)":"var(--ink-soft)";
+}
+function backendUrl(path, params){
+  params=params||{};
+  const qs=new URLSearchParams(params).toString();
+  return backendBase()+path+(qs?"?"+qs:"");
+}
+async function backendFetchJson(path, params, opts){
+  const secret=backendSecret();
+  if(!secret){toast("先填任务密码");$("backendSecret").focus();throw new Error("missing SCHEDULE_SECRET");}
+  params=Object.assign({}, params||{});
+  opts=opts||{};
+  if(!opts.headerSecret)params.secret=secret;
+  const headers=opts.headerSecret?{"X-Schedule-Secret":secret}:{};
+  const r=await fetch(backendUrl(path,params),{headers});
+  const text=await r.text();
+  let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
+  if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
+  return data;
+}
+function loadBackendPayload(payload){
+  rows=[];dramaRows=[];
+  clearResults();
+  const summary=payload.summary||[];
+  const dramas=payload.dramas_detail||[];
+  for(const row of summary)addRow(row);
+  dramaRows=dramas;
+  const failed=(payload.errors||[]).map(e=>e.account||e.error||"未知");
+  updateSummary(failed);
+  backendSetStatus("已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧", true);
+  if(summary.length)toast("已加载后端最新结果");
+}
+async function loadBackendLatest(){
+  backendSetStatus("正在加载最新结果…");
+  const payload=await backendFetchJson("/reports/latest_report.json",{});
+  loadBackendPayload(payload);
+  return payload;
+}
+async function pollBackendJob(){
+  for(let i=0;i<180;i++){
+    const data=await backendFetchJson("/schedule-status",{});
+    const job=data.job||{};
+    if(job.running){
+      const started=job.started_at?(" · "+job.started_at):"";
+      backendSetStatus("后端抓取中"+started);
+      await sleep(5000);
+      continue;
+    }
+    if(job.error)throw new Error(job.error);
+    if(job.result){
+      backendSetStatus("后端抓取完成,正在加载结果…", true);
+      return loadBackendLatest();
+    }
+    backendSetStatus("后端空闲");
+    return null;
+  }
+  throw new Error("等待后端任务超时");
+}
+async function runBackendJob(manual){
+  if(schedBusy){if(manual)toast("后端任务正在运行");return;}
+  schedBusy=true;
+  try{
+    backendSetStatus("正在启动后端抓取…");
+    $("runCard").style.display="block";
+    clearConsole();
+    logHead("后端账号任务启动 "+nowStamp());
+    let started=false;
+    try{
+      await backendFetchJson("/run-scheduled",{});
+      started=true;
+    }catch(e){
+      if(!/already running/i.test(e.message||""))throw e;
+      log("后端已有任务在跑,开始等待结果","c-dim");
+    }
+    if(started)log("后端已开始抓取,账号名单来自 Render 环境变量","c-ok");
+    await pollBackendJob();
+    store.set("thr_sched_last",dayStr());
+    log("后端结果已加载到前端表格,可以导出 CSV/Excel/Word","c-ok");
+  }catch(e){
+    backendSetStatus("出错:"+(e.message||e));
+    log("后端任务出错:"+(e.message||e),"c-err");
+    if(manual)toast("出错:"+(e.message||e));
+  }finally{schedBusy=false;refreshSchedUI();}
+}
+async function openBackendReports(){
+  const secret=backendSecret();
+  if(!secret){toast("先填任务密码");$("backendSecret").focus();return;}
+  window.open(backendUrl("/reports",{secret}),"_blank","noopener");
+}
+
 /* ---------- 定时监控 ---------- */
 const HIST_COLS=["日期时间","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","最高观看短剧","最高观看"];
 function pad2(n){return String(n).padStart(2,"0");}
@@ -818,6 +940,7 @@ async function saveReports(){
 let schedBusy=false;
 async function runScheduled(manual){
   if(running||schedBusy){if(manual)toast("正在抓取中,请稍候");return;}
+  if(backendSecret())return runBackendJob(manual);
   schedBusy=true;
   try{
     if(!manual)store.set("thr_sched_last",dayStr()); // 自动跑先占当天,避免每30秒重复触发
@@ -944,10 +1067,15 @@ function init(){
   if(state.apiKey)$("rememberKey").checked=true;
   refreshKeyPill();
   updateAcctCount();
+  $("backendSecret").value=store.get("thr_backend_secret")||"";
 
   $("accountsInput").addEventListener("input",updateAcctCount);
   $("accountsInput").addEventListener("input",()=>store.set("thr_accounts",$("accountsInput").value));
   if(store.get("thr_accounts")){$("accountsInput").value=store.get("thr_accounts");updateAcctCount();}
+  $("backendSecret").addEventListener("input",()=>store.set("thr_backend_secret",$("backendSecret").value.trim()));
+  $("backendRunBtn").addEventListener("click",()=>runBackendJob(true));
+  $("backendLoadBtn").addEventListener("click",()=>loadBackendLatest().catch(e=>{backendSetStatus("出错:"+(e.message||e));toast("出错:"+(e.message||e));}));
+  $("backendReportsBtn").addEventListener("click",openBackendReports);
   $("schedEnabled").addEventListener("change",()=>{store.set("thr_sched_on",$("schedEnabled").checked?"1":"0");if($("schedEnabled").checked){toast("已开启每天定时");$("schedDetails").open=true;}refreshSchedUI();});
   $("schedTime").addEventListener("change",()=>{store.set("thr_sched_time",$("schedTime").value||"08:00");refreshSchedUI();});
   $("schedNowBtn").addEventListener("click",()=>runScheduled(true));
