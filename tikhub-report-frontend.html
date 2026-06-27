@@ -887,8 +887,18 @@ async function loadBackendLatest(){
   let payload=null;
   try{
     payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
-  }catch(_){
-    payload=await fetchJsonUrl("public_reports/latest_report.json");
+  }catch(firstErr){
+    if(backendSecret()){
+      try{
+        backendSetStatus("后端暂无最新结果，正在重新抓取…");
+        await backendFetchJson("/run-scheduled",{wait:"1"}, {requireSecret:true});
+        payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+      }catch(_){
+        payload=await fetchJsonUrl("public_reports/latest_report.json");
+      }
+    }else{
+      payload=await fetchJsonUrl("public_reports/latest_report.json");
+    }
   }
   loadBackendPayload(payload);
   return payload;
