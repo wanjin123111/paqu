@@ -16,6 +16,12 @@ services:
         sync: false
       - key: SCHEDULE_MAX_VIDEOS
         value: 100
+      - key: SCHEDULE_USE_DRAMA_LIBRARY
+        value: "1"
+      - key: SCHEDULE_DRAMA_PAGE_SIZE
+        value: 50
+      - key: SCHEDULE_MAX_DRAMAS
+        value: 0
       - key: SCHEDULE_USE_PLAYLISTS
         value: "1"
       - key: SCHEDULE_MAX_PLAYLISTS

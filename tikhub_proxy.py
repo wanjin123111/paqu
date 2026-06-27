@@ -63,11 +63,18 @@ def _env_bool(name, default):
 
 
 TIKHUB_HOST = os.environ.get("TIKHUB_HOST", "https://api.tikhub.io").rstrip("/")
+TIKTOK_HOST = os.environ.get("TIKTOK_HOST", "https://www.tiktok.com").rstrip("/")
+TIKTOK_AID = os.environ.get("TIKTOK_AID", "1233").strip() or "1233"
+TIKTOK_REGION = os.environ.get("TIKTOK_REGION", "US").strip() or "US"
+TIKTOK_LANGUAGE = os.environ.get("TIKTOK_LANGUAGE", "en").strip() or "en"
 SCHEDULE_SECRET = os.environ.get("SCHEDULE_SECRET", "").strip()
 SCHEDULE_ACCOUNTS = os.environ.get("SCHEDULE_ACCOUNTS", "")
 SCHEDULE_MAX_VIDEOS = _env_int("SCHEDULE_MAX_VIDEOS", 100, 0, 20000)
 SCHEDULE_MAX_PAGES = _env_int("SCHEDULE_MAX_PAGES", 80, 1, 20000)
 SCHEDULE_PAGE_SIZE = _env_int("SCHEDULE_PAGE_SIZE", 30, 1, 50)
+SCHEDULE_USE_DRAMA_LIBRARY = _env_bool("SCHEDULE_USE_DRAMA_LIBRARY", True)
+SCHEDULE_DRAMA_PAGE_SIZE = _env_int("SCHEDULE_DRAMA_PAGE_SIZE", 50, 1, 50)
+SCHEDULE_MAX_DRAMAS = _env_int("SCHEDULE_MAX_DRAMAS", 0, 0, 20000)
 SCHEDULE_USE_PLAYLISTS = _env_bool("SCHEDULE_USE_PLAYLISTS", True)
 SCHEDULE_MAX_PLAYLISTS = _env_int("SCHEDULE_MAX_PLAYLISTS", 300, 0, 20000)
 SCHEDULE_PLAYLIST_PAGE_SIZE = _env_int("SCHEDULE_PLAYLIST_PAGE_SIZE", 20, 1, 50)
@@ -102,6 +109,10 @@ PLAYLIST_ID_KEYS = ("mixId", "mix_id", "playlist_id", "playlistId")
 PLAYLIST_NAME_KEYS = ("mixName", "mix_name", "name", "playlist_name", "title")
 PLAYLIST_COUNT_KEYS = ("videoCount", "video_count", "aweme_count", "item_count", "itemCount", "episode_count", "episodeCount")
 PLAYLIST_VIEW_KEYS = ("play_count", "playCount", "view_count", "viewCount", "total_play_count", "totalPlayCount")
+DRAMA_ID_KEYS = ("dramaID", "dramaId", "drama_id", "id")
+DRAMA_NAME_KEYS = ("dramaName", "drama_name", "name", "title")
+DRAMA_COUNT_KEYS = ("numVideos", "num_videos", "videoCount", "video_count", "episodeCount", "episode_count")
+DRAMA_VIEW_KEYS = ("numWatched", "num_watched", "play_count", "playCount", "view_count", "viewCount")
 FOLLOWER_KEYS = ("followerCount", "follower_count", "fans_count", "total_follower", "followers")
 HEART_KEYS = ("heartCount", "heart_count", "total_favorited", "favoriting_count", "likes")
 NICK_KEYS = ("nickname", "nick_name", "nick")
@@ -129,6 +140,38 @@ def _send_tikhub_get(path, params, label):
     headers = {
         "Accept": "application/json",
         "Authorization": "Bearer " + SERVER_API_KEY,
+        "User-Agent": DEFAULT_UA,
+    }
+    last_error = None
+    for attempt in range(1, SCHEDULE_RETRIES + 1):
+        try:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                text = resp.read().decode("utf-8", "replace")
+                return json.loads(text) if text else None
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace")[:500]
+            last_error = TikHubError("%s failed with HTTP %s: %s" % (label, exc.code, body), exc.code)
+            if exc.code in (429, 500, 502, 503, 504) and attempt < SCHEDULE_RETRIES:
+                time.sleep(max(0.5, SCHEDULE_DELAY_MS / 1000.0) * attempt)
+                continue
+            raise last_error
+        except Exception as exc:
+            last_error = TikHubError("%s request failed: %s" % (label, exc))
+            if attempt < SCHEDULE_RETRIES:
+                time.sleep(max(0.5, SCHEDULE_DELAY_MS / 1000.0) * attempt)
+                continue
+            raise last_error
+    raise last_error or TikHubError("%s request failed" % label)
+
+
+def _send_tiktok_get(path, params, label, referer_uid=None):
+    query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
+    url = TIKTOK_HOST + path + ("?" + query if query else "")
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": TIKTOK_HOST + ("/@" + referer_uid if referer_uid else "/"),
         "User-Agent": DEFAULT_UA,
     }
     last_error = None
@@ -553,6 +596,74 @@ def _get_playlist_dramas(secuid, uid):
     return dramas
 
 
+def _get_tiktok_drama_library(secuid, uid):
+    if not secuid:
+        return []
+    started = time.time()
+    dramas, seen = [], set()
+    cursor, prev, stall = "0", None, 0
+    for _page in range(1, SCHEDULE_MAX_PAGES + 1):
+        if _runtime_exceeded(started):
+            break
+        data = _send_tiktok_get("/api/drama/user/drama_list/", {
+            "secUid": secuid,
+            "aid": TIKTOK_AID,
+            "language": TIKTOK_LANGUAGE,
+            "region": TIKTOK_REGION,
+            "count": str(SCHEDULE_DRAMA_PAGE_SIZE),
+            "cursor": str(cursor),
+        }, "TikTok drama library endpoint", uid)
+        if not isinstance(data, dict):
+            break
+        status = data.get("statusCode", data.get("status_code"))
+        batch = data.get("dramaList") or data.get("drama_list") or []
+        if status not in (None, 0, "0") and not batch:
+            raise TikHubError("TikTok drama library returned status %s" % status)
+        if not isinstance(batch, list):
+            batch = []
+        added = 0
+        for item in batch:
+            if not isinstance(item, dict):
+                continue
+            drama_id = _deep_find(item, DRAMA_ID_KEYS)
+            drama_key = "" if drama_id is None else str(drama_id)
+            name = str(_deep_find(item, DRAMA_NAME_KEYS) or "").strip()
+            if not name:
+                name = str(_deep_find(item, ("description",)) or drama_key).strip()
+            if not name:
+                continue
+            key = drama_key or name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            dramas.append({
+                "name": (_clean_title(name)[:80].strip() or name[:80] or key),
+                "episodes": _to_int(_deep_find(item, DRAMA_COUNT_KEYS)),
+                "views": _to_int(_deep_find(item, DRAMA_VIEW_KEYS)),
+            })
+            added += 1
+            if SCHEDULE_MAX_DRAMAS and len(dramas) >= SCHEDULE_MAX_DRAMAS:
+                return dramas[:SCHEDULE_MAX_DRAMAS]
+        has_more = data.get("hasMore", data.get("has_more"))
+        next_cursor = data.get("cursor") or data.get("nextCursor") or data.get("next_cursor")
+        more_false = has_more in (False, 0, "0")
+        advanced = next_cursor not in (None, "", "0") and str(next_cursor) != str(cursor) and str(next_cursor) != str(prev)
+        if more_false:
+            break
+        if advanced:
+            prev, cursor = cursor, str(next_cursor)
+            stall = 0 if added else stall + 1
+            if stall >= 6:
+                break
+            time.sleep(SCHEDULE_DELAY_MS / 1000.0)
+            continue
+        stall += 1
+        if stall >= 6:
+            break
+        time.sleep((SCHEDULE_DELAY_MS / 1000.0) * (1 + stall))
+    return dramas
+
+
 def _clean_title(text):
     text = text or ""
     patterns = [
@@ -622,7 +733,14 @@ def _scrape_account(uid):
     secuid = _resolve_secuid(uid)
     profile = _get_profile(uid, secuid)
     videos, dramas = [], []
-    if SCHEDULE_USE_PLAYLISTS:
+    if SCHEDULE_USE_DRAMA_LIBRARY:
+        try:
+            drama_library = _get_tiktok_drama_library(secuid, uid)
+            if _playlist_dramas_are_usable(drama_library):
+                dramas = drama_library
+        except TikHubError:
+            dramas = []
+    if not dramas and SCHEDULE_USE_PLAYLISTS:
         try:
             playlist_dramas = _get_playlist_dramas(secuid, uid)
             if _playlist_dramas_are_usable(playlist_dramas):
