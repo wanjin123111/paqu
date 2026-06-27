@@ -55,12 +55,24 @@ def _env_int(name, default, low=None, high=None):
     return value
 
 
+def _env_bool(name, default):
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
 TIKHUB_HOST = os.environ.get("TIKHUB_HOST", "https://api.tikhub.io").rstrip("/")
 SCHEDULE_SECRET = os.environ.get("SCHEDULE_SECRET", "").strip()
 SCHEDULE_ACCOUNTS = os.environ.get("SCHEDULE_ACCOUNTS", "")
 SCHEDULE_MAX_VIDEOS = _env_int("SCHEDULE_MAX_VIDEOS", 100, 0, 20000)
 SCHEDULE_MAX_PAGES = _env_int("SCHEDULE_MAX_PAGES", 80, 1, 20000)
 SCHEDULE_PAGE_SIZE = _env_int("SCHEDULE_PAGE_SIZE", 30, 1, 50)
+SCHEDULE_USE_PLAYLISTS = _env_bool("SCHEDULE_USE_PLAYLISTS", True)
+SCHEDULE_MAX_PLAYLISTS = _env_int("SCHEDULE_MAX_PLAYLISTS", 300, 0, 20000)
+SCHEDULE_PLAYLIST_PAGE_SIZE = _env_int("SCHEDULE_PLAYLIST_PAGE_SIZE", 20, 1, 50)
+SCHEDULE_PLAYLIST_VIDEO_PAGE_SIZE = _env_int("SCHEDULE_PLAYLIST_VIDEO_PAGE_SIZE", 30, 1, 50)
+SCHEDULE_MAX_PLAYLIST_VIDEO_PAGES = _env_int("SCHEDULE_MAX_PLAYLIST_VIDEO_PAGES", 200, 1, 1000)
 SCHEDULE_DELAY_MS = _env_int("SCHEDULE_DELAY_MS", 300, 0, 60000)
 SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
 SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
@@ -70,6 +82,8 @@ DEFAULT_ENDPOINTS = {
     "profile": "/api/v1/tiktok/app/v3/handler_user_profile",
     "secuid": "/api/v1/tiktok/app/v3/get_user_id_and_sec_user_id_by_username",
     "posts": "/api/v1/tiktok/app/v3/fetch_user_post_videos",
+    "playlists": "/api/v1/tiktok/web/fetch_user_play_list",
+    "playlist_videos": "/api/v1/tiktok/web/fetch_play_list_videos",
 }
 POST_EP_CANDIDATES = [
     "/api/v1/tiktok/app/v3/fetch_user_post_videos",
@@ -80,6 +94,10 @@ POST_EP_CANDIDATES = [
 PLAY_KEYS = ("play_count", "playCount", "play_cnt")
 DESC_KEYS = ("desc", "title", "content", "aweme_title", "text")
 ID_KEYS = ("aweme_id", "awemeId", "id", "item_id", "itemId")
+PLAYLIST_ID_KEYS = ("mixId", "mix_id", "playlist_id", "playlistId")
+PLAYLIST_NAME_KEYS = ("mixName", "mix_name", "name", "playlist_name", "title")
+PLAYLIST_COUNT_KEYS = ("videoCount", "video_count", "aweme_count", "item_count", "itemCount", "episode_count", "episodeCount")
+PLAYLIST_VIEW_KEYS = ("play_count", "playCount", "view_count", "viewCount", "total_play_count", "totalPlayCount")
 FOLLOWER_KEYS = ("followerCount", "follower_count", "fans_count", "total_follower", "followers")
 HEART_KEYS = ("heartCount", "heart_count", "total_favorited", "favoriting_count", "likes")
 NICK_KEYS = ("nickname", "nick_name", "nick")
@@ -169,6 +187,12 @@ def _looks_like_video(item):
     return has_id and has_play
 
 
+def _looks_like_playlist(item):
+    if not isinstance(item, dict):
+        return False
+    return any(key in item for key in PLAYLIST_ID_KEYS) or _deep_find(item, PLAYLIST_ID_KEYS) is not None
+
+
 def _find_video_list(obj, depth=0):
     best = []
     if depth > 9 or obj is None:
@@ -183,6 +207,25 @@ def _find_video_list(obj, depth=0):
     elif isinstance(obj, dict):
         for item in obj.values():
             found = _find_video_list(item, depth + 1)
+            if len(found) > len(best):
+                best = found
+    return best
+
+
+def _find_playlist_list(obj, depth=0):
+    best = []
+    if depth > 9 or obj is None:
+        return best
+    if isinstance(obj, list):
+        if obj and any(_looks_like_playlist(item) for item in obj):
+            best = obj
+        for item in obj:
+            found = _find_playlist_list(item, depth + 1)
+            if len(found) > len(best):
+                best = found
+    elif isinstance(obj, dict):
+        for item in obj.values():
+            found = _find_playlist_list(item, depth + 1)
             if len(found) > len(best):
                 best = found
     return best
@@ -214,6 +257,26 @@ def _get_video_id(video):
                 return str(video[key])
     found = _deep_find(video, ID_KEYS)
     return "" if found is None else str(found)
+
+
+def _get_playlist_id(playlist):
+    if isinstance(playlist, dict):
+        for key in PLAYLIST_ID_KEYS:
+            if key in playlist and not isinstance(playlist[key], (dict, list)):
+                return str(playlist[key])
+    found = _deep_find(playlist, PLAYLIST_ID_KEYS)
+    return "" if found is None else str(found)
+
+
+def _get_playlist_name(playlist, fallback):
+    if isinstance(playlist, dict):
+        for key in PLAYLIST_NAME_KEYS:
+            if isinstance(playlist.get(key), str) and playlist[key].strip():
+                return playlist[key]
+    found = _deep_find(playlist, PLAYLIST_NAME_KEYS)
+    if isinstance(found, str) and found.strip():
+        return found
+    return fallback
 
 
 def _read_pagination(data):
@@ -297,13 +360,17 @@ def _fetch_posts_page(ep_list, params):
     raise last_error or TikHubError("No TikHub posts endpoint worked")
 
 
+def _runtime_exceeded(started):
+    return time.time() - started > SCHEDULE_MAX_RUNTIME_SECONDS
+
+
 def _get_all_videos(secuid, uid):
     videos, seen = [], set()
     cursor, locked_endpoint, stall = "0", None, 0
     started = time.time()
     ep_list = [DEFAULT_ENDPOINTS["posts"]] + [ep for ep in POST_EP_CANDIDATES if ep != DEFAULT_ENDPOINTS["posts"]]
     for _page in range(1, SCHEDULE_MAX_PAGES + 1):
-        if time.time() - started > SCHEDULE_MAX_RUNTIME_SECONDS:
+        if _runtime_exceeded(started):
             break
         params = {
             "secUid": secuid,
@@ -344,6 +411,120 @@ def _get_all_videos(secuid, uid):
             break
         time.sleep((SCHEDULE_DELAY_MS / 1000.0) * (1 + stall))
     return videos[:SCHEDULE_MAX_VIDEOS] if SCHEDULE_MAX_VIDEOS else videos
+
+
+def _get_user_playlists(secuid, uid, started):
+    playlists, seen = [], set()
+    cursor, prev, stall = "0", None, 0
+    for _page in range(1, SCHEDULE_MAX_PAGES + 1):
+        if _runtime_exceeded(started):
+            break
+        data = _send_tikhub_get(DEFAULT_ENDPOINTS["playlists"], {
+            "secUid": secuid,
+            "sec_user_id": secuid,
+            "unique_id": uid,
+            "count": str(SCHEDULE_PLAYLIST_PAGE_SIZE),
+            "cursor": str(cursor),
+            "max_cursor": str(cursor),
+        }, "playlists endpoint")
+        batch = _find_playlist_list(data)
+        added = 0
+        for item in batch:
+            playlist_id = _get_playlist_id(item)
+            if not playlist_id or playlist_id in seen:
+                continue
+            seen.add(playlist_id)
+            playlists.append({
+                "id": playlist_id,
+                "name": _get_playlist_name(item, playlist_id),
+                "episodes_hint": _to_int(_deep_find(item, PLAYLIST_COUNT_KEYS)),
+                "views_hint": _to_int(_deep_find(item, PLAYLIST_VIEW_KEYS)),
+            })
+            added += 1
+            if SCHEDULE_MAX_PLAYLISTS and len(playlists) >= SCHEDULE_MAX_PLAYLISTS:
+                return playlists[:SCHEDULE_MAX_PLAYLISTS]
+        has_more, next_cursor = _read_pagination(data)
+        more_false = has_more in (False, 0, "0")
+        advanced = next_cursor not in (None, "", "0") and str(next_cursor) != str(cursor) and str(next_cursor) != str(prev)
+        if more_false:
+            break
+        if advanced:
+            prev, cursor = cursor, str(next_cursor)
+            stall = 0 if added else stall + 1
+            if stall >= 6:
+                break
+            time.sleep(SCHEDULE_DELAY_MS / 1000.0)
+            continue
+        stall += 1
+        if stall >= 6:
+            break
+        time.sleep((SCHEDULE_DELAY_MS / 1000.0) * (1 + stall))
+    return playlists
+
+
+def _get_playlist_video_stats(playlist_id, started):
+    seen, total_views, episodes = set(), 0, 0
+    cursor, prev, stall = "0", None, 0
+    for _page in range(1, SCHEDULE_MAX_PLAYLIST_VIDEO_PAGES + 1):
+        if _runtime_exceeded(started):
+            break
+        data = _send_tikhub_get(DEFAULT_ENDPOINTS["playlist_videos"], {
+            "mixId": playlist_id,
+            "mix_id": playlist_id,
+            "playlistId": playlist_id,
+            "count": str(SCHEDULE_PLAYLIST_VIDEO_PAGE_SIZE),
+            "cursor": str(cursor),
+            "max_cursor": str(cursor),
+        }, "playlist videos endpoint")
+        batch = _find_video_list(data)
+        added = 0
+        for video in batch:
+            video_id = _get_video_id(video)
+            if video_id and video_id in seen:
+                continue
+            if video_id:
+                seen.add(video_id)
+            episodes += 1
+            total_views += _get_play_count(video)
+            added += 1
+        has_more, next_cursor = _read_pagination(data)
+        more_false = has_more in (False, 0, "0")
+        advanced = next_cursor not in (None, "", "0") and str(next_cursor) != str(cursor) and str(next_cursor) != str(prev)
+        if not batch or more_false:
+            break
+        if advanced:
+            prev, cursor = cursor, str(next_cursor)
+            stall = 0 if added else stall + 1
+            if stall >= 6:
+                break
+            time.sleep(SCHEDULE_DELAY_MS / 1000.0)
+            continue
+        stall += 1
+        if stall >= 6:
+            break
+        time.sleep((SCHEDULE_DELAY_MS / 1000.0) * (1 + stall))
+    return {"episodes": episodes, "views": total_views}
+
+
+def _get_playlist_dramas(secuid, uid):
+    started = time.time()
+    playlists = _get_user_playlists(secuid, uid, started)
+    dramas = []
+    for playlist in playlists:
+        episodes = playlist["episodes_hint"]
+        views = playlist["views_hint"]
+        if not _runtime_exceeded(started):
+            try:
+                stats = _get_playlist_video_stats(playlist["id"], started)
+                if stats["episodes"]:
+                    episodes = stats["episodes"]
+                    views = stats["views"]
+            except TikHubError as exc:
+                if exc.status in (401, 402, 403):
+                    raise
+        name = (_clean_title(playlist["name"])[:60].strip() or playlist["name"] or playlist["id"])
+        dramas.append({"name": name, "episodes": episodes, "views": views})
+    return dramas
 
 
 def _clean_title(text):
@@ -387,8 +568,8 @@ def _group_by_title(videos):
 
 
 def _build_summary_row(uid, profile, videos, dramas):
-    total_episodes = len(videos)
-    total_views = sum(video["views"] for video in videos)
+    total_episodes = sum(_to_int(drama.get("episodes")) for drama in dramas) if dramas else len(videos)
+    total_views = sum(_to_int(drama.get("views")) for drama in dramas) if dramas else sum(video["views"] for video in videos)
     drama_count = len(dramas)
     avg_views = round(total_views / drama_count) if drama_count else 0
     top_name, top_views = "", 0
@@ -414,8 +595,16 @@ def _build_summary_row(uid, profile, videos, dramas):
 def _scrape_account(uid):
     secuid = _resolve_secuid(uid)
     profile = _get_profile(uid, secuid)
-    videos = _get_all_videos(secuid, uid)
-    dramas = _group_by_title(videos)
+    videos, dramas = [], []
+    if SCHEDULE_USE_PLAYLISTS:
+        try:
+            dramas = _get_playlist_dramas(secuid, uid)
+        except TikHubError as exc:
+            if exc.status in (401, 402, 403):
+                raise
+    if not dramas:
+        videos = _get_all_videos(secuid, uid)
+        dramas = _group_by_title(videos)
     summary = _build_summary_row(uid, profile, videos, dramas)
     drama_rows = []
     for drama in dramas:
