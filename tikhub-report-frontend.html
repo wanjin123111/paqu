@@ -983,6 +983,7 @@ async function loadBackendReports(){
   backendSetStatus("正在刷新历史记录…");
   try{
     const items=await loadRenderHistory();
+    if(!items.length)throw new Error("empty render history");
     backendSetStatus("已加载 "+items.length+" 条当前记录", true);
     return items;
   }catch(_){
