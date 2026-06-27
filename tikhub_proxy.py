@@ -83,13 +83,17 @@ DEFAULT_ENDPOINTS = {
     "secuid": "/api/v1/tiktok/app/v3/get_user_id_and_sec_user_id_by_username",
     "posts": "/api/v1/tiktok/app/v3/fetch_user_post_videos",
     "playlists": "/api/v1/tiktok/web/fetch_user_play_list",
-    "playlist_videos": "/api/v1/tiktok/web/fetch_play_list_videos",
+    "playlist_videos": "/api/v1/tiktok/web/fetch_user_mix",
 }
 POST_EP_CANDIDATES = [
     "/api/v1/tiktok/app/v3/fetch_user_post_videos",
     "/api/v1/tiktok/app/v3/fetch_user_post_videos_v2",
     "/api/v1/tiktok/app/v3/fetch_user_post_videos_v3",
     "/api/v1/tiktok/web/fetch_user_post",
+]
+PLAYLIST_VIDEO_EP_CANDIDATES = [
+    "/api/v1/tiktok/web/fetch_user_mix",
+    "/api/v1/tiktok/web/fetch_play_list_videos",
 ]
 PLAY_KEYS = ("play_count", "playCount", "play_cnt")
 DESC_KEYS = ("desc", "title", "content", "aweme_title", "text")
@@ -360,6 +364,19 @@ def _fetch_posts_page(ep_list, params):
     raise last_error or TikHubError("No TikHub posts endpoint worked")
 
 
+def _fetch_playlist_videos_page(ep_list, params):
+    last_error = None
+    for endpoint in ep_list:
+        try:
+            return _send_tikhub_get(endpoint, params, "playlist videos endpoint"), endpoint
+        except TikHubError as exc:
+            if exc.status == 404:
+                last_error = exc
+                continue
+            raise
+    raise last_error or TikHubError("No TikHub playlist videos endpoint worked")
+
+
 def _runtime_exceeded(started):
     return time.time() - started > SCHEDULE_MAX_RUNTIME_SECONDS
 
@@ -464,18 +481,23 @@ def _get_user_playlists(secuid, uid, started):
 
 def _get_playlist_video_stats(playlist_id, started):
     seen, total_views, episodes = set(), 0, 0
-    cursor, prev, stall = "0", None, 0
+    cursor, prev, stall, locked_endpoint = "0", None, 0, None
+    ep_list = [DEFAULT_ENDPOINTS["playlist_videos"]] + [ep for ep in PLAYLIST_VIDEO_EP_CANDIDATES if ep != DEFAULT_ENDPOINTS["playlist_videos"]]
     for _page in range(1, SCHEDULE_MAX_PLAYLIST_VIDEO_PAGES + 1):
         if _runtime_exceeded(started):
             break
-        data = _send_tikhub_get(DEFAULT_ENDPOINTS["playlist_videos"], {
+        params = {
             "mixId": playlist_id,
             "mix_id": playlist_id,
             "playlistId": playlist_id,
             "count": str(SCHEDULE_PLAYLIST_VIDEO_PAGE_SIZE),
             "cursor": str(cursor),
             "max_cursor": str(cursor),
-        }, "playlist videos endpoint")
+        }
+        if locked_endpoint:
+            data = _send_tikhub_get(locked_endpoint, params, "playlist videos endpoint")
+        else:
+            data, locked_endpoint = _fetch_playlist_videos_page(ep_list, params)
         batch = _find_video_list(data)
         added = 0
         for video in batch:
@@ -504,6 +526,10 @@ def _get_playlist_video_stats(playlist_id, started):
             break
         time.sleep((SCHEDULE_DELAY_MS / 1000.0) * (1 + stall))
     return {"episodes": episodes, "views": total_views}
+
+
+def _playlist_dramas_are_usable(dramas):
+    return bool(dramas) and any(_to_int(item.get("episodes")) or _to_int(item.get("views")) for item in dramas)
 
 
 def _get_playlist_dramas(secuid, uid):
@@ -598,7 +624,9 @@ def _scrape_account(uid):
     videos, dramas = [], []
     if SCHEDULE_USE_PLAYLISTS:
         try:
-            dramas = _get_playlist_dramas(secuid, uid)
+            playlist_dramas = _get_playlist_dramas(secuid, uid)
+            if _playlist_dramas_are_usable(playlist_dramas):
+                dramas = playlist_dramas
         except TikHubError as exc:
             if exc.status in (401, 402, 403):
                 raise

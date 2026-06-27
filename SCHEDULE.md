@@ -19,7 +19,7 @@ SCHEDULE_DELAY_MS=300
 
 `SCHEDULE_ACCOUNTS` 也可以一行一个账号。
 
-默认会优先走 TikHub 播放列表/合集接口统计短剧数量；如果某个账号拿不到合集，才会退回按公开视频标题自动归类。`SCHEDULE_MAX_VIDEOS` 只影响这个退回方案，不会再把合集数量截成 100。
+默认会优先走 TikHub 播放列表/合集接口统计短剧数量；如果某个账号拿不到可用合集，或者合集返回的集数/播放量明显为空，才会退回按公开视频标题自动归类。`SCHEDULE_MAX_VIDEOS` 只影响这个退回方案。
 
 ## GitHub Secret
 
