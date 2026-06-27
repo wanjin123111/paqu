@@ -886,9 +886,9 @@ async function loadBackendLatest(){
   backendSetStatus("正在加载最新结果…");
   let payload=null;
   try{
-    payload=await fetchJsonUrl("public_reports/latest_report.json");
-  }catch(_){
     payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+  }catch(_){
+    payload=await fetchJsonUrl("public_reports/latest_report.json");
   }
   loadBackendPayload(payload);
   return payload;
@@ -972,12 +972,12 @@ async function loadRenderHistory(){
 async function loadBackendReports(){
   backendSetStatus("正在刷新历史记录…");
   try{
-    const items=await loadPublishedHistory();
-    backendSetStatus("已加载 "+items.length+" 条历史记录", true);
-    return items;
-  }catch(_){
     const items=await loadRenderHistory();
     backendSetStatus("已加载 "+items.length+" 条当前记录", true);
+    return items;
+  }catch(_){
+    const items=await loadPublishedHistory();
+    backendSetStatus("已加载 "+items.length+" 条历史记录", true);
     return items;
   }
 }
