@@ -128,6 +128,10 @@
   body.public-mode #manualCard,
   body.public-mode #schedCard,
   body.public-mode #settingsCard{display:none!important}
+  body:not(.admin-mode) .admin-only{display:none!important}
+  .backend-admin{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px;align-items:end;margin-bottom:12px}
+  .backend-admin .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
+  .backend-admin .tf:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .history-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
   .history-list{margin-top:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
   .history-empty{padding:14px 16px;color:var(--ink-faint);font-size:13px}
@@ -203,11 +207,16 @@
   <div class="card" id="backendCard">
     <div class="card-head"><h2>抓取记录</h2><span class="sub" id="backendStatus">正在读取云端报表...</span></div>
     <div class="card-body">
-      <input id="backendSecret" type="hidden" value="" />
+      <div class="backend-admin admin-only">
+        <div>
+          <label class="fl" for="backendSecret">任务密码 <span class="hint">— SCHEDULE_SECRET</span></label>
+          <input class="tf" id="backendSecret" type="password" value="" autocomplete="off" spellcheck="false" placeholder="输入任务密码后可立即抓取" />
+        </div>
+        <button class="mini-btn" id="backendRunBtn" type="button">立即抓取一次</button>
+      </div>
       <div class="history-actions">
         <button class="mini-btn" id="backendLoadBtn" type="button">刷新最新结果</button>
         <button class="mini-btn" id="backendReportsBtn" type="button">刷新历史记录</button>
-        <button class="mini-btn" id="backendRunBtn" type="button" style="display:none">启动后端抓取</button>
       </div>
       <div class="history-list" id="historyList"><div class="history-empty">正在加载历史记录...</div></div>
     </div>
@@ -1032,6 +1041,7 @@ function pad2(n){return String(n).padStart(2,"0");}
 function dayStr(d){d=d||new Date();return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate());}
 function nowStamp(){const d=new Date();return dayStr(d)+" "+pad2(d.getHours())+":"+pad2(d.getMinutes());}
 function isPublicMode(){return document.body.classList.contains("public-mode");}
+function isAdminMode(){return new URLSearchParams(location.search).get("admin")==="1";}
 function schedCfg(){return {enabled:!isPublicMode()&&store.get("thr_sched_on")==="1",time:store.get("thr_sched_time")||"08:00",last:store.get("thr_sched_last")||""};}
 function computeNext(){
   const c=schedCfg();if(!c.enabled)return null;
@@ -1196,6 +1206,7 @@ function checkOrigin(){
 }
 function init(){
   checkOrigin();
+  if(isAdminMode())document.body.classList.add("admin-mode");
   $("hostSelect").value=state.host;
   $("proxyInput").value=store.get("thr_proxy")||"";
   if(store.get("thr_ep_ver")!==EP_VER){for(const k of["epProfile","epSecuid","epPosts","epPlaylists","epPlaylistVideos"]){store.set("thr_"+k,DEFAULTS[k]);}store.set("thr_ep_ver",EP_VER);}
