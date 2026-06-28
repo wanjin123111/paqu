@@ -26,6 +26,15 @@
                         "title":  "2026-06-27 02:35:09 北京时间",
                         "accounts":  9,
                         "dramas":  78
+                    },
+                    {
+                        "name":  "scheduled_report_20260628-155547.json",
+                        "summary_url":  "scheduled_report_20260628-155547.csv",
+                        "dramas_url":  "scheduled_dramas_20260628-155547.csv",
+                        "generated_at":  "2026-06-28T15:55:47",
+                        "title":  "2026-06-28 15:55:47 北京时间",
+                        "accounts":  9,
+                        "dramas":  594
                     }
                 ]
 }

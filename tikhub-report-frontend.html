@@ -821,7 +821,8 @@ function backendSetStatus(text, ok){
   el.style.color=ok?"var(--ok)":"var(--ink-soft)";
 }
 function backendUrl(path, params){
-  params=params||{};
+  params=Object.assign({}, params||{});
+  if(String(path||"").startsWith("/reports"))params._=String(Date.now());
   const qs=new URLSearchParams(params).toString();
   return backendBase()+path+(qs?"?"+qs:"");
 }
@@ -834,14 +835,15 @@ async function backendFetchJson(path, params, opts){
     if(opts.headerSecret){}else params.secret=secret;
   }
   const headers=(opts.headerSecret&&secret)?{"X-Schedule-Secret":secret}:{};
-  const r=await fetch(backendUrl(path,params),{headers});
+  const r=await fetch(backendUrl(path,params),{headers,cache:"no-store"});
   const text=await r.text();
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
   return data;
 }
 async function fetchJsonUrl(url){
-  const r=await fetch(url,{cache:"no-store"});
+  const sep=String(url).includes("?")?"&":"?";
+  const r=await fetch(url+sep+"_="+Date.now(),{cache:"no-store"});
   const text=await r.text();
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
@@ -995,6 +997,17 @@ async function loadBackendReports(){
 async function loadPublicDashboard(){
   try{await loadBackendLatest();}catch(e){backendSetStatus("暂时没有最新结果:"+(e.message||e));}
   try{await loadBackendReports();}catch(e){renderHistoryList([], "");}
+}
+async function refreshPublicDashboardQuiet(){
+  if(isAdminMode()||document.hidden)return;
+  window.__quietRefresh=true;
+  try{
+    await loadBackendLatest();
+    await loadBackendReports();
+  }catch(_){
+  }finally{
+    window.__quietRefresh=false;
+  }
 }
 async function pollBackendJob(){
   for(let i=0;i<180;i++){
@@ -1189,7 +1202,7 @@ async function testKey(){
 function refreshKeyPill(){const p=$("keyPill");if(state.apiKey){p.classList.add("set");$("keyPillText").textContent="Key ••"+state.apiKey.slice(-4);}else{p.classList.remove("set");$("keyPillText").textContent="未设置 Key";}}
 
 /* ---------- toast ---------- */
-let tt=null;function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("show"),1900);}
+let tt=null;function toast(m){if(window.__quietRefresh)return;const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(tt);tt=setTimeout(()=>t.classList.remove("show"),1900);}
 
 /* ---------- init ---------- */
 function checkOrigin(){
@@ -1257,6 +1270,7 @@ function init(){
   $("keyModal").addEventListener("click",e=>{if(e.target===$("keyModal"))closeKeyModal();});
   document.addEventListener("keydown",e=>{if(e.key==="Escape")closeKeyModal();});
   setTimeout(loadPublicDashboard,600);
+  if(!isAdminMode())setInterval(refreshPublicDashboardQuiet,60000);
 }
 function updateAcctCount(){$("acctCount").textContent=parseAccounts().length;}
 
