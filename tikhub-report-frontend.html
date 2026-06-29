@@ -506,7 +506,7 @@ const SECUID_KEYS=["secUid","sec_uid","sec_user_id","secUserId"];
 
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
-const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","集数","观看","时长","题材","简介","主页链接"];
+const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","时长","题材","简介","主页链接"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
 
@@ -843,7 +843,7 @@ async function scrapeAccount(acc,log){
   }else dramas=groupByTitle(videos);
   const row=buildRow(acc,prof,videos,dramas);
   addRow(row);
-  for(const [idx,d] of dramas.entries()){dramaRows.push({"账号":acc,"昵称":prof.nickname,"短剧名":d.name,"Rank in Account / 账号内排序":idx+1,"English Title / 英文剧名":d.name,"Episodes / 集数":d.episodes,"Views / 观看数":d.views,"集数":d.episodes,"累计观看":d.views,"单集均观看":d.episodes?Math.round(d.views/d.episodes):0,"主页链接":"https://www.tiktok.com/@"+acc,"Source Profile URL / 来源主页":"https://www.tiktok.com/@"+acc});}
+  for(const [idx,d] of dramas.entries()){dramaRows.push({"账号":acc,"昵称":prof.nickname,"短剧名":d.name,"Rank in Account / 账号内排序":idx+1,"English Title / 英文剧名":d.name,"Publish Time / 发布时间":d.publish_time||"","Episodes / 集数":d.episodes,"Views / 观看数":d.views,"集数":d.episodes,"累计观看":d.views,"单集均观看":d.episodes?Math.round(d.views/d.episodes):0,"主页链接":"https://www.tiktok.com/@"+acc,"Source Profile URL / 来源主页":"https://www.tiktok.com/@"+acc});}
   renderResultTable();
   log("完成 → 短剧 "+row.短剧数+" 总集 "+row.总集数+" 累计观看 "+fmt(row.累计观看)+" 最高《"+row.最高观看短剧.slice(0,20)+"》"+fmt(row.最高观看),"c-ok");
 }
@@ -1058,6 +1058,13 @@ async function hydrateChineseTitles(targetRows){
 function dramaViewsOf(row){return toInt(valueOf(row,["Views / 观看数","累计观看"],0));}
 function dramaEpisodesOf(row){return toInt(valueOf(row,["Episodes / 集数","集数"],0));}
 function dramaRankOf(row,index){return toInt(valueOf(row,["Rank in Account / 账号内排序"],index+1));}
+function dramaPublishTimeOf(row){return valueOf(row,["Publish Time / 发布时间","发布时间","Published At / 发布时间","Release Time / 发布时间"],"");}
+function dramaPublishMsOf(row){
+  const text=dramaPublishTimeOf(row);
+  if(!text)return 0;
+  const ms=Date.parse(String(text).replace(" ","T")+"+08:00");
+  return Number.isFinite(ms)?ms:0;
+}
 function summaryHotOf(row){return toInt(valueOf(row,[DISPLAY_COLUMNS[5],COLUMNS[7]],0));}
 function sortedSummaryRows(){
   const list=[...rows];
@@ -1068,6 +1075,9 @@ function sortedDetailRows(details){
   const list=[...details];
   if(resultSort==="hot"){
     return list.sort((a,b)=>dramaViewsOf(b)-dramaViewsOf(a)||dramaRankOf(a,9999)-dramaRankOf(b,9999));
+  }
+  if(list.some(row=>dramaPublishMsOf(row))){
+    return list.sort((a,b)=>dramaPublishMsOf(b)-dramaPublishMsOf(a)||dramaRankOf(a,9999)-dramaRankOf(b,9999));
   }
   return list.sort((a,b)=>dramaRankOf(a,9999)-dramaRankOf(b,9999));
 }
@@ -1130,6 +1140,7 @@ function appendDetailCell(tr,c,row,index){
   else if(c==="短剧ID"){td.className="detail-id";td.textContent=valueOf(row,["Drama ID / 短剧ID"],"");}
   else if(c==="英文剧名"){td.className="detail-title";td.textContent=dramaTitleOf(row);}
   else if(c==="中文剧名"){td.className="detail-title";td.textContent=chineseTitleOf(row);}
+  else if(c==="发布时间"){td.className="num";td.textContent=dramaPublishTimeOf(row);}
   else if(c==="集数"){td.className="num";td.textContent=fmt(dramaEpisodesOf(row));}
   else if(c==="观看"){td.className="num";td.textContent=fmtPlay(dramaViewsOf(row));}
   else if(c==="时长"){
@@ -1284,7 +1295,7 @@ function exportCSV(){
   downloadBlob(new Blob(["\ufeff"+head+"\n"+body],{type:"text/csv;charset=utf-8"}),"tikhub_report.csv");
   toast("已导出 CSV");
 }
-const DRAMA_COLS=["Account / 账号","Nickname / 昵称","Screenshot Name / 截图名称","Rank in Account / 账号内排序","Drama ID / 短剧ID","English Title / 英文剧名","Chinese Title / 中文剧名","Episodes / 集数","Views / 观看数","Duration Seconds / 总时长(秒)","Duration Minutes / 总时长(分钟)","Limited Free / 是否限免","English Themes / 英文题材","Chinese Themes / 中文题材","English Description Preview / 英文简介预览","Chinese Description / 中文简介","Description Truncated / 简介是否截断","Source Profile URL / 来源主页"];
+const DRAMA_COLS=["Account / 账号","Nickname / 昵称","Screenshot Name / 截图名称","Rank in Account / 账号内排序","Drama ID / 短剧ID","English Title / 英文剧名","Chinese Title / 中文剧名","Publish Time / 发布时间","Episodes / 集数","Views / 观看数","Duration Seconds / 总时长(秒)","Duration Minutes / 总时长(分钟)","Limited Free / 是否限免","English Themes / 英文题材","Chinese Themes / 中文题材","English Description Preview / 英文简介预览","Chinese Description / 中文简介","Description Truncated / 简介是否截断","Source Profile URL / 来源主页"];
 const TOP_COLS=["排名","短剧名","账号","昵称","累计观看","集数","单集均观看"];
 function normalizeDramaRow(d,index){
   const episodes=dramaEpisodesOf(d);
@@ -1299,6 +1310,7 @@ function normalizeDramaRow(d,index){
     "Drama ID / 短剧ID":valueOf(d,["Drama ID / 短剧ID"],""),
     "English Title / 英文剧名":dramaTitleOf(d),
     "Chinese Title / 中文剧名":chineseTitleOf(d),
+    "Publish Time / 发布时间":dramaPublishTimeOf(d),
     "Episodes / 集数":episodes,
     "Views / 观看数":views,
     "Duration Seconds / 总时长(秒)":valueOf(d,["Duration Seconds / 总时长(秒)"],""),
@@ -1326,7 +1338,7 @@ function buildWorkbook(){
   XLSX.utils.book_append_sheet(wb,ws1,"Account Summary");
   const normalizedDramas=dramaRows.map((d,i)=>normalizeDramaRow(d,i));
   const ws2=XLSX.utils.json_to_sheet(normalizedDramas.length?normalizedDramas:[Object.fromEntries(DRAMA_COLS.map(c=>[c,""]))],{header:DRAMA_COLS});
-  ws2["!cols"]=[{wch:20},{wch:18},{wch:20},{wch:10},{wch:22},{wch:36},{wch:28},{wch:9},{wch:14},{wch:12},{wch:13},{wch:12},{wch:22},{wch:22},{wch:48},{wch:48},{wch:14},{wch:42}];
+  ws2["!cols"]=[{wch:20},{wch:18},{wch:20},{wch:10},{wch:22},{wch:36},{wch:28},{wch:20},{wch:9},{wch:14},{wch:12},{wch:13},{wch:12},{wch:22},{wch:22},{wch:48},{wch:48},{wch:14},{wch:42}];
   XLSX.utils.book_append_sheet(wb,ws2,"All Drama List");
   const top=topDramas(200);
   const ws3=XLSX.utils.json_to_sheet(top.length?top:[Object.fromEntries(TOP_COLS.map(c=>[c,""]))],{header:TOP_COLS});

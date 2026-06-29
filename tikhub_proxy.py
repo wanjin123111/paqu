@@ -31,6 +31,7 @@ if os.environ.get("RENDER") or os.environ.get("PORT"):
 ROOT = os.path.dirname(os.path.abspath(__file__))  # 托管脚本所在文件夹
 DEFAULT_PAGE = "tikhub-report-frontend.html"
 REPORTS_DIR = os.path.join(ROOT, "reports")   # 定时监控存盘目录
+BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
 ALLOW_HEADERS = "Authorization, Content-Type, Accept"
 ALLOWED_PROXY_HOSTS = {
@@ -124,6 +125,12 @@ DRAMA_EN_THEMES_KEYS = ("englishThemes", "english_themes", "enThemes", "themesEn
 DRAMA_CN_THEMES_KEYS = ("chineseThemes", "chinese_themes", "cnThemes", "themesCn", "theme_cn", "zhThemes", "theme_zh")
 DRAMA_EN_DESC_KEYS = ("englishDescription", "english_description", "enDescription", "descriptionEn", "descEn", "description", "desc")
 DRAMA_CN_DESC_KEYS = ("chineseDescription", "chinese_description", "cnDescription", "descriptionCn", "descCn")
+DRAMA_PUBLISH_TIME_KEYS = (
+    "publishTime", "publish_time", "publishedAt", "published_at", "publishedTime", "published_time",
+    "releaseTime", "release_time", "releaseDate", "release_date", "onlineTime", "online_time",
+    "firstPublishTime", "first_publish_time", "firstReleaseTime", "first_release_time",
+    "createTime", "create_time", "createTimeMs", "create_time_ms", "createdAt", "created_at",
+)
 FOLLOWER_KEYS = ("followerCount", "follower_count", "fans_count", "total_follower", "followers")
 HEART_KEYS = ("heartCount", "heart_count", "total_favorited", "favoriting_count", "likes")
 NICK_KEYS = ("nickname", "nick_name", "nick")
@@ -133,7 +140,7 @@ SUMMARY_COLUMNS = ["截图名称", "账号", "昵称", "粉丝", "点赞", "短�
                    "单剧均观看", "最高观看短剧", "最高观看", "主页链接"]
 DRAMA_COLUMNS = ["Account / 账号", "Nickname / 昵称", "Screenshot Name / 截图名称", "Rank in Account / 账号内排序",
                  "Drama ID / 短剧ID", "English Title / 英文剧名", "Chinese Title / 中文剧名",
-                 "Episodes / 集数", "Views / 观看数", "Duration Seconds / 总时长(秒)",
+                 "Publish Time / 发布时间", "Episodes / 集数", "Views / 观看数", "Duration Seconds / 总时长(秒)",
                  "Duration Minutes / 总时长(分钟)", "Limited Free / 是否限免",
                  "English Themes / 英文题材", "Chinese Themes / 中文题材",
                  "English Description Preview / 英文简介预览", "Chinese Description / 中文简介",
@@ -267,6 +274,89 @@ def _to_text(value, limit=None):
     if limit and len(text) > limit:
         return text[:limit].rstrip()
     return text
+
+
+def _direct_find_any(obj, keys):
+    if not isinstance(obj, dict):
+        return None
+    for key in keys:
+        if key in obj and not isinstance(obj[key], (dict, list)):
+            return obj[key]
+    return None
+
+
+def _collect_key_values(obj, keys, out=None, depth=0):
+    if out is None:
+        out = []
+    if depth > 9 or obj is None:
+        return out
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key in keys and not isinstance(value, (dict, list)):
+                out.append(value)
+            elif isinstance(value, (dict, list)):
+                _collect_key_values(value, keys, out, depth + 1)
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_key_values(item, keys, out, depth + 1)
+    return out
+
+
+def _publish_epoch(value):
+    if value is None or isinstance(value, (dict, list, tuple, set)):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if re.fullmatch(r"\d+(?:\.\d+)?", text):
+        try:
+            stamp = float(text)
+        except Exception:
+            return None
+        if stamp > 100000000000:
+            stamp = stamp / 1000.0
+        if stamp > 1000000000:
+            return stamp
+        return None
+    iso = text.replace("Z", "+00:00")
+    try:
+        dt = datetime.datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=BEIJING_TZ)
+        return dt.timestamp()
+    except Exception:
+        pass
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            dt = datetime.datetime.strptime(text[:19], pattern)
+            return dt.replace(tzinfo=BEIJING_TZ).timestamp()
+        except Exception:
+            continue
+    return None
+
+
+def _format_publish_time(value):
+    epoch = _publish_epoch(value)
+    if epoch is not None:
+        return datetime.datetime.fromtimestamp(epoch, BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    text = _to_text(value, 80)
+    if not text or not re.search(r"\d", text):
+        return ""
+    return text
+
+
+def _publish_time_of(obj):
+    direct = _format_publish_time(_direct_find_any(obj, DRAMA_PUBLISH_TIME_KEYS))
+    if direct:
+        return direct
+    candidates = []
+    for value in _collect_key_values(obj, DRAMA_PUBLISH_TIME_KEYS):
+        formatted = _format_publish_time(value)
+        if formatted:
+            candidates.append(formatted)
+    if not candidates:
+        return ""
+    return min(candidates, key=lambda item: _publish_epoch(item) or float("inf"))
 
 
 def _has_cjk(text):
@@ -675,7 +765,8 @@ def _get_all_videos(secuid, uid):
             video_id = _get_video_id(video)
             if video_id and video_id not in seen:
                 seen.add(video_id)
-                videos.append({"id": video_id, "desc": _get_desc(video), "views": _get_play_count(video)})
+                videos.append({"id": video_id, "desc": _get_desc(video), "views": _get_play_count(video),
+                               "publish_time": _publish_time_of(video)})
                 added += 1
         if SCHEDULE_MAX_VIDEOS and len(videos) >= SCHEDULE_MAX_VIDEOS:
             return videos[:SCHEDULE_MAX_VIDEOS]
@@ -724,6 +815,7 @@ def _get_user_playlists(secuid, uid, started):
                 "name": _get_playlist_name(item, playlist_id),
                 "episodes_hint": _to_int(_deep_find(item, PLAYLIST_COUNT_KEYS)),
                 "views_hint": _to_int(_deep_find(item, PLAYLIST_VIEW_KEYS)),
+                "publish_time": _publish_time_of(item),
             })
             added += 1
             if SCHEDULE_MAX_PLAYLISTS and len(playlists) >= SCHEDULE_MAX_PLAYLISTS:
@@ -817,7 +909,7 @@ def _get_playlist_dramas(secuid, uid):
                 if exc.status in (401, 402, 403):
                     raise
         name = (_clean_title(playlist["name"])[:60].strip() or playlist["name"] or playlist["id"])
-        dramas.append({"name": name, "episodes": episodes, "views": views})
+        dramas.append({"name": name, "episodes": episodes, "views": views, "publish_time": playlist.get("publish_time", "")})
     return dramas
 
 
@@ -868,6 +960,7 @@ def _get_tiktok_drama_library(secuid, uid):
             chinese_title = _chinese_title_or_translate(_deep_find(item, DRAMA_CN_TITLE_KEYS), english_title)
             english_desc = _to_text(_deep_find_any(item, DRAMA_EN_DESC_KEYS), 600)
             chinese_desc = _to_text(_deep_find_any(item, DRAMA_CN_DESC_KEYS), 600)
+            publish_time = _publish_time_of(item)
             english_themes_source = _deep_find_any(item, DRAMA_EN_THEMES_KEYS)
             chinese_themes = _theme_text(_deep_find_any(item, DRAMA_CN_THEMES_KEYS))
             if not chinese_themes:
@@ -879,6 +972,7 @@ def _get_tiktok_drama_library(secuid, uid):
                 "drama_id": ("ID " + drama_key) if drama_key and not drama_key.upper().startswith("ID ") else drama_key,
                 "english_title": english_title,
                 "chinese_title": chinese_title,
+                "publish_time": publish_time,
                 "duration_seconds": duration_seconds,
                 "duration_minutes": _duration_minutes(duration_seconds, _deep_find(item, DRAMA_DURATION_MINUTES_KEYS)),
                 "limited_free": _yes_no(_deep_find(item, DRAMA_LIMITED_KEYS)),
@@ -947,7 +1041,9 @@ def _group_by_title(videos):
         total_views = sum(ep["views"] for ep in episodes)
         top = max(episodes, key=lambda item: item["views"])
         name = (_clean_title(top.get("desc", ""))[:60].strip() or top.get("desc", "")[:40] or key)
-        dramas.append({"name": name, "episodes": len(episodes), "views": total_views})
+        publish_times = [ep.get("publish_time", "") for ep in episodes if ep.get("publish_time")]
+        publish_time = min(publish_times, key=lambda item: _publish_epoch(item) or float("inf")) if publish_times else ""
+        dramas.append({"name": name, "episodes": len(episodes), "views": total_views, "publish_time": publish_time})
     return dramas
 
 
@@ -1015,6 +1111,7 @@ def _scrape_account(uid):
             "Drama ID / 短剧ID": drama.get("drama_id", ""),
             "English Title / 英文剧名": title,
             "Chinese Title / 中文剧名": chinese_title,
+            "Publish Time / 发布时间": drama.get("publish_time", ""),
             "Episodes / 集数": episodes,
             "Views / 观看数": views,
             "Duration Seconds / 总时长(秒)": _to_int(drama.get("duration_seconds")),
