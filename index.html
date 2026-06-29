@@ -463,6 +463,7 @@ const SECUID_KEYS=["secUid","sec_uid","sec_user_id","secUserId"];
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
+const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
 
 const DEFAULT_RENDER_PROXY="https://paqu-tikhub-proxy.onrender.com/?url={url}";
 const state={ apiKey:store.get("thr_key")||"", host:store.get("thr_host")||"https://api.tikhub.io" };
@@ -480,6 +481,19 @@ class ApiError extends Error{
 /* ---------- 工具 ---------- */
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const fmt=n=>(typeof n==="number"?n:Number(n)||0).toLocaleString("en-US");
+function fmtPlay(n){
+  const v=typeof n==="number"?n:Number(String(n||0).replace(/,/g,""))||0;
+  const sign=v<0?"-":"";
+  const abs=Math.abs(v);
+  const short=(num,unit)=>{
+    const rounded=Math.round(num*10)/10;
+    return sign+String(rounded).replace(/\.0$/,"")+unit;
+  };
+  if(abs>=1e9)return short(abs/1e9,"B");
+  if(abs>=1e6)return short(abs/1e6,"M");
+  if(abs>=1e3)return short(abs/1e3,"K");
+  return sign+String(Math.round(abs));
+}
 function toInt(x){if(x==null)return 0;const n=Number(String(x).replace(/,/g,"").trim());return isFinite(n)?Math.trunc(n):0;}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 
@@ -806,7 +820,7 @@ function addRow(row){
       td.appendChild(nick);
       td.appendChild(a);
     }
-    else if(NUM_COLS.has(c)){td.className="num";td.textContent=fmt(row[c]);}
+    else if(NUM_COLS.has(c)){td.className="num";td.textContent=VIEW_COLS.has(c)?fmtPlay(row[c]):fmt(row[c]);}
     else if(c==="主页链接"){td.className="link";const a=document.createElement("a");a.href=row[c];a.target="_blank";a.rel="noopener";a.textContent="@"+row["账号"];td.appendChild(a);}
     else if(c==="最高观看短剧"){td.className="name";td.textContent=row[c];}
     else td.textContent=row[c];
