@@ -113,6 +113,15 @@ DRAMA_ID_KEYS = ("dramaID", "dramaId", "drama_id", "id")
 DRAMA_NAME_KEYS = ("dramaName", "drama_name", "name", "title")
 DRAMA_COUNT_KEYS = ("numVideos", "num_videos", "videoCount", "video_count", "episodeCount", "episode_count")
 DRAMA_VIEW_KEYS = ("numWatched", "num_watched", "play_count", "playCount", "view_count", "viewCount")
+DRAMA_EN_TITLE_KEYS = ("englishTitle", "english_title", "enTitle", "titleEn", "title_en", "dramaName", "drama_name", "name", "title")
+DRAMA_CN_TITLE_KEYS = ("chineseTitle", "chinese_title", "cnTitle", "titleCn", "title_cn", "zhTitle", "title_zh")
+DRAMA_DURATION_SECONDS_KEYS = ("durationSeconds", "duration_seconds", "durationSec", "duration_sec", "duration", "totalDuration", "total_duration")
+DRAMA_DURATION_MINUTES_KEYS = ("durationMinutes", "duration_minutes", "durationMin", "duration_min")
+DRAMA_LIMITED_KEYS = ("limitedFree", "limited_free", "isLimitedFree", "is_limited_free", "isFree", "is_free", "free")
+DRAMA_EN_THEMES_KEYS = ("englishThemes", "english_themes", "enThemes", "themesEn", "theme_en", "themes", "theme", "tags")
+DRAMA_CN_THEMES_KEYS = ("chineseThemes", "chinese_themes", "cnThemes", "themesCn", "theme_cn", "zhThemes", "theme_zh")
+DRAMA_EN_DESC_KEYS = ("englishDescription", "english_description", "enDescription", "descriptionEn", "descEn", "description", "desc")
+DRAMA_CN_DESC_KEYS = ("chineseDescription", "chinese_description", "cnDescription", "descriptionCn", "descCn")
 FOLLOWER_KEYS = ("followerCount", "follower_count", "fans_count", "total_follower", "followers")
 HEART_KEYS = ("heartCount", "heart_count", "total_favorited", "favoriting_count", "likes")
 NICK_KEYS = ("nickname", "nick_name", "nick")
@@ -120,7 +129,13 @@ VCOUNT_KEYS = ("videoCount", "aweme_count", "video_count")
 SECUID_KEYS = ("secUid", "sec_uid", "sec_user_id", "secUserId")
 SUMMARY_COLUMNS = ["截图名称", "账号", "昵称", "粉丝", "点赞", "短剧数", "总集数", "累计观看",
                    "单剧均观看", "最高观看短剧", "最高观看", "主页链接"]
-DRAMA_COLUMNS = ["账号", "昵称", "短剧名", "集数", "累计观看", "单集均观看", "主页链接"]
+DRAMA_COLUMNS = ["Account / 账号", "Nickname / 昵称", "Screenshot Name / 截图名称", "Rank in Account / 账号内排序",
+                 "Drama ID / 短剧ID", "English Title / 英文剧名", "Chinese Title / 中文剧名",
+                 "Episodes / 集数", "Views / 观看数", "Duration Seconds / 总时长(秒)",
+                 "Duration Minutes / 总时长(分钟)", "Limited Free / 是否限免",
+                 "English Themes / 英文题材", "Chinese Themes / 中文题材",
+                 "English Description Preview / 英文简介预览", "Chinese Description / 中文简介",
+                 "Description Truncated / 简介是否截断", "Source Profile URL / 来源主页"]
 
 JOB_LOCK = threading.Lock()
 LAST_JOB = {"running": False, "started_at": None, "finished_at": None, "result": None, "error": None}
@@ -206,6 +221,45 @@ def _to_int(value):
         return 0
 
 
+def _to_text(value, limit=None):
+    if value is None:
+        text = ""
+    elif isinstance(value, bool):
+        text = "Yes" if value else "No"
+    elif isinstance(value, (list, tuple, set)):
+        parts = [_to_text(item) for item in value]
+        text = "; ".join(part for part in parts if part)
+    elif isinstance(value, dict):
+        text = json.dumps(value, ensure_ascii=False)
+    else:
+        text = str(value)
+    text = re.sub(r"\s+", " ", text).strip()
+    if limit and len(text) > limit:
+        return text[:limit].rstrip()
+    return text
+
+
+def _yes_no(value):
+    if value is None or value == "":
+        return ""
+    if isinstance(value, bool):
+        return "是 / Yes" if value else "否 / No"
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "y", "free", "limited"):
+        return "是 / Yes"
+    if text in ("0", "false", "no", "n", "none"):
+        return "否 / No"
+    return _to_text(value, 30)
+
+
+def _duration_minutes(seconds, explicit_minutes=None):
+    minutes = _to_int(explicit_minutes)
+    if minutes:
+        return round(minutes, 1)
+    sec = _to_int(seconds)
+    return round(sec / 60, 1) if sec else 0
+
+
 def _deep_find(obj, keys, depth=0):
     if depth > 9 or obj is None:
         return None
@@ -221,6 +275,26 @@ def _deep_find(obj, keys, depth=0):
                 return obj[key]
         for item in obj.values():
             found = _deep_find(item, keys, depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def _deep_find_any(obj, keys, depth=0):
+    if depth > 9 or obj is None:
+        return None
+    if isinstance(obj, list):
+        for item in obj:
+            found = _deep_find_any(item, keys, depth + 1)
+            if found is not None:
+                return found
+        return None
+    if isinstance(obj, dict):
+        for key in keys:
+            if key in obj:
+                return obj[key]
+        for item in obj.values():
+            found = _deep_find_any(item, keys, depth + 1)
             if found is not None:
                 return found
     return None
@@ -636,10 +710,28 @@ def _get_tiktok_drama_library(secuid, uid):
             if key in seen:
                 continue
             seen.add(key)
+            episodes = _to_int(_deep_find(item, DRAMA_COUNT_KEYS))
+            views = _to_int(_deep_find(item, DRAMA_VIEW_KEYS))
+            duration_seconds = _to_int(_deep_find(item, DRAMA_DURATION_SECONDS_KEYS))
+            english_title = _to_text(_deep_find(item, DRAMA_EN_TITLE_KEYS) or name, 160)
+            chinese_title = _to_text(_deep_find(item, DRAMA_CN_TITLE_KEYS), 160)
+            english_desc = _to_text(_deep_find_any(item, DRAMA_EN_DESC_KEYS), 600)
+            chinese_desc = _to_text(_deep_find_any(item, DRAMA_CN_DESC_KEYS), 600)
             dramas.append({
                 "name": (_clean_title(name)[:80].strip() or name[:80] or key),
-                "episodes": _to_int(_deep_find(item, DRAMA_COUNT_KEYS)),
-                "views": _to_int(_deep_find(item, DRAMA_VIEW_KEYS)),
+                "episodes": episodes,
+                "views": views,
+                "drama_id": ("ID " + drama_key) if drama_key and not drama_key.upper().startswith("ID ") else drama_key,
+                "english_title": english_title,
+                "chinese_title": chinese_title,
+                "duration_seconds": duration_seconds,
+                "duration_minutes": _duration_minutes(duration_seconds, _deep_find(item, DRAMA_DURATION_MINUTES_KEYS)),
+                "limited_free": _yes_no(_deep_find(item, DRAMA_LIMITED_KEYS)),
+                "english_themes": _to_text(_deep_find_any(item, DRAMA_EN_THEMES_KEYS), 220),
+                "chinese_themes": _to_text(_deep_find_any(item, DRAMA_CN_THEMES_KEYS), 220),
+                "english_description": english_desc,
+                "chinese_description": chinese_desc,
+                "description_truncated": "是 / Yes" if len(english_desc) >= 600 or len(chinese_desc) >= 600 else "否 / No",
             })
             added += 1
             if SCHEDULE_MAX_DRAMAS and len(dramas) >= SCHEDULE_MAX_DRAMAS:
@@ -753,15 +845,38 @@ def _scrape_account(uid):
         dramas = _group_by_title(videos)
     summary = _build_summary_row(uid, profile, videos, dramas)
     drama_rows = []
-    for drama in dramas:
+    for rank, drama in enumerate(dramas, 1):
+        episodes = _to_int(drama.get("episodes"))
+        views = _to_int(drama.get("views"))
+        avg_views = round(views / episodes) if episodes else 0
+        title = drama.get("english_title") or drama.get("name") or ""
+        profile_url = "https://www.tiktok.com/@" + uid
         drama_rows.append({
+            "Account / 账号": uid,
+            "Nickname / 昵称": profile["nickname"],
+            "Screenshot Name / 截图名称": profile["nickname"],
+            "Rank in Account / 账号内排序": rank,
+            "Drama ID / 短剧ID": drama.get("drama_id", ""),
+            "English Title / 英文剧名": title,
+            "Chinese Title / 中文剧名": drama.get("chinese_title", ""),
+            "Episodes / 集数": episodes,
+            "Views / 观看数": views,
+            "Duration Seconds / 总时长(秒)": _to_int(drama.get("duration_seconds")),
+            "Duration Minutes / 总时长(分钟)": drama.get("duration_minutes", 0),
+            "Limited Free / 是否限免": drama.get("limited_free", ""),
+            "English Themes / 英文题材": drama.get("english_themes", ""),
+            "Chinese Themes / 中文题材": drama.get("chinese_themes", ""),
+            "English Description Preview / 英文简介预览": drama.get("english_description", ""),
+            "Chinese Description / 中文简介": drama.get("chinese_description", ""),
+            "Description Truncated / 简介是否截断": drama.get("description_truncated", ""),
+            "Source Profile URL / 来源主页": profile_url,
             "账号": uid,
             "昵称": profile["nickname"],
-            "短剧名": drama["name"],
-            "集数": drama["episodes"],
-            "累计观看": drama["views"],
-            "单集均观看": round(drama["views"] / drama["episodes"]) if drama["episodes"] else 0,
-            "主页链接": "https://www.tiktok.com/@" + uid,
+            "短剧名": title,
+            "集数": episodes,
+            "累计观看": views,
+            "单集均观看": avg_views,
+            "主页链接": profile_url,
         })
     return summary, drama_rows
 

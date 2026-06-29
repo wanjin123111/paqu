@@ -117,6 +117,14 @@
   .result-sum{font-size:13px;color:var(--ink-soft)}
   .result-sum b{color:var(--ink);font-family:var(--mono)}
   .exports{display:flex;gap:9px}
+  .result-viewbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 12px}
+  .result-tabs{display:flex;gap:6px;padding:4px;background:var(--paper);border:1px solid var(--line);border-radius:10px}
+  .tab-btn{border:0;background:transparent;border-radius:7px;padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer}
+  .tab-btn.active{background:var(--card);color:var(--accent);box-shadow:0 1px 2px rgba(20,22,29,.07)}
+  .detail-nav{display:none;align-items:center;gap:8px;flex-wrap:wrap}
+  .detail-nav.show{display:flex}
+  .detail-select{min-width:220px;max-width:360px;border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .detail-count{font-size:12px;color:var(--ink-faint)}
   .mini-btn{border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:500;color:var(--ink);cursor:pointer;display:flex;align-items:center;gap:6px}
   .mini-btn:hover{border-color:var(--accent);color:var(--accent)}
   .table-scroll{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:560px}
@@ -130,6 +138,9 @@
   td.account-cell{white-space:normal}
   .account-nick{font-weight:600;color:var(--ink);line-height:1.35;word-break:break-word}
   .account-id{display:inline-block;margin-top:3px;font-family:var(--mono);font-size:11.5px;color:var(--accent);word-break:break-all}
+  td.detail-title{white-space:normal;min-width:220px;line-height:1.35}
+  td.detail-text{white-space:normal;min-width:180px;line-height:1.38;color:var(--ink-soft)}
+  td.detail-id{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);word-break:break-all}
   .row-err td{background:var(--err-soft)}
   body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin-left:50%;transform:translateX(-50%)}
   body.public-mode #resultCard .card-body{padding:18px 22px 22px}
@@ -147,6 +158,20 @@
   body.public-mode #resultCard th:nth-child(9),body.public-mode #resultCard td:nth-child(9){width:118px}
   body.public-mode #resultCard th:nth-child(8),body.public-mode #resultCard td:nth-child(8){width:auto}
   body.public-mode #resultCard th:nth-child(10),body.public-mode #resultCard td:nth-child(10){width:150px}
+  body.public-mode #resultCard.detail-view td.detail-title,
+  body.public-mode #resultCard.detail-view td.detail-text{min-width:0}
+  body.public-mode #resultCard.detail-view th:nth-child(1),body.public-mode #resultCard.detail-view td:nth-child(1){width:170px}
+  body.public-mode #resultCard.detail-view th:nth-child(2),body.public-mode #resultCard.detail-view td:nth-child(2),
+  body.public-mode #resultCard.detail-view th:nth-child(6),body.public-mode #resultCard.detail-view td:nth-child(6),
+  body.public-mode #resultCard.detail-view th:nth-child(8),body.public-mode #resultCard.detail-view td:nth-child(8),
+  body.public-mode #resultCard.detail-view th:nth-child(9),body.public-mode #resultCard.detail-view td:nth-child(9){width:78px}
+  body.public-mode #resultCard.detail-view th:nth-child(3),body.public-mode #resultCard.detail-view td:nth-child(3){width:138px}
+  body.public-mode #resultCard.detail-view th:nth-child(4),body.public-mode #resultCard.detail-view td:nth-child(4),
+  body.public-mode #resultCard.detail-view th:nth-child(5),body.public-mode #resultCard.detail-view td:nth-child(5){width:190px}
+  body.public-mode #resultCard.detail-view th:nth-child(7),body.public-mode #resultCard.detail-view td:nth-child(7){width:105px}
+  body.public-mode #resultCard.detail-view th:nth-child(10),body.public-mode #resultCard.detail-view td:nth-child(10){width:120px}
+  body.public-mode #resultCard.detail-view th:nth-child(11),body.public-mode #resultCard.detail-view td:nth-child(11){width:auto}
+  body.public-mode #resultCard.detail-view th:nth-child(12),body.public-mode #resultCard.detail-view td:nth-child(12){width:135px}
 
   .foot-note{font-size:12px;color:var(--ink-faint);line-height:1.6;padding:0 4px}
 
@@ -394,6 +419,18 @@ shortdramatime"></textarea>
           <button class="mini-btn" id="docBtn" type="button">导出 Word</button>
         </div>
       </div>
+      <div class="result-viewbar">
+        <div class="result-tabs" role="tablist" aria-label="报表视图">
+          <button class="tab-btn active" id="summaryTabBtn" type="button" data-view="summary">账号汇总</button>
+          <button class="tab-btn" id="detailTabBtn" type="button" data-view="detail">账号明细</button>
+        </div>
+        <div class="detail-nav" id="detailNav">
+          <button class="mini-btn" id="detailPrevBtn" type="button">上一账号</button>
+          <select class="detail-select" id="detailAccountSelect" aria-label="选择账号"></select>
+          <button class="mini-btn" id="detailNextBtn" type="button">下一账号</button>
+          <span class="detail-count" id="detailCount"></span>
+        </div>
+      </div>
       <div class="table-scroll">
         <table id="resultTable"><thead></thead><tbody></tbody></table>
       </div>
@@ -462,6 +499,7 @@ const SECUID_KEYS=["secUid","sec_uid","sec_user_id","secUserId"];
 
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
+const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","账号内排名","短剧ID","英文剧名","中文剧名","集数","观看","时长","限免","题材","简介","主页链接"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
 
@@ -470,6 +508,8 @@ const state={ apiKey:store.get("thr_key")||"", host:store.get("thr_host")||"http
 let cfg={};                 // 运行时从设置读取
 let rows=[];                // 结果行(账号汇总)
 let dramaRows=[];           // 全部短剧明细(用于 All Drama List / Top Dramas 两个表)
+let resultView="summary";
+let detailAccountIndex=0;
 let running=false, cancelled=false;
 let corsShown=false;
 
@@ -779,7 +819,8 @@ async function scrapeAccount(acc,log){
   }else dramas=groupByTitle(videos);
   const row=buildRow(acc,prof,videos,dramas);
   addRow(row);
-  for(const d of dramas){dramaRows.push({"账号":acc,"昵称":prof.nickname,"短剧名":d.name,"集数":d.episodes,"累计观看":d.views,"单集均观看":d.episodes?Math.round(d.views/d.episodes):0,"主页链接":"https://www.tiktok.com/@"+acc});}
+  for(const [idx,d] of dramas.entries()){dramaRows.push({"账号":acc,"昵称":prof.nickname,"短剧名":d.name,"Rank in Account / 账号内排序":idx+1,"English Title / 英文剧名":d.name,"Episodes / 集数":d.episodes,"Views / 观看数":d.views,"集数":d.episodes,"累计观看":d.views,"单集均观看":d.episodes?Math.round(d.views/d.episodes):0,"主页链接":"https://www.tiktok.com/@"+acc,"Source Profile URL / 来源主页":"https://www.tiktok.com/@"+acc});}
+  renderResultTable();
   log("完成 → 短剧 "+row.短剧数+" 总集 "+row.总集数+" 累计观看 "+fmt(row.累计观看)+" 最高《"+row.最高观看短剧.slice(0,20)+"》"+fmt(row.最高观看),"c-ok");
 }
 
@@ -791,43 +832,169 @@ function log(t,cls){const d=document.createElement("div");d.className="ln"+(cls?
 function setProgress(done,total){$("pcount").textContent=done+" / "+total;$("pbarFill").style.width=(total?Math.round(done/total*100):0)+"%";$("runSub").textContent="抓取中 "+done+"/"+total;}
 
 /* ---------- 结果表 ---------- */
-function clearResults(){$("resultCard").style.display="none";$("resultTable").querySelector("thead").innerHTML="";$("resultTable").querySelector("tbody").innerHTML="";$("resultSum").textContent="";}
-function ensureHeader(){
+function clearResults(){
+  $("resultCard").style.display="none";
+  $("resultTable").querySelector("thead").innerHTML="";
+  $("resultTable").querySelector("tbody").innerHTML="";
+  $("resultSum").textContent="";
+  if($("detailAccountSelect"))$("detailAccountSelect").innerHTML="";
+  if($("detailCount"))$("detailCount").textContent="";
+}
+function valueOf(row,keys,fallback){
+  for(const k of keys){if(row&&row[k]!=null&&row[k]!=="")return row[k];}
+  return fallback==null?"":fallback;
+}
+function accountOf(row){return valueOf(row,["账号","Account / 账号"],"");}
+function nickOf(row){return valueOf(row,["昵称","Nickname / 昵称"],accountOf(row));}
+function linkOf(row){const acc=accountOf(row);return valueOf(row,["主页链接","Source Profile URL / 来源主页"],acc?("https://www.tiktok.com/@"+acc):"");}
+function dramaTitleOf(row){return valueOf(row,["English Title / 英文剧名","短剧名"],"");}
+function dramaViewsOf(row){return toInt(valueOf(row,["Views / 观看数","累计观看"],0));}
+function dramaEpisodesOf(row){return toInt(valueOf(row,["Episodes / 集数","集数"],0));}
+function dramaRankOf(row,index){return toInt(valueOf(row,["Rank in Account / 账号内排序"],index+1));}
+function setHeader(columns){
   const thead=$("resultTable").querySelector("thead");
-  if(thead.children.length)return;
+  thead.innerHTML="";
   const tr=document.createElement("tr");
-  for(const c of DISPLAY_COLUMNS){const th=document.createElement("th");th.textContent=c;tr.appendChild(th);}
+  for(const c of columns){const th=document.createElement("th");th.textContent=c;tr.appendChild(th);}
   thead.appendChild(tr);
 }
-function addRow(row){
-  $("resultCard").style.display="block";
-  ensureHeader();
-  const tb=$("resultTable").querySelector("tbody");
-  const tr=document.createElement("tr");
-  for(const c of DISPLAY_COLUMNS){
-    const td=document.createElement("td");
-    if(c==="账号 / 昵称"){
-      td.className="account-cell";
-      const nick=document.createElement("div");
-      nick.className="account-nick";
-      nick.textContent=row["昵称"]||row["账号"]||"";
-      const a=document.createElement("a");
-      a.className="account-id";
-      a.href=row["主页链接"]||("https://www.tiktok.com/@"+row["账号"]);
-      a.target="_blank";
-      a.rel="noopener";
-      a.textContent="@"+(row["账号"]||"");
-      td.appendChild(nick);
-      td.appendChild(a);
-    }
-    else if(NUM_COLS.has(c)){td.className="num";td.textContent=VIEW_COLS.has(c)?fmtPlay(row[c]):fmt(row[c]);}
-    else if(c==="主页链接"){td.className="link";const a=document.createElement("a");a.href=row[c];a.target="_blank";a.rel="noopener";a.textContent="@"+row["账号"];td.appendChild(a);}
-    else if(c==="最高观看短剧"){td.className="name";td.textContent=row[c];}
-    else td.textContent=row[c];
-    tr.appendChild(td);
+function appendAccountCell(td,row){
+  td.className="account-cell";
+  const nick=document.createElement("div");
+  nick.className="account-nick";
+  nick.textContent=nickOf(row)||accountOf(row);
+  const acc=accountOf(row);
+  const a=document.createElement("a");
+  a.className="account-id";
+  a.href=linkOf(row);
+  a.target="_blank";
+  a.rel="noopener";
+  a.textContent=acc?("@"+acc):"";
+  td.appendChild(nick);
+  if(acc)td.appendChild(a);
+}
+function appendSummaryCell(tr,c,row){
+  const td=document.createElement("td");
+  if(c==="账号 / 昵称")appendAccountCell(td,row);
+  else if(NUM_COLS.has(c)){td.className="num";td.textContent=VIEW_COLS.has(c)?fmtPlay(row[c]):fmt(row[c]);}
+  else if(c==="主页链接"){
+    td.className="link";
+    const a=document.createElement("a");
+    a.href=linkOf(row);
+    a.target="_blank";
+    a.rel="noopener";
+    a.textContent="@"+accountOf(row);
+    td.appendChild(a);
+  }else if(c==="最高观看短剧"){td.className="name";td.textContent=row[c]||"";}
+  else td.textContent=row[c]||"";
+  tr.appendChild(td);
+}
+function appendDetailCell(tr,c,row,index){
+  const td=document.createElement("td");
+  if(c==="账号 / 昵称")appendAccountCell(td,row);
+  else if(c==="账号内排名"){td.className="num";td.textContent=fmt(dramaRankOf(row,index));}
+  else if(c==="短剧ID"){td.className="detail-id";td.textContent=valueOf(row,["Drama ID / 短剧ID"],"");}
+  else if(c==="英文剧名"){td.className="detail-title";td.textContent=dramaTitleOf(row);}
+  else if(c==="中文剧名"){td.className="detail-title";td.textContent=valueOf(row,["Chinese Title / 中文剧名"],"");}
+  else if(c==="集数"){td.className="num";td.textContent=fmt(dramaEpisodesOf(row));}
+  else if(c==="观看"){td.className="num";td.textContent=fmtPlay(dramaViewsOf(row));}
+  else if(c==="时长"){
+    const seconds=toInt(valueOf(row,["Duration Seconds / 总时长(秒)"],0));
+    const minutes=valueOf(row,["Duration Minutes / 总时长(分钟)"],"");
+    td.className="num";
+    td.textContent=(seconds?fmt(seconds)+"秒":"")+(seconds&&minutes?" / ":"")+(minutes?minutes+"分钟":"");
+  }else if(c==="限免")td.textContent=valueOf(row,["Limited Free / 是否限免"],"");
+  else if(c==="题材"){
+    td.className="detail-text";
+    const en=valueOf(row,["English Themes / 英文题材"],"");
+    const cn=valueOf(row,["Chinese Themes / 中文题材"],"");
+    td.textContent=[en,cn].filter(Boolean).join(" / ");
+  }else if(c==="简介"){
+    td.className="detail-text";
+    td.textContent=valueOf(row,["English Description Preview / 英文简介预览","Chinese Description / 中文简介"],"");
+  }else if(c==="主页链接"){
+    td.className="link";
+    const a=document.createElement("a");
+    a.href=linkOf(row);
+    a.target="_blank";
+    a.rel="noopener";
+    a.textContent="@"+accountOf(row);
+    td.appendChild(a);
   }
-  tb.appendChild(tr);
+  tr.appendChild(td);
+}
+function detailAccounts(){
+  const seen=new Set(), out=[];
+  for(const row of [...rows,...dramaRows]){
+    const acc=accountOf(row);
+    if(!acc||seen.has(acc))continue;
+    seen.add(acc);
+    out.push({account:acc,nick:nickOf(row)});
+  }
+  return out;
+}
+function updateDetailControls(list){
+  const nav=$("detailNav"), sel=$("detailAccountSelect"), count=$("detailCount");
+  if(!nav||!sel||!count)return list;
+  nav.classList.toggle("show",resultView==="detail");
+  if(resultView!=="detail")return list;
+  if(detailAccountIndex>=list.length)detailAccountIndex=0;
+  sel.innerHTML="";
+  list.forEach((item,i)=>{
+    const opt=document.createElement("option");
+    opt.value=String(i);
+    const total=dramaRows.filter(row=>accountOf(row)===item.account).length;
+    opt.textContent=(item.nick||item.account)+" (@"+item.account+") · "+total+" 部";
+    sel.appendChild(opt);
+  });
+  sel.value=String(detailAccountIndex);
+  const current=list[detailAccountIndex];
+  const total=current?dramaRows.filter(row=>accountOf(row)===current.account).length:0;
+  count.textContent=current?("第 "+(detailAccountIndex+1)+"/"+list.length+" 个账号 · "+total+" 部短剧"):"暂无账号明细";
+  return list;
+}
+function renderResultTable(){
+  const card=$("resultCard");
+  const tb=$("resultTable").querySelector("tbody");
+  card.style.display=(rows.length||dramaRows.length)?"block":"none";
+  card.classList.toggle("detail-view",resultView==="detail");
+  card.classList.toggle("summary-view",resultView!=="detail");
+  $("summaryTabBtn").classList.toggle("active",resultView==="summary");
+  $("detailTabBtn").classList.toggle("active",resultView==="detail");
+  tb.innerHTML="";
+  const list=updateDetailControls(detailAccounts());
+  if(resultView==="detail"){
+    setHeader(DRAMA_DETAIL_COLUMNS);
+    const current=list[detailAccountIndex];
+    let details=current?dramaRows.filter(row=>accountOf(row)===current.account):dramaRows;
+    details=[...details].sort((a,b)=>dramaRankOf(a,9999)-dramaRankOf(b,9999));
+    if(!details.length){
+      const tr=document.createElement("tr");
+      const td=document.createElement("td");
+      td.colSpan=DRAMA_DETAIL_COLUMNS.length;
+      td.className="detail-text";
+      td.textContent="这个账号暂时没有短剧明细。";
+      tr.appendChild(td);
+      tb.appendChild(tr);
+      return;
+    }
+    details.forEach((row,i)=>{
+      const tr=document.createElement("tr");
+      for(const c of DRAMA_DETAIL_COLUMNS)appendDetailCell(tr,c,row,i);
+      tb.appendChild(tr);
+    });
+    return;
+  }
+  setHeader(DISPLAY_COLUMNS);
+  for(const row of rows){
+    const tr=document.createElement("tr");
+    for(const c of DISPLAY_COLUMNS)appendSummaryCell(tr,c,row);
+    tb.appendChild(tr);
+  }
+}
+function addRow(row){
   rows.push(row);
+  renderResultTable();
 }
 function updateSummary(failed, dataTime){
   let s=dataTime?("数据时间:<b>"+esc(dataTime)+"</b> · "):"";
@@ -845,19 +1012,49 @@ function exportCSV(){
   downloadBlob(new Blob(["\ufeff"+head+"\n"+body],{type:"text/csv;charset=utf-8"}),"tikhub_report.csv");
   toast("已导出 CSV");
 }
-const DRAMA_COLS=["账号","昵称","短剧名","集数","累计观看","单集均观看","主页链接"];
+const DRAMA_COLS=["Account / 账号","Nickname / 昵称","Screenshot Name / 截图名称","Rank in Account / 账号内排序","Drama ID / 短剧ID","English Title / 英文剧名","Chinese Title / 中文剧名","Episodes / 集数","Views / 观看数","Duration Seconds / 总时长(秒)","Duration Minutes / 总时长(分钟)","Limited Free / 是否限免","English Themes / 英文题材","Chinese Themes / 中文题材","English Description Preview / 英文简介预览","Chinese Description / 中文简介","Description Truncated / 简介是否截断","Source Profile URL / 来源主页"];
 const TOP_COLS=["排名","短剧名","账号","昵称","累计观看","集数","单集均观看"];
+function normalizeDramaRow(d,index){
+  const episodes=dramaEpisodesOf(d);
+  const views=dramaViewsOf(d);
+  const enDesc=valueOf(d,["English Description Preview / 英文简介预览"],"");
+  const cnDesc=valueOf(d,["Chinese Description / 中文简介"],"");
+  return {
+    "Account / 账号":accountOf(d),
+    "Nickname / 昵称":nickOf(d),
+    "Screenshot Name / 截图名称":valueOf(d,["Screenshot Name / 截图名称","截图名称"],nickOf(d)),
+    "Rank in Account / 账号内排序":dramaRankOf(d,index),
+    "Drama ID / 短剧ID":valueOf(d,["Drama ID / 短剧ID"],""),
+    "English Title / 英文剧名":dramaTitleOf(d),
+    "Chinese Title / 中文剧名":valueOf(d,["Chinese Title / 中文剧名"],""),
+    "Episodes / 集数":episodes,
+    "Views / 观看数":views,
+    "Duration Seconds / 总时长(秒)":valueOf(d,["Duration Seconds / 总时长(秒)"],""),
+    "Duration Minutes / 总时长(分钟)":valueOf(d,["Duration Minutes / 总时长(分钟)"],""),
+    "Limited Free / 是否限免":valueOf(d,["Limited Free / 是否限免"],""),
+    "English Themes / 英文题材":valueOf(d,["English Themes / 英文题材"],""),
+    "Chinese Themes / 中文题材":valueOf(d,["Chinese Themes / 中文题材"],""),
+    "English Description Preview / 英文简介预览":enDesc,
+    "Chinese Description / 中文简介":cnDesc,
+    "Description Truncated / 简介是否截断":valueOf(d,["Description Truncated / 简介是否截断"],(enDesc.length>=600||cnDesc.length>=600)?"是 / Yes":""),
+    "Source Profile URL / 来源主页":linkOf(d),
+  };
+}
 function topDramas(limit){
-  return [...dramaRows].sort((a,b)=>b["累计观看"]-a["累计观看"]).slice(0,limit)
-    .map((d,i)=>({"排名":i+1,"短剧名":d["短剧名"],"账号":d["账号"],"昵称":d["昵称"],"累计观看":d["累计观看"],"集数":d["集数"],"单集均观看":d["单集均观看"]}));
+  return [...dramaRows].sort((a,b)=>dramaViewsOf(b)-dramaViewsOf(a)).slice(0,limit)
+    .map((d,i)=>{
+      const episodes=dramaEpisodesOf(d), views=dramaViewsOf(d);
+      return {"排名":i+1,"短剧名":dramaTitleOf(d),"账号":accountOf(d),"昵称":nickOf(d),"累计观看":views,"集数":episodes,"单集均观看":valueOf(d,["单集均观看"],episodes?Math.round(views/episodes):0)};
+    });
 }
 function buildWorkbook(){
   const wb=XLSX.utils.book_new();
   const ws1=XLSX.utils.json_to_sheet(rows,{header:COLUMNS});
   ws1["!cols"]=[{wch:16},{wch:20},{wch:16},{wch:11},{wch:12},{wch:8},{wch:9},{wch:14},{wch:12},{wch:32},{wch:13},{wch:40}];
   XLSX.utils.book_append_sheet(wb,ws1,"Account Summary");
-  const ws2=XLSX.utils.json_to_sheet(dramaRows.length?dramaRows:[Object.fromEntries(DRAMA_COLS.map(c=>[c,""]))],{header:DRAMA_COLS});
-  ws2["!cols"]=[{wch:20},{wch:18},{wch:36},{wch:7},{wch:14},{wch:12},{wch:40}];
+  const normalizedDramas=dramaRows.map((d,i)=>normalizeDramaRow(d,i));
+  const ws2=XLSX.utils.json_to_sheet(normalizedDramas.length?normalizedDramas:[Object.fromEntries(DRAMA_COLS.map(c=>[c,""]))],{header:DRAMA_COLS});
+  ws2["!cols"]=[{wch:20},{wch:18},{wch:20},{wch:10},{wch:22},{wch:36},{wch:28},{wch:9},{wch:14},{wch:12},{wch:13},{wch:12},{wch:22},{wch:22},{wch:48},{wch:48},{wch:14},{wch:42}];
   XLSX.utils.book_append_sheet(wb,ws2,"All Drama List");
   const top=topDramas(200);
   const ws3=XLSX.utils.json_to_sheet(top.length?top:[Object.fromEntries(TOP_COLS.map(c=>[c,""]))],{header:TOP_COLS});
@@ -944,6 +1141,7 @@ function loadBackendPayload(payload){
   const dramas=payload.dramas_detail||[];
   for(const row of summary)addRow(row);
   dramaRows=dramas;
+  renderResultTable();
   const failed=(payload.errors||[]).map(e=>e.account||e.error||"未知");
   const dataTime=reportTimeLabel(payload.generated_at);
   updateSummary(failed, dataTime);
@@ -1214,6 +1412,7 @@ function exportWord(){
     return h+"</table>";
   };
   const top=topDramas(200);
+  const normalizedDramas=dramaRows.map((d,i)=>normalizeDramaRow(d,i));
   const doc=
     "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>"+
     "<head><meta charset='utf-8'><title>TikHub 短剧报表</title>"+
@@ -1223,7 +1422,7 @@ function exportWord(){
     "<p style='color:#64748b;font-size:9pt'>账号 "+rows.length+" 个 · 短剧 "+dramaRows.length+" 部 · 生成于 "+e(new Date().toLocaleString())+"</p>"+
     "<h2>① 账号汇总 / Account Summary</h2>"+table(COLUMNS,rows)+
     "<h2>② 热门短剧榜 / Top Dramas（前 200）</h2>"+table(TOP_COLS,top)+
-    "<h2>③ 全部短剧明细 / All Drama List</h2>"+table(DRAMA_COLS,dramaRows)+
+    "<h2>③ 全部短剧明细 / All Drama List</h2>"+table(DRAMA_COLS,normalizedDramas)+
     "</body></html>";
   downloadBlob(new Blob(["\ufeff"+doc],{type:"application/msword"}),"tikhub_report.doc");
   toast("已导出 Word");
@@ -1330,6 +1529,24 @@ function init(){
     document.addEventListener("click",closeHistoryMenu);
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeHistoryMenu();});
   }
+  $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
+  $("detailTabBtn").addEventListener("click",()=>{resultView="detail";renderResultTable();});
+  $("detailAccountSelect").addEventListener("change",()=>{
+    detailAccountIndex=Number($("detailAccountSelect").value)||0;
+    renderResultTable();
+  });
+  $("detailPrevBtn").addEventListener("click",()=>{
+    const list=detailAccounts();
+    if(!list.length)return;
+    detailAccountIndex=(detailAccountIndex+list.length-1)%list.length;
+    renderResultTable();
+  });
+  $("detailNextBtn").addEventListener("click",()=>{
+    const list=detailAccounts();
+    if(!list.length)return;
+    detailAccountIndex=(detailAccountIndex+1)%list.length;
+    renderResultTable();
+  });
   $("schedEnabled").addEventListener("change",()=>{store.set("thr_sched_on",$("schedEnabled").checked?"1":"0");if($("schedEnabled").checked){toast("已开启每天定时");$("schedDetails").open=true;}refreshSchedUI();});
   $("schedTime").addEventListener("change",()=>{store.set("thr_sched_time",$("schedTime").value||"08:00");refreshSchedUI();});
   $("schedNowBtn").addEventListener("click",()=>runScheduled(true));
