@@ -863,7 +863,21 @@ function accountOf(row){return valueOf(row,["账号","Account / 账号"],"");}
 function nickOf(row){return valueOf(row,["昵称","Nickname / 昵称"],accountOf(row));}
 function linkOf(row){const acc=accountOf(row);return valueOf(row,["主页链接","Source Profile URL / 来源主页"],acc?("https://www.tiktok.com/@"+acc):"");}
 function dramaTitleOf(row){return valueOf(row,["English Title / 英文剧名","短剧名"],"");}
-const titleTranslationCache=new Map();
+function readJsonStore(key){
+  try{
+    const value=store.get(key);
+    return value?JSON.parse(value):{};
+  }catch(_){
+    return {};
+  }
+}
+function saveMapStore(key,map,limit){
+  try{
+    const entries=Array.from(map.entries()).filter(([,value])=>value).slice(-limit);
+    store.set(key,JSON.stringify(Object.fromEntries(entries)));
+  }catch(_){}
+}
+const titleTranslationCache=new Map(Object.entries(readJsonStore("thr_title_translation_cache")));
 let titleHydrateRun=0;
 function chineseTitleOf(row){
   const direct=valueOf(row,["Chinese Title / 中文剧名","中文剧名"],"");
@@ -898,7 +912,7 @@ const THEME_CN_MAP={
   "Pregnancy":"孕育",
   "Secret Identity":"隐藏身份"
 };
-const themeLabelCache=new Map(Object.entries(THEME_CN_MAP));
+const themeLabelCache=new Map([...Object.entries(THEME_CN_MAP),...Object.entries(readJsonStore("thr_theme_translation_cache"))]);
 let themeHydrateRun=0;
 function cleanThemeLabel(value){
   let text=String(value==null?"":value).trim();
@@ -991,6 +1005,7 @@ async function hydrateThemeLabels(targetRows){
     if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
     const translations=(data&&data.translations)||{};
     for(const label of labels)if(translations[label])themeLabelCache.set(label,translations[label]);
+    saveMapStore("thr_theme_translation_cache",themeLabelCache,800);
     if(run===themeHydrateRun)renderResultTable();
   }catch(_){}
 }
@@ -1019,6 +1034,7 @@ async function hydrateChineseTitles(targetRows){
     if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
     const translations=(data&&data.translations)||{};
     for(const title of missing)titleTranslationCache.set(title,translations[title]||"");
+    saveMapStore("thr_title_translation_cache",titleTranslationCache,1500);
     for(const row of list){
       if(valueOf(row,["Chinese Title / 中文剧名","中文剧名"],""))continue;
       const cn=titleTranslationCache.get(dramaTitleOf(row));
@@ -1354,12 +1370,11 @@ function reportTimeLabel(value){
     pad2(bj.getUTCHours())+":"+pad2(bj.getUTCMinutes())+":"+pad2(bj.getUTCSeconds())+" 北京时间";
 }
 function loadBackendPayload(payload){
-  rows=[];dramaRows=[];
   clearResults();
-  const summary=payload.summary||[];
-  const dramas=payload.dramas_detail||[];
-  for(const row of summary)addRow(row);
-  dramaRows=dramas;
+  const summary=Array.isArray(payload.summary)?payload.summary:[];
+  const dramas=Array.isArray(payload.dramas_detail)?payload.dramas_detail:[];
+  rows=[...summary];
+  dramaRows=[...dramas];
   renderResultTable();
   const failed=(payload.errors||[]).map(e=>e.account||e.error||"未知");
   const dataTime=reportTimeLabel(payload.generated_at);
