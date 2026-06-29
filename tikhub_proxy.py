@@ -142,6 +142,33 @@ DRAMA_COLUMNS = ["Account / 账号", "Nickname / 昵称", "Screenshot Name / 截
 JOB_LOCK = threading.Lock()
 LAST_JOB = {"running": False, "started_at": None, "finished_at": None, "result": None, "error": None}
 TITLE_TRANSLATION_CACHE = {}
+THEME_TRANSLATION_MAP = {
+    "rural area": "乡村",
+    "ensemble cast": "群像",
+    "family disputes": "家庭纠纷",
+    "city": "城市",
+    "urbanlife general settings": "都市",
+    "urban life": "都市",
+    "farming/business": "种田/经商",
+    "skill/talent competition": "技能/才艺竞赛",
+    "superior and inferior": "强弱逆袭",
+    "werewolf": "狼人",
+    "billionaire": "豪门总裁",
+    "ceo": "总裁",
+    "marriage": "婚恋",
+    "romance": "爱情",
+    "revenge": "复仇",
+    "fantasy": "奇幻",
+    "drama": "剧情",
+    "comedy": "喜剧",
+    "suspense": "悬疑",
+    "crime": "犯罪",
+    "medical": "医疗",
+    "campus": "校园",
+    "royal": "皇室",
+    "pregnancy": "孕育",
+    "secret identity": "隐藏身份",
+}
 
 
 class TikHubError(Exception):
@@ -304,7 +331,8 @@ def _clean_theme_label(value):
 
 
 def _theme_values(value, out=None):
-    out = out or []
+    if out is None:
+        out = []
     if value in (None, ""):
         return out
     if isinstance(value, (list, tuple, set)):
@@ -355,7 +383,7 @@ def _theme_text(value, translate=False):
             continue
         seen.add(key)
         if translate and not _has_cjk(label):
-            label = _translate_english_title(label) or label
+            label = THEME_TRANSLATION_MAP.get(key) or _translate_english_title(label) or label
         labels.append(label)
         if len(labels) >= 12:
             break
