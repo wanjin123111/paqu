@@ -533,6 +533,11 @@ let detailAccountIndex=0;
 let detailAccountKey=store.get("thr_detail_account")||"";
 const DETAIL_PAGE_SIZE=10;
 let detailPage=1;
+let currentReportSource="latest";
+let currentReportGeneratedAt="";
+let detailRefreshTimer=null;
+let detailRefreshCount=0;
+const DETAIL_REFRESH_LIMIT=24;
 let running=false, cancelled=false;
 let corsShown=false;
 
@@ -1100,6 +1105,33 @@ function dramaPublishMsOf(row){
   const ms=Date.parse(String(text).replace(" ","T")+"+08:00");
   return Number.isFinite(ms)?ms:0;
 }
+function dramaDurationTextOf(row){
+  const seconds=toInt(valueOf(row,["Duration Seconds / 总时长(秒)"],0));
+  const minutes=valueOf(row,["Duration Minutes / 总时长(分钟)"],"");
+  return (seconds?fmt(seconds)+"秒":"")+(seconds&&minutes?" / ":"")+(minutes?minutes+"分钟":"");
+}
+function dramaDescriptionTextOf(row){
+  return valueOf(row,["Chinese Description / 中文简介","English Description Preview / 英文简介预览"],"");
+}
+function detailRowHasIdentity(row){
+  return !!(dramaTitleOf(row)||valueOf(row,["Drama ID / 短剧ID"],"")||accountOf(row));
+}
+function detailFieldPending(row,column){
+  if(currentReportSource!=="latest"||!detailRowHasIdentity(row))return false;
+  if(column==="发布时间")return !dramaPublishTimeOf(row);
+  if(column==="时长")return !dramaDurationTextOf(row);
+  if(column==="题材")return !themeDisplayList(row).length&&!englishThemeLabelsOf(row).length&&!chineseThemeLabelsOf(row).length;
+  if(column==="简介")return !dramaDescriptionTextOf(row);
+  return false;
+}
+function detailEnrichmentPending(){
+  return currentReportSource==="latest"&&dramaRows.some(row=>
+    detailFieldPending(row,"发布时间")||
+    detailFieldPending(row,"时长")||
+    detailFieldPending(row,"题材")||
+    detailFieldPending(row,"简介")
+  );
+}
 function summaryHotOf(row){return toInt(valueOf(row,[DISPLAY_COLUMNS[5],COLUMNS[7]],0));}
 function sortedSummaryRows(){
   const list=[...rows];
@@ -1173,11 +1205,11 @@ function setMutedCell(td,text){
   td.classList.add("cell-muted");
   td.textContent=text;
 }
-function setLoadingCell(td){
+function setLoadingCell(td,text){
   td.classList.add("cell-muted");
   const span=document.createElement("span");
   span.className="loading-inline";
-  span.textContent="加载中…";
+  span.textContent=text||"加载中…";
   td.appendChild(span);
 }
 function setOptionalCell(td,value,isLoading=false){
@@ -1196,15 +1228,12 @@ function appendDetailCell(tr,c,row,index){
   else if(c==="短剧ID"){td.className="detail-id";td.textContent=valueOf(row,["Drama ID / 短剧ID"],"");}
   else if(c==="英文剧名"){td.className="detail-title";td.textContent=dramaTitleOf(row);}
   else if(c==="中文剧名"){td.className="detail-title";setOptionalCell(td,chineseTitleOf(row),titleHydrating&&!!dramaTitleOf(row));}
-  else if(c==="发布时间"){td.className="num";setOptionalCell(td,dramaPublishTimeOf(row));}
+  else if(c==="发布时间"){td.className="num";setOptionalCell(td,dramaPublishTimeOf(row),detailFieldPending(row,c));}
   else if(c==="集数"){td.className="num";td.textContent=fmt(dramaEpisodesOf(row));}
   else if(c==="观看"){td.className="num";td.textContent=fmtPlay(dramaViewsOf(row));}
   else if(c==="时长"){
-    const seconds=toInt(valueOf(row,["Duration Seconds / 总时长(秒)"],0));
-    const minutes=valueOf(row,["Duration Minutes / 总时长(分钟)"],"");
     td.className="num";
-    const text=(seconds?fmt(seconds)+"秒":"")+(seconds&&minutes?" / ":"")+(minutes?minutes+"分钟":"");
-    setOptionalCell(td,text);
+    setOptionalCell(td,dramaDurationTextOf(row),detailFieldPending(row,c));
   }else if(c==="限免")td.textContent=valueOf(row,["Limited Free / 是否限免"],"");
   else if(c==="题材"){
     td.className="detail-text";
@@ -1220,10 +1249,11 @@ function appendDetailCell(tr,c,row,index){
       });
       td.appendChild(wrap);
     }else if(themeHydrating&&englishThemeLabelsOf(row).length)setLoadingCell(td);
+    else if(detailFieldPending(row,c))setLoadingCell(td,"补全中…");
     else setMutedCell(td,"暂无");
   }else if(c==="简介"){
     td.className="detail-text";
-    setOptionalCell(td,valueOf(row,["English Description Preview / 英文简介预览","Chinese Description / 中文简介"],""));
+    setOptionalCell(td,dramaDescriptionTextOf(row),detailFieldPending(row,c));
   }else if(c==="主页链接"){
     td.className="link";
     const a=document.createElement("a");
@@ -1499,7 +1529,41 @@ function reportTimeLabel(value){
   return bj.getUTCFullYear()+"-"+pad2(bj.getUTCMonth()+1)+"-"+pad2(bj.getUTCDate())+" "+
     pad2(bj.getUTCHours())+":"+pad2(bj.getUTCMinutes())+":"+pad2(bj.getUTCSeconds())+" 北京时间";
 }
-function loadBackendPayload(payload){
+function stopDetailAutoRefresh(){
+  if(detailRefreshTimer){
+    clearTimeout(detailRefreshTimer);
+    detailRefreshTimer=null;
+  }
+}
+function scheduleDetailAutoRefresh(){
+  stopDetailAutoRefresh();
+  if(currentReportSource!=="latest"||!detailEnrichmentPending()){
+    detailRefreshCount=0;
+    return;
+  }
+  if(detailRefreshCount>=DETAIL_REFRESH_LIMIT)return;
+  detailRefreshCount+=1;
+  detailRefreshTimer=setTimeout(async()=>{
+    if(document.hidden){
+      scheduleDetailAutoRefresh();
+      return;
+    }
+    window.__quietRefresh=true;
+    try{
+      await loadBackendLatest({quiet:true});
+    }catch(_){
+      scheduleDetailAutoRefresh();
+    }finally{
+      window.__quietRefresh=false;
+    }
+  },15000);
+}
+function loadBackendPayload(payload,opts){
+  opts=opts||{};
+  const previousGeneratedAt=currentReportGeneratedAt;
+  currentReportSource=opts.source||"latest";
+  currentReportGeneratedAt=payload.generated_at||"";
+  if(!opts.quiet||currentReportGeneratedAt!==previousGeneratedAt)detailRefreshCount=0;
   clearResults();
   const summary=Array.isArray(payload.summary)?payload.summary:[];
   const dramas=Array.isArray(payload.dramas_detail)?payload.dramas_detail:[];
@@ -1509,13 +1573,16 @@ function loadBackendPayload(payload){
   const failed=(payload.errors||[]).map(e=>e.account||e.error||"未知");
   const dataTime=reportTimeLabel(payload.generated_at);
   updateSummary(failed, dataTime);
-  backendSetStatus("数据时间 "+dataTime+" · 已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧", true);
+  const pending=detailEnrichmentPending();
+  backendSetStatus("数据时间 "+dataTime+" · 已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧"+(pending?" · 明细补全中，页面会自动刷新":""), !pending);
+  scheduleDetailAutoRefresh();
   hydrateChineseTitles(dramaRows);
   hydrateThemeLabels(dramaRows);
-  if(summary.length)toast("已加载最新结果");
+  if(summary.length&&!window.__quietRefresh&&!opts.quiet)toast("已加载最新结果");
 }
-async function loadBackendLatest(){
-  backendSetStatus("正在加载最新结果…");
+async function loadBackendLatest(opts){
+  opts=opts||{};
+  if(!opts.quiet)backendSetStatus("正在加载最新结果…");
   let payload=null;
   try{
     payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
@@ -1532,7 +1599,7 @@ async function loadBackendLatest(){
       payload=await fetchJsonUrl("public_reports/latest_report.json");
     }
   }
-  loadBackendPayload(payload);
+  loadBackendPayload(payload,{source:"latest", quiet:opts.quiet});
   return payload;
 }
 function reportStamp(name){
@@ -1570,7 +1637,7 @@ function renderHistoryList(items, source){
       backendSetStatus("正在加载历史记录…");
       const url=btn.getAttribute("data-report-json");
       const payload=url.startsWith("http")||url.startsWith("public_reports/")?await fetchJsonUrl(url):await backendFetchJson(url,{}, {sendSecret:false});
-      loadBackendPayload(payload);
+      loadBackendPayload(payload,{source:"history"});
     }catch(e){backendSetStatus("加载历史失败:"+(e.message||e));toast("加载历史失败");}
   }));
   box.querySelectorAll("[data-report-download]").forEach(btn=>btn.addEventListener("click",()=>{
