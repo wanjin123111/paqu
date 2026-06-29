@@ -140,6 +140,8 @@
   .account-id{display:inline-block;margin-top:3px;font-family:var(--mono);font-size:11.5px;color:var(--accent);word-break:break-all}
   td.detail-title{white-space:normal;min-width:220px;line-height:1.35}
   td.detail-text{white-space:normal;min-width:180px;line-height:1.38;color:var(--ink-soft)}
+  .theme-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start}
+  .theme-tag{display:inline-flex;align-items:center;max-width:100%;padding:3px 7px;border:1px solid #dbe4f0;border-radius:999px;background:#f8fafc;color:#334155;font-size:11.5px;line-height:1.2;white-space:normal;word-break:break-word}
   td.detail-id{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);word-break:break-all}
   .row-err td{background:var(--err-soft)}
   body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin-left:50%;transform:translateX(-50%)}
@@ -805,6 +807,7 @@ async function run(){
   $("runSub").textContent=cancelled?"已停止":"完成";
   updateSummary(failed);
   hydrateChineseTitles(dramaRows);
+  hydrateThemeLabels(dramaRows);
   if(rows.length)toast("完成 "+rows.length+" 个账号");
 }
 
@@ -865,6 +868,129 @@ function chineseTitleOf(row){
   const direct=valueOf(row,["Chinese Title / 中文剧名","中文剧名"],"");
   if(direct)return direct;
   return titleTranslationCache.get(dramaTitleOf(row))||"";
+}
+const CJK_RE=/[\u3400-\u9fff]/;
+const THEME_CN_MAP={
+  "City":"城市",
+  "Urbanlife General Settings":"都市",
+  "Urban Life":"都市",
+  "Farming/Business":"种田/经商",
+  "Family Disputes":"家庭纠纷",
+  "Skill/Talent Competition":"技能/才艺竞赛",
+  "Superior and Inferior":"强弱逆袭",
+  "Ensemble Cast":"群像",
+  "Werewolf":"狼人",
+  "Billionaire":"豪门总裁",
+  "CEO":"总裁",
+  "Marriage":"婚恋",
+  "Romance":"爱情",
+  "Revenge":"复仇",
+  "Fantasy":"奇幻",
+  "Drama":"剧情",
+  "Comedy":"喜剧",
+  "Suspense":"悬疑",
+  "Crime":"犯罪",
+  "Medical":"医疗",
+  "Campus":"校园",
+  "Royal":"皇室",
+  "Pregnancy":"孕育",
+  "Secret Identity":"隐藏身份"
+};
+const themeLabelCache=new Map(Object.entries(THEME_CN_MAP));
+let themeHydrateRun=0;
+function cleanThemeLabel(value){
+  let text=String(value==null?"":value).trim();
+  if(!text)return "";
+  text=text.replace(/\\u([0-9a-fA-F]{4})/g,(_,hex)=>String.fromCharCode(parseInt(hex,16)));
+  text=text.replace(/^tag[_\s-]*/i,"").replace(/_/g," ").replace(/\s+/g," ").trim();
+  if(!text||/^\d+$/.test(text)||/^ID\s*\d+/i.test(text))return "";
+  if(/[{}[\]":]/.test(text)||/^tag[A-Z_]/.test(text))return "";
+  return text.slice(0,60);
+}
+function collectThemeLabels(value,out){
+  out=out||[];
+  if(value==null||value==="")return out;
+  if(Array.isArray(value)){
+    value.forEach(item=>collectThemeLabels(item,out));
+    return out;
+  }
+  if(typeof value==="object"){
+    for(const key of ["tagVal","tagName","themeVal","themeName","name","title","value","label"]){
+      if(value[key]!=null&&!Array.isArray(value[key])&&typeof value[key]!=="object"){
+        const label=cleanThemeLabel(value[key]);
+        if(label)out.push(label);
+      }
+    }
+    for(const [key,item] of Object.entries(value)){
+      if(/(?:id|key)$/i.test(key)||key==="tagID"||key==="tagKey")continue;
+      collectThemeLabels(item,out);
+    }
+    return out;
+  }
+  const raw=String(value).trim();
+  if(!raw)return out;
+  if(raw[0]==="{"||raw[0]==="["){
+    try{return collectThemeLabels(JSON.parse(raw),out);}catch(_){}
+  }
+  let matched=false;
+  raw.replace(/"tagVal"\s*:\s*"([^"]+)"/g,(_,label)=>{
+    const clean=cleanThemeLabel(label);
+    if(clean){out.push(clean);matched=true;}
+    return "";
+  });
+  if(matched)return out;
+  if(/[{}[\]"]/.test(raw))return out;
+  raw.split(/[;；,，、|]+/).forEach(part=>{
+    const clean=cleanThemeLabel(part);
+    if(clean)out.push(clean);
+  });
+  return out;
+}
+function uniqThemeLabels(labels){
+  const seen=new Set(), out=[];
+  for(const label of labels){
+    const clean=cleanThemeLabel(label);
+    if(!clean)continue;
+    const key=clean.toLowerCase();
+    if(seen.has(key))continue;
+    seen.add(key);
+    out.push(clean);
+    if(out.length>=12)break;
+  }
+  return out;
+}
+function themeLabelsFromValue(value){return uniqThemeLabels(collectThemeLabels(value,[]));}
+function englishThemeLabelsOf(row){return themeLabelsFromValue(valueOf(row,["English Themes / 英文题材"],""));}
+function chineseThemeLabelsOf(row){return themeLabelsFromValue(valueOf(row,["Chinese Themes / 中文题材"],""));}
+function themeSourceLabelsOf(row){
+  const cn=chineseThemeLabelsOf(row);
+  return cn.length?cn:englishThemeLabelsOf(row);
+}
+function themeDisplayList(row){
+  return themeSourceLabelsOf(row).map(label=>{
+    if(CJK_RE.test(label))return label;
+    return themeLabelCache.get(label)||themeLabelCache.get(label.replace(/\//g,"/"))||label;
+  }).filter(Boolean);
+}
+function themeTextOf(row){return themeDisplayList(row).join("、");}
+async function hydrateThemeLabels(targetRows){
+  const list=(targetRows||[]).filter(Boolean);
+  const labels=[...new Set(list.flatMap(row=>englishThemeLabelsOf(row)).filter(label=>label&&!CJK_RE.test(label)&&!themeLabelCache.has(label)))].slice(0,300);
+  if(!labels.length)return;
+  const run=++themeHydrateRun;
+  try{
+    const r=await fetch(backendUrl("/translate-titles",{}),{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({titles:labels}),
+      cache:"no-store",
+    });
+    const data=await r.json().catch(()=>null);
+    if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
+    const translations=(data&&data.translations)||{};
+    for(const label of labels)if(translations[label])themeLabelCache.set(label,translations[label]);
+    if(run===themeHydrateRun)renderResultTable();
+  }catch(_){}
 }
 async function hydrateChineseTitles(targetRows){
   const list=(targetRows||[]).filter(Boolean);
@@ -960,9 +1086,18 @@ function appendDetailCell(tr,c,row,index){
   }else if(c==="限免")td.textContent=valueOf(row,["Limited Free / 是否限免"],"");
   else if(c==="题材"){
     td.className="detail-text";
-    const en=valueOf(row,["English Themes / 英文题材"],"");
-    const cn=valueOf(row,["Chinese Themes / 中文题材"],"");
-    td.textContent=[en,cn].filter(Boolean).join(" / ");
+    const labels=themeDisplayList(row);
+    if(labels.length){
+      const wrap=document.createElement("div");
+      wrap.className="theme-tags";
+      labels.forEach(label=>{
+        const tag=document.createElement("span");
+        tag.className="theme-tag";
+        tag.textContent=label;
+        wrap.appendChild(tag);
+      });
+      td.appendChild(wrap);
+    }else td.textContent="";
   }else if(c==="简介"){
     td.className="detail-text";
     td.textContent=valueOf(row,["English Description Preview / 英文简介预览","Chinese Description / 中文简介"],"");
@@ -1086,8 +1221,8 @@ function normalizeDramaRow(d,index){
     "Duration Seconds / 总时长(秒)":valueOf(d,["Duration Seconds / 总时长(秒)"],""),
     "Duration Minutes / 总时长(分钟)":valueOf(d,["Duration Minutes / 总时长(分钟)"],""),
     "Limited Free / 是否限免":valueOf(d,["Limited Free / 是否限免"],""),
-    "English Themes / 英文题材":valueOf(d,["English Themes / 英文题材"],""),
-    "Chinese Themes / 中文题材":valueOf(d,["Chinese Themes / 中文题材"],""),
+    "English Themes / 英文题材":englishThemeLabelsOf(d).join("、"),
+    "Chinese Themes / 中文题材":themeTextOf(d),
     "English Description Preview / 英文简介预览":enDesc,
     "Chinese Description / 中文简介":cnDesc,
     "Description Truncated / 简介是否截断":valueOf(d,["Description Truncated / 简介是否截断"],(enDesc.length>=600||cnDesc.length>=600)?"是 / Yes":""),
@@ -1201,6 +1336,7 @@ function loadBackendPayload(payload){
   updateSummary(failed, dataTime);
   backendSetStatus("数据时间 "+dataTime+" · 已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧", true);
   hydrateChineseTitles(dramaRows);
+  hydrateThemeLabels(dramaRows);
   if(summary.length)toast("已加载最新结果");
 }
 async function loadBackendLatest(){

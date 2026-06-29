@@ -290,6 +290,78 @@ def _chinese_title_or_translate(chinese_title, english_title):
     return _translate_english_title(english_title)
 
 
+def _clean_theme_label(value):
+    text = _to_text(value, 80)
+    if not text:
+        return ""
+    text = re.sub(r"^tag[_\s-]*", "", text, flags=re.I).replace("_", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text or text.isdigit() or re.search(r"[{}\[\]\":]", text):
+        return ""
+    if re.match(r"^id\s*\d+", text, flags=re.I):
+        return ""
+    return text[:60]
+
+
+def _theme_values(value, out=None):
+    out = out or []
+    if value in (None, ""):
+        return out
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            _theme_values(item, out)
+        return out
+    if isinstance(value, dict):
+        for key in ("tagVal", "tagName", "themeVal", "themeName", "name", "title", "value", "label"):
+            if key in value and not isinstance(value[key], (dict, list, tuple, set)):
+                label = _clean_theme_label(value[key])
+                if label:
+                    out.append(label)
+        for key, item in value.items():
+            if key in ("tagID", "tagKey") or re.search(r"(?:id|key)$", str(key), flags=re.I):
+                continue
+            _theme_values(item, out)
+        return out
+    text = str(value).strip()
+    if not text:
+        return out
+    if text[:1] in ("{", "["):
+        try:
+            return _theme_values(json.loads(text), out)
+        except Exception:
+            pass
+    matched = False
+    for match in re.finditer(r'"tagVal"\s*:\s*"([^"]+)"', text):
+        label = _clean_theme_label(match.group(1))
+        if label:
+            out.append(label)
+            matched = True
+    if matched:
+        return out
+    if re.search(r"[{}\[\]\"]", text):
+        return out
+    for part in re.split(r"[;；,，、|]+", text):
+        label = _clean_theme_label(part)
+        if label:
+            out.append(label)
+    return out
+
+
+def _theme_text(value, translate=False):
+    labels, seen = [], set()
+    for label in _theme_values(value, []):
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if translate and not _has_cjk(label):
+            label = _translate_english_title(label) or label
+        labels.append(label)
+        if len(labels) >= 12:
+            break
+    return "、".join(labels)
+
+
 def _yes_no(value):
     if value is None or value == "":
         return ""
@@ -768,6 +840,10 @@ def _get_tiktok_drama_library(secuid, uid):
             chinese_title = _chinese_title_or_translate(_deep_find(item, DRAMA_CN_TITLE_KEYS), english_title)
             english_desc = _to_text(_deep_find_any(item, DRAMA_EN_DESC_KEYS), 600)
             chinese_desc = _to_text(_deep_find_any(item, DRAMA_CN_DESC_KEYS), 600)
+            english_themes_source = _deep_find_any(item, DRAMA_EN_THEMES_KEYS)
+            chinese_themes = _theme_text(_deep_find_any(item, DRAMA_CN_THEMES_KEYS))
+            if not chinese_themes:
+                chinese_themes = _theme_text(english_themes_source, translate=True)
             dramas.append({
                 "name": (_clean_title(name)[:80].strip() or name[:80] or key),
                 "episodes": episodes,
@@ -778,8 +854,8 @@ def _get_tiktok_drama_library(secuid, uid):
                 "duration_seconds": duration_seconds,
                 "duration_minutes": _duration_minutes(duration_seconds, _deep_find(item, DRAMA_DURATION_MINUTES_KEYS)),
                 "limited_free": _yes_no(_deep_find(item, DRAMA_LIMITED_KEYS)),
-                "english_themes": _to_text(_deep_find_any(item, DRAMA_EN_THEMES_KEYS), 220),
-                "chinese_themes": _to_text(_deep_find_any(item, DRAMA_CN_THEMES_KEYS), 220),
+                "english_themes": _theme_text(english_themes_source),
+                "chinese_themes": chinese_themes,
                 "english_description": english_desc,
                 "chinese_description": chinese_desc,
                 "description_truncated": "是 / Yes" if len(english_desc) >= 600 or len(chinese_desc) >= 600 else "否 / No",
