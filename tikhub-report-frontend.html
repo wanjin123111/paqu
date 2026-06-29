@@ -127,8 +127,11 @@
   .detail-nav.show{display:flex}
   .detail-select{min-width:220px;max-width:360px;border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--ink)}
   .detail-count{font-size:12px;color:var(--ink-faint)}
+  .detail-pager{display:none;align-items:center;gap:8px;flex-wrap:wrap}
+  .detail-pager.show{display:flex}
   .mini-btn{border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:500;color:var(--ink);cursor:pointer;display:flex;align-items:center;gap:6px}
   .mini-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .mini-btn:disabled{cursor:not-allowed;opacity:.45;border-color:var(--line-strong);color:var(--ink-faint)}
   .table-scroll{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:560px}
   table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
   thead th{position:sticky;top:0;background:#1F2733;color:#fff;font-weight:600;text-align:left;padding:10px 12px;font-size:12px;z-index:1}
@@ -145,6 +148,10 @@
   .theme-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start}
   .theme-tag{display:inline-flex;align-items:center;max-width:100%;padding:3px 7px;border:1px solid #dbe4f0;border-radius:999px;background:#f8fafc;color:#334155;font-size:11.5px;line-height:1.2;white-space:normal;word-break:break-word}
   td.detail-id{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);word-break:break-all}
+  td.cell-muted{color:var(--ink-faint)}
+  .loading-inline{display:inline-flex;align-items:center;gap:6px;color:var(--ink-faint)}
+  .loading-inline::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse .9s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.35;transform:scale(.82)}50%{opacity:1;transform:scale(1)}}
   .row-err td{background:var(--err-soft)}
   body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin-left:50%;transform:translateX(-50%)}
   body.public-mode #resultCard .card-body{padding:18px 22px 22px}
@@ -435,6 +442,11 @@ shortdramatime"></textarea>
             <select class="detail-select" id="detailAccountSelect" aria-label="选择账号"></select>
             <button class="mini-btn" id="detailNextBtn" type="button">下一账号</button>
             <span class="detail-count" id="detailCount"></span>
+            <div class="detail-pager" id="detailPager">
+              <button class="mini-btn" id="detailPagePrevBtn" type="button">上一页</button>
+              <span class="detail-count" id="detailPageCount"></span>
+              <button class="mini-btn" id="detailPageNextBtn" type="button">下一页</button>
+            </div>
           </div>
         </div>
       </div>
@@ -519,6 +531,8 @@ let resultView="summary";
 let resultSort=store.get("thr_result_sort")||"latest";
 let detailAccountIndex=0;
 let detailAccountKey=store.get("thr_detail_account")||"";
+const DETAIL_PAGE_SIZE=10;
+let detailPage=1;
 let running=false, cancelled=false;
 let corsShown=false;
 
@@ -857,12 +871,14 @@ function setProgress(done,total){$("pcount").textContent=done+" / "+total;$("pba
 
 /* ---------- 结果表 ---------- */
 function clearResults(){
+  resetDetailPage();
   $("resultCard").style.display="none";
   $("resultTable").querySelector("thead").innerHTML="";
   $("resultTable").querySelector("tbody").innerHTML="";
   $("resultSum").textContent="";
   if($("detailAccountSelect"))$("detailAccountSelect").innerHTML="";
   if($("detailCount"))$("detailCount").textContent="";
+  if($("detailPager"))$("detailPager").classList.remove("show");
 }
 function valueOf(row,keys,fallback){
   for(const k of keys){if(row&&row[k]!=null&&row[k]!=="")return row[k];}
@@ -888,6 +904,7 @@ function saveMapStore(key,map,limit){
 }
 const titleTranslationCache=new Map(Object.entries(readJsonStore("thr_title_translation_cache")));
 let titleHydrateRun=0;
+let titleHydrating=false;
 function chineseTitleOf(row){
   const direct=valueOf(row,["Chinese Title / 中文剧名","中文剧名"],"");
   if(direct)return direct;
@@ -923,6 +940,7 @@ const THEME_CN_MAP={
 };
 const themeLabelCache=new Map([...Object.entries(THEME_CN_MAP),...Object.entries(readJsonStore("thr_theme_translation_cache"))]);
 let themeHydrateRun=0;
+let themeHydrating=false;
 function cleanThemeLabel(value){
   let text=String(value==null?"":value).trim();
   if(!text)return "";
@@ -997,12 +1015,17 @@ function themeDisplayList(row){
     return themeLabelCache.get(label)||themeLabelCache.get(label.replace(/\//g,"/"))||label;
   }).filter(Boolean);
 }
+function themeHasPendingTranslation(row){
+  return englishThemeLabelsOf(row).some(label=>label&&!CJK_RE.test(label)&&!themeLabelCache.has(label));
+}
 function themeTextOf(row){return themeDisplayList(row).join("、");}
 async function hydrateThemeLabels(targetRows){
   const list=(targetRows||[]).filter(Boolean);
   const labels=[...new Set(list.flatMap(row=>englishThemeLabelsOf(row)).filter(label=>label&&!CJK_RE.test(label)&&!themeLabelCache.has(label)))].slice(0,300);
   if(!labels.length)return;
   const run=++themeHydrateRun;
+  themeHydrating=true;
+  renderResultTable();
   try{
     const r=await fetch(backendUrl("/translate-titles",{}),{
       method:"POST",
@@ -1015,8 +1038,13 @@ async function hydrateThemeLabels(targetRows){
     const translations=(data&&data.translations)||{};
     for(const label of labels)if(translations[label])themeLabelCache.set(label,translations[label]);
     saveMapStore("thr_theme_translation_cache",themeLabelCache,800);
-    if(run===themeHydrateRun)renderResultTable();
-  }catch(_){}
+  }catch(_){
+  }finally{
+    if(run===themeHydrateRun){
+      themeHydrating=false;
+      renderResultTable();
+    }
+  }
 }
 async function hydrateChineseTitles(targetRows){
   const list=(targetRows||[]).filter(Boolean);
@@ -1032,6 +1060,8 @@ async function hydrateChineseTitles(targetRows){
     return;
   }
   const run=++titleHydrateRun;
+  titleHydrating=true;
+  renderResultTable();
   try{
     const r=await fetch(backendUrl("/translate-titles",{}),{
       method:"POST",
@@ -1052,8 +1082,13 @@ async function hydrateChineseTitles(targetRows){
         row["中文剧名"]=cn;
       }
     }
-    if(run===titleHydrateRun)renderResultTable();
-  }catch(_){}
+  }catch(_){
+  }finally{
+    if(run===titleHydrateRun){
+      titleHydrating=false;
+      renderResultTable();
+    }
+  }
 }
 function dramaViewsOf(row){return toInt(valueOf(row,["Views / 观看数","累计观看"],0));}
 function dramaEpisodesOf(row){return toInt(valueOf(row,["Episodes / 集数","集数"],0));}
@@ -1092,6 +1127,7 @@ function updateSortControls(){
 function setResultSort(mode){
   resultSort=mode==="hot"?"hot":"latest";
   store.set("thr_result_sort",resultSort);
+  resetDetailPage();
   updateSortControls();
   renderResultTable();
 }
@@ -1133,26 +1169,47 @@ function appendSummaryCell(tr,c,row){
   else td.textContent=row[c]||"";
   tr.appendChild(td);
 }
+function setMutedCell(td,text){
+  td.classList.add("cell-muted");
+  td.textContent=text;
+}
+function setLoadingCell(td){
+  td.classList.add("cell-muted");
+  const span=document.createElement("span");
+  span.className="loading-inline";
+  span.textContent="加载中…";
+  td.appendChild(span);
+}
+function setOptionalCell(td,value,isLoading=false){
+  if(value!=null&&value!==""){
+    td.textContent=value;
+  }else if(isLoading){
+    setLoadingCell(td);
+  }else{
+    setMutedCell(td,"暂无");
+  }
+}
 function appendDetailCell(tr,c,row,index){
   const td=document.createElement("td");
   if(c==="账号 / 昵称")appendAccountCell(td,row);
   else if(c==="账号内排名"){td.className="num";td.textContent=fmt(dramaRankOf(row,index));}
   else if(c==="短剧ID"){td.className="detail-id";td.textContent=valueOf(row,["Drama ID / 短剧ID"],"");}
   else if(c==="英文剧名"){td.className="detail-title";td.textContent=dramaTitleOf(row);}
-  else if(c==="中文剧名"){td.className="detail-title";td.textContent=chineseTitleOf(row);}
-  else if(c==="发布时间"){td.className="num";td.textContent=dramaPublishTimeOf(row);}
+  else if(c==="中文剧名"){td.className="detail-title";setOptionalCell(td,chineseTitleOf(row),titleHydrating&&!!dramaTitleOf(row));}
+  else if(c==="发布时间"){td.className="num";setOptionalCell(td,dramaPublishTimeOf(row));}
   else if(c==="集数"){td.className="num";td.textContent=fmt(dramaEpisodesOf(row));}
   else if(c==="观看"){td.className="num";td.textContent=fmtPlay(dramaViewsOf(row));}
   else if(c==="时长"){
     const seconds=toInt(valueOf(row,["Duration Seconds / 总时长(秒)"],0));
     const minutes=valueOf(row,["Duration Minutes / 总时长(分钟)"],"");
     td.className="num";
-    td.textContent=(seconds?fmt(seconds)+"秒":"")+(seconds&&minutes?" / ":"")+(minutes?minutes+"分钟":"");
+    const text=(seconds?fmt(seconds)+"秒":"")+(seconds&&minutes?" / ":"")+(minutes?minutes+"分钟":"");
+    setOptionalCell(td,text);
   }else if(c==="限免")td.textContent=valueOf(row,["Limited Free / 是否限免"],"");
   else if(c==="题材"){
     td.className="detail-text";
     const labels=themeDisplayList(row);
-    if(labels.length){
+    if(labels.length&&!(themeHydrating&&themeHasPendingTranslation(row))){
       const wrap=document.createElement("div");
       wrap.className="theme-tags";
       labels.forEach(label=>{
@@ -1162,10 +1219,11 @@ function appendDetailCell(tr,c,row,index){
         wrap.appendChild(tag);
       });
       td.appendChild(wrap);
-    }else td.textContent="";
+    }else if(themeHydrating&&englishThemeLabelsOf(row).length)setLoadingCell(td);
+    else setMutedCell(td,"暂无");
   }else if(c==="简介"){
     td.className="detail-text";
-    td.textContent=valueOf(row,["English Description Preview / 英文简介预览","Chinese Description / 中文简介"],"");
+    setOptionalCell(td,valueOf(row,["English Description Preview / 英文简介预览","Chinese Description / 中文简介"],""));
   }else if(c==="主页链接"){
     td.className="link";
     const a=document.createElement("a");
@@ -1216,6 +1274,24 @@ function syncDetailAccountSelection(list){
   detailAccountIndex=idx;
   return list[idx];
 }
+function resetDetailPage(){
+  detailPage=1;
+}
+function clampDetailPage(totalRows){
+  const totalPages=Math.max(1,Math.ceil(totalRows/DETAIL_PAGE_SIZE));
+  detailPage=Math.max(1,Math.min(Number(detailPage)||1,totalPages));
+  return totalPages;
+}
+function updateDetailPager(totalRows){
+  const pager=$("detailPager"), count=$("detailPageCount"), prev=$("detailPagePrevBtn"), next=$("detailPageNextBtn");
+  if(!pager||!count||!prev||!next)return;
+  const totalPages=clampDetailPage(totalRows);
+  const show=resultView==="detail"&&totalRows>DETAIL_PAGE_SIZE;
+  pager.classList.toggle("show",show);
+  count.textContent="第 "+detailPage+"/"+totalPages+" 页";
+  prev.disabled=detailPage<=1;
+  next.disabled=detailPage>=totalPages;
+}
 function updateDetailControls(list){
   const nav=$("detailNav"), sel=$("detailAccountSelect"), count=$("detailCount");
   if(!nav||!sel||!count)return list;
@@ -1233,6 +1309,7 @@ function updateDetailControls(list){
   sel.value=String(detailAccountIndex);
   const total=current?dramaRows.filter(row=>accountOf(row)===current.account).length:0;
   count.textContent=current?("第 "+(detailAccountIndex+1)+"/"+list.length+" 个账号 · "+total+" 部短剧"):"暂无账号明细";
+  updateDetailPager(total);
   return list;
 }
 function renderResultTable(){
@@ -1261,9 +1338,13 @@ function renderResultTable(){
       tb.appendChild(tr);
       return;
     }
-    details.forEach((row,i)=>{
+    clampDetailPage(details.length);
+    updateDetailPager(details.length);
+    const pageStart=(detailPage-1)*DETAIL_PAGE_SIZE;
+    const pageRows=details.slice(pageStart,pageStart+DETAIL_PAGE_SIZE);
+    pageRows.forEach((row,i)=>{
       const tr=document.createElement("tr");
-      for(const c of DRAMA_DETAIL_COLUMNS)appendDetailCell(tr,c,row,i);
+      for(const c of DRAMA_DETAIL_COLUMNS)appendDetailCell(tr,c,row,pageStart+i);
       tb.appendChild(tr);
     });
     return;
@@ -1815,12 +1896,13 @@ function init(){
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeHistoryMenu();});
   }
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
-  $("detailTabBtn").addEventListener("click",()=>{resultView="detail";renderResultTable();});
+  $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
   $("sortHotBtn").addEventListener("click",()=>setResultSort("hot"));
   $("sortLatestBtn").addEventListener("click",()=>setResultSort("latest"));
   updateSortControls();
   $("detailAccountSelect").addEventListener("change",()=>{
     setDetailAccountSelection(detailAccounts(),Number($("detailAccountSelect").value)||0);
+    resetDetailPage();
     renderResultTable();
   });
   $("detailPrevBtn").addEventListener("click",()=>{
@@ -1828,6 +1910,7 @@ function init(){
     if(!list.length)return;
     syncDetailAccountSelection(list);
     setDetailAccountSelection(list,(detailAccountIndex+list.length-1)%list.length);
+    resetDetailPage();
     renderResultTable();
   });
   $("detailNextBtn").addEventListener("click",()=>{
@@ -1835,6 +1918,15 @@ function init(){
     if(!list.length)return;
     syncDetailAccountSelection(list);
     setDetailAccountSelection(list,(detailAccountIndex+1)%list.length);
+    resetDetailPage();
+    renderResultTable();
+  });
+  $("detailPagePrevBtn").addEventListener("click",()=>{
+    detailPage=Math.max(1,detailPage-1);
+    renderResultTable();
+  });
+  $("detailPageNextBtn").addEventListener("click",()=>{
+    detailPage+=1;
     renderResultTable();
   });
   $("schedEnabled").addEventListener("change",()=>{store.set("thr_sched_on",$("schedEnabled").checked?"1":"0");if($("schedEnabled").checked){toast("已开启每天定时");$("schedDetails").open=true;}refreshSchedUI();});
