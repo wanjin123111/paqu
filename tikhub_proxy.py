@@ -76,6 +76,8 @@ SCHEDULE_PAGE_SIZE = _env_int("SCHEDULE_PAGE_SIZE", 30, 1, 50)
 SCHEDULE_USE_DRAMA_LIBRARY = _env_bool("SCHEDULE_USE_DRAMA_LIBRARY", True)
 SCHEDULE_DRAMA_PAGE_SIZE = _env_int("SCHEDULE_DRAMA_PAGE_SIZE", 50, 1, 50)
 SCHEDULE_MAX_DRAMAS = _env_int("SCHEDULE_MAX_DRAMAS", 0, 0, 20000)
+SCHEDULE_FETCH_EPISODE_PUBLISH_TIME = _env_bool("SCHEDULE_FETCH_EPISODE_PUBLISH_TIME", True)
+SCHEDULE_PUBLISH_TIME_EPISODE_SAMPLE = _env_int("SCHEDULE_PUBLISH_TIME_EPISODE_SAMPLE", 3, 1, 20)
 SCHEDULE_USE_PLAYLISTS = _env_bool("SCHEDULE_USE_PLAYLISTS", True)
 SCHEDULE_MAX_PLAYLISTS = _env_int("SCHEDULE_MAX_PLAYLISTS", 300, 0, 20000)
 SCHEDULE_PLAYLIST_PAGE_SIZE = _env_int("SCHEDULE_PLAYLIST_PAGE_SIZE", 20, 1, 50)
@@ -913,6 +915,36 @@ def _get_playlist_dramas(secuid, uid):
     return dramas
 
 
+def _get_drama_first_episode_publish_time(drama_id, uid, started):
+    if not SCHEDULE_FETCH_EPISODE_PUBLISH_TIME or not drama_id or _runtime_exceeded(started):
+        return ""
+    try:
+        data = _send_tiktok_get("/api/drama/episode/item_list/", {
+            "dramaID": drama_id,
+            "aid": TIKTOK_AID,
+            "language": TIKTOK_LANGUAGE,
+            "region": TIKTOK_REGION,
+            "storeRegion": TIKTOK_REGION,
+            "count": str(SCHEDULE_PUBLISH_TIME_EPISODE_SAMPLE),
+            "cursor": "0",
+        }, "TikTok drama episode endpoint", uid)
+    except TikHubError:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    batch = data.get("itemList") or data.get("item_list") or []
+    if not isinstance(batch, list):
+        return ""
+    candidates = []
+    for item in batch:
+        formatted = _publish_time_of(item)
+        if formatted:
+            candidates.append(formatted)
+    if not candidates:
+        return ""
+    return min(candidates, key=lambda item: _publish_epoch(item) or float("inf"))
+
+
 def _get_tiktok_drama_library(secuid, uid):
     if not secuid:
         return []
@@ -965,6 +997,8 @@ def _get_tiktok_drama_library(secuid, uid):
             chinese_themes = _theme_text(_deep_find_any(item, DRAMA_CN_THEMES_KEYS))
             if not chinese_themes:
                 chinese_themes = _theme_text(english_themes_source, translate=True)
+            if not publish_time and drama_key:
+                publish_time = _get_drama_first_episode_publish_time(drama_key, uid, started)
             dramas.append({
                 "name": (_clean_title(name)[:80].strip() or name[:80] or key),
                 "episodes": episodes,
