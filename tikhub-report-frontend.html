@@ -526,12 +526,11 @@ function fmtPlay(n){
   const sign=v<0?"-":"";
   const abs=Math.abs(v);
   const short=(num,unit)=>{
-    const rounded=Math.round(num*10)/10;
-    return sign+String(rounded).replace(/\.0$/,"")+unit;
+    const rounded=Math.round(num*100)/100;
+    return sign+String(rounded).replace(/\.0+$/,"").replace(/(\.\d*[1-9])0+$/,"$1")+unit;
   };
-  if(abs>=1e9)return short(abs/1e9,"B");
-  if(abs>=1e6)return short(abs/1e6,"M");
-  if(abs>=1e3)return short(abs/1e3,"K");
+  if(abs>=1e8)return short(abs/1e8,"亿");
+  if(abs>=1e4)return short(abs/1e4,"万");
   return sign+String(Math.round(abs));
 }
 function toInt(x){if(x==null)return 0;const n=Number(String(x).replace(/,/g,"").trim());return isFinite(n)?Math.trunc(n):0;}
