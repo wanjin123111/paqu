@@ -1,40 +1,49 @@
-﻿{
-    "reports":  [
-                    {
-                        "name":  "scheduled_report_20260627-110246.json",
-                        "summary_url":  "scheduled_report_20260627-110246.csv",
-                        "dramas_url":  "scheduled_dramas_20260627-110246.csv",
-                        "generated_at":  "2026-06-27T11:02:46",
-                        "title":  "2026-06-27 11:02:46 北京时间",
-                        "accounts":  9,
-                        "dramas":  587
-                    },
-                    {
-                        "name":  "scheduled_report_20260627-023058.json",
-                        "summary_url":  "scheduled_report_20260627-023058.csv",
-                        "dramas_url":  "scheduled_dramas_20260627-023058.csv",
-                        "generated_at":  "2026-06-27T02:30:58",
-                        "title":  "2026-06-27 10:30:58 北京时间",
-                        "accounts":  9,
-                        "dramas":  81
-                    },
-                    {
-                        "name":  "scheduled_report_20260626-183509.json",
-                        "summary_url":  "scheduled_report_20260626-183509.csv",
-                        "dramas_url":  "scheduled_dramas_20260626-183509.csv",
-                        "generated_at":  "2026-06-26T18:35:09",
-                        "title":  "2026-06-27 02:35:09 北京时间",
-                        "accounts":  9,
-                        "dramas":  78
-                    },
-                    {
-                        "name":  "scheduled_report_20260628-155547.json",
-                        "summary_url":  "scheduled_report_20260628-155547.csv",
-                        "dramas_url":  "scheduled_dramas_20260628-155547.csv",
-                        "generated_at":  "2026-06-28T15:55:47",
-                        "title":  "2026-06-28 15:55:47 北京时间",
-                        "accounts":  9,
-                        "dramas":  594
-                    }
-                ]
+{
+  "reports": [
+    {
+      "name": "scheduled_report_20260629-045503.json",
+      "summary_url": "scheduled_report_20260629-045503.csv",
+      "dramas_url": "scheduled_dramas_20260629-045503.csv",
+      "generated_at": "2026-06-29T04:55:03",
+      "title": "2026-06-29 12:55:03 北京时间",
+      "accounts": 9,
+      "dramas": 596
+    },
+    {
+      "name": "scheduled_report_20260628-155547.json",
+      "summary_url": "scheduled_report_20260628-155547.csv",
+      "dramas_url": "scheduled_dramas_20260628-155547.csv",
+      "generated_at": "2026-06-28T15:55:47",
+      "title": "2026-06-28 15:55:47 北京时间",
+      "accounts": 9,
+      "dramas": 594
+    },
+    {
+      "name": "scheduled_report_20260627-110246.json",
+      "summary_url": "scheduled_report_20260627-110246.csv",
+      "dramas_url": "scheduled_dramas_20260627-110246.csv",
+      "generated_at": "2026-06-27T11:02:46",
+      "title": "2026-06-27 11:02:46 北京时间",
+      "accounts": 9,
+      "dramas": 587
+    },
+    {
+      "name": "scheduled_report_20260627-023058.json",
+      "summary_url": "scheduled_report_20260627-023058.csv",
+      "dramas_url": "scheduled_dramas_20260627-023058.csv",
+      "generated_at": "2026-06-27T02:30:58",
+      "title": "2026-06-27 10:30:58 北京时间",
+      "accounts": 9,
+      "dramas": 81
+    },
+    {
+      "name": "scheduled_report_20260626-183509.json",
+      "summary_url": "scheduled_report_20260626-183509.csv",
+      "dramas_url": "scheduled_dramas_20260626-183509.csv",
+      "generated_at": "2026-06-26T18:35:09",
+      "title": "2026-06-27 02:35:09 北京时间",
+      "accounts": 9,
+      "dramas": 78
+    }
+  ]
 }
