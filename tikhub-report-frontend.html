@@ -790,6 +790,7 @@ async function run(){
   $("stopBtn").style.display="none";
   $("runSub").textContent=cancelled?"已停止":"完成";
   updateSummary(failed);
+  hydrateChineseTitles(dramaRows);
   if(rows.length)toast("完成 "+rows.length+" 个账号");
 }
 
@@ -844,6 +845,49 @@ function accountOf(row){return valueOf(row,["账号","Account / 账号"],"");}
 function nickOf(row){return valueOf(row,["昵称","Nickname / 昵称"],accountOf(row));}
 function linkOf(row){const acc=accountOf(row);return valueOf(row,["主页链接","Source Profile URL / 来源主页"],acc?("https://www.tiktok.com/@"+acc):"");}
 function dramaTitleOf(row){return valueOf(row,["English Title / 英文剧名","短剧名"],"");}
+const titleTranslationCache=new Map();
+let titleHydrateRun=0;
+function chineseTitleOf(row){
+  const direct=valueOf(row,["Chinese Title / 中文剧名","中文剧名"],"");
+  if(direct)return direct;
+  return titleTranslationCache.get(dramaTitleOf(row))||"";
+}
+async function hydrateChineseTitles(targetRows){
+  const list=(targetRows||[]).filter(Boolean);
+  if(!list.length)return;
+  const titles=[...new Set(list
+    .filter(row=>!valueOf(row,["Chinese Title / 中文剧名","中文剧名"],""))
+    .map(row=>dramaTitleOf(row))
+    .filter(Boolean)
+  )].slice(0,1000);
+  const missing=titles.filter(title=>!titleTranslationCache.has(title));
+  if(!missing.length){
+    renderResultTable();
+    return;
+  }
+  const run=++titleHydrateRun;
+  try{
+    const r=await fetch(backendUrl("/translate-titles",{}),{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({titles:missing}),
+      cache:"no-store",
+    });
+    const data=await r.json().catch(()=>null);
+    if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
+    const translations=(data&&data.translations)||{};
+    for(const title of missing)titleTranslationCache.set(title,translations[title]||"");
+    for(const row of list){
+      if(valueOf(row,["Chinese Title / 中文剧名","中文剧名"],""))continue;
+      const cn=titleTranslationCache.get(dramaTitleOf(row));
+      if(cn){
+        row["Chinese Title / 中文剧名"]=cn;
+        row["中文剧名"]=cn;
+      }
+    }
+    if(run===titleHydrateRun)renderResultTable();
+  }catch(_){}
+}
 function dramaViewsOf(row){return toInt(valueOf(row,["Views / 观看数","累计观看"],0));}
 function dramaEpisodesOf(row){return toInt(valueOf(row,["Episodes / 集数","集数"],0));}
 function dramaRankOf(row,index){return toInt(valueOf(row,["Rank in Account / 账号内排序"],index+1));}
@@ -891,7 +935,7 @@ function appendDetailCell(tr,c,row,index){
   else if(c==="账号内排名"){td.className="num";td.textContent=fmt(dramaRankOf(row,index));}
   else if(c==="短剧ID"){td.className="detail-id";td.textContent=valueOf(row,["Drama ID / 短剧ID"],"");}
   else if(c==="英文剧名"){td.className="detail-title";td.textContent=dramaTitleOf(row);}
-  else if(c==="中文剧名"){td.className="detail-title";td.textContent=valueOf(row,["Chinese Title / 中文剧名"],"");}
+  else if(c==="中文剧名"){td.className="detail-title";td.textContent=chineseTitleOf(row);}
   else if(c==="集数"){td.className="num";td.textContent=fmt(dramaEpisodesOf(row));}
   else if(c==="观看"){td.className="num";td.textContent=fmtPlay(dramaViewsOf(row));}
   else if(c==="时长"){
@@ -1022,7 +1066,7 @@ function normalizeDramaRow(d,index){
     "Rank in Account / 账号内排序":dramaRankOf(d,index),
     "Drama ID / 短剧ID":valueOf(d,["Drama ID / 短剧ID"],""),
     "English Title / 英文剧名":dramaTitleOf(d),
-    "Chinese Title / 中文剧名":valueOf(d,["Chinese Title / 中文剧名"],""),
+    "Chinese Title / 中文剧名":chineseTitleOf(d),
     "Episodes / 集数":episodes,
     "Views / 观看数":views,
     "Duration Seconds / 总时长(秒)":valueOf(d,["Duration Seconds / 总时长(秒)"],""),
@@ -1142,6 +1186,7 @@ function loadBackendPayload(payload){
   const dataTime=reportTimeLabel(payload.generated_at);
   updateSummary(failed, dataTime);
   backendSetStatus("数据时间 "+dataTime+" · 已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧", true);
+  hydrateChineseTitles(dramaRows);
   if(summary.length)toast("已加载最新结果");
 }
 async function loadBackendLatest(){

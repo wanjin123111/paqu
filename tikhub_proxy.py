@@ -80,10 +80,12 @@ SCHEDULE_MAX_PLAYLISTS = _env_int("SCHEDULE_MAX_PLAYLISTS", 300, 0, 20000)
 SCHEDULE_PLAYLIST_PAGE_SIZE = _env_int("SCHEDULE_PLAYLIST_PAGE_SIZE", 20, 1, 50)
 SCHEDULE_PLAYLIST_VIDEO_PAGE_SIZE = _env_int("SCHEDULE_PLAYLIST_VIDEO_PAGE_SIZE", 30, 1, 50)
 SCHEDULE_MAX_PLAYLIST_VIDEO_PAGES = _env_int("SCHEDULE_MAX_PLAYLIST_VIDEO_PAGES", 200, 1, 1000)
+SCHEDULE_TRANSLATE_TITLES = _env_bool("SCHEDULE_TRANSLATE_TITLES", True)
 SCHEDULE_DELAY_MS = _env_int("SCHEDULE_DELAY_MS", 300, 0, 60000)
 SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
 SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
+TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
 
 DEFAULT_ENDPOINTS = {
     "profile": "/api/v1/tiktok/app/v3/handler_user_profile",
@@ -139,6 +141,7 @@ DRAMA_COLUMNS = ["Account / 账号", "Nickname / 昵称", "Screenshot Name / 截
 
 JOB_LOCK = threading.Lock()
 LAST_JOB = {"running": False, "started_at": None, "finished_at": None, "result": None, "error": None}
+TITLE_TRANSLATION_CACHE = {}
 
 
 class TikHubError(Exception):
@@ -237,6 +240,54 @@ def _to_text(value, limit=None):
     if limit and len(text) > limit:
         return text[:limit].rstrip()
     return text
+
+
+def _has_cjk(text):
+    return bool(re.search(r"[\u3400-\u9fff]", text or ""))
+
+
+def _translate_english_title(title):
+    title = _to_text(title, 160)
+    if not title:
+        return ""
+    if _has_cjk(title):
+        return title
+    key = title.lower()
+    if key in TITLE_TRANSLATION_CACHE:
+        return TITLE_TRANSLATION_CACHE[key]
+    if not SCHEDULE_TRANSLATE_TITLES:
+        TITLE_TRANSLATION_CACHE[key] = ""
+        return ""
+    translated = ""
+    params = urllib.parse.urlencode({
+        "client": "gtx",
+        "sl": "en",
+        "tl": "zh-CN",
+        "dt": "t",
+        "q": title,
+    })
+    url = TRANSLATE_HOST + "/translate_a/single?" + params
+    headers = {"Accept": "application/json", "User-Agent": DEFAULT_UA}
+    try:
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+        translated = "".join(part[0] for part in (data[0] or []) if part and part[0])
+        translated = _to_text(translated, 160)
+        if translated.lower() == title.lower():
+            translated = ""
+    except Exception:
+        translated = ""
+    if translated:
+        TITLE_TRANSLATION_CACHE[key] = translated
+    return translated
+
+
+def _chinese_title_or_translate(chinese_title, english_title):
+    chinese_title = _to_text(chinese_title, 160)
+    if chinese_title:
+        return chinese_title
+    return _translate_english_title(english_title)
 
 
 def _yes_no(value):
@@ -714,7 +765,7 @@ def _get_tiktok_drama_library(secuid, uid):
             views = _to_int(_deep_find(item, DRAMA_VIEW_KEYS))
             duration_seconds = _to_int(_deep_find(item, DRAMA_DURATION_SECONDS_KEYS))
             english_title = _to_text(_deep_find(item, DRAMA_EN_TITLE_KEYS) or name, 160)
-            chinese_title = _to_text(_deep_find(item, DRAMA_CN_TITLE_KEYS), 160)
+            chinese_title = _chinese_title_or_translate(_deep_find(item, DRAMA_CN_TITLE_KEYS), english_title)
             english_desc = _to_text(_deep_find_any(item, DRAMA_EN_DESC_KEYS), 600)
             chinese_desc = _to_text(_deep_find_any(item, DRAMA_CN_DESC_KEYS), 600)
             dramas.append({
@@ -850,6 +901,7 @@ def _scrape_account(uid):
         views = _to_int(drama.get("views"))
         avg_views = round(views / episodes) if episodes else 0
         title = drama.get("english_title") or drama.get("name") or ""
+        chinese_title = _chinese_title_or_translate(drama.get("chinese_title", ""), title)
         profile_url = "https://www.tiktok.com/@" + uid
         drama_rows.append({
             "Account / 账号": uid,
@@ -858,7 +910,7 @@ def _scrape_account(uid):
             "Rank in Account / 账号内排序": rank,
             "Drama ID / 短剧ID": drama.get("drama_id", ""),
             "English Title / 英文剧名": title,
-            "Chinese Title / 中文剧名": drama.get("chinese_title", ""),
+            "Chinese Title / 中文剧名": chinese_title,
             "Episodes / 集数": episodes,
             "Views / 观看数": views,
             "Duration Seconds / 总时长(秒)": _to_int(drama.get("duration_seconds")),
@@ -1006,6 +1058,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/save":
             self._save_file()
             return
+        if parsed.path == "/translate-titles":
+            self._translate_titles()
+            return
         qs = urllib.parse.parse_qs(parsed.query)
         target = qs.get("url", [None])[0]
         if not target:
@@ -1135,6 +1190,23 @@ class Handler(BaseHTTPRequestHandler):
             self._send_bytes(200, json.dumps({"ok": True, "path": full}).encode("utf-8"), "application/json")
         except Exception as e:
             self._send_bytes(500, json.dumps({"ok": False, "error": str(e)}).encode("utf-8"), "application/json")
+
+    def _translate_titles(self):
+        try:
+            ln = int(self.headers.get("Content-Length", 0) or 0)
+            payload = json.loads(self.rfile.read(ln) or b"{}")
+            titles = payload.get("titles", [])
+            if not isinstance(titles, list):
+                titles = []
+            translations = {}
+            for title in titles[:1000]:
+                title = _to_text(title, 160)
+                if not title or title in translations:
+                    continue
+                translations[title] = _translate_english_title(title)
+            self._send_json(200, {"ok": True, "translations": translations})
+        except Exception as exc:
+            self._send_json(500, {"ok": False, "error": str(exc)})
 
     # ---- 静态托管 ----
     def _serve_static(self, path):
