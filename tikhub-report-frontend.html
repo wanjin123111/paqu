@@ -509,6 +509,7 @@ let rows=[];                // 结果行(账号汇总)
 let dramaRows=[];           // 全部短剧明细(用于 All Drama List / Top Dramas 两个表)
 let resultView="summary";
 let detailAccountIndex=0;
+let detailAccountKey=store.get("thr_detail_account")||"";
 let running=false, cancelled=false;
 let corsShown=false;
 
@@ -1123,12 +1124,40 @@ function detailAccounts(){
   }
   return out;
 }
+function setDetailAccountSelection(list,index){
+  if(!list.length){
+    detailAccountIndex=0;
+    return null;
+  }
+  const safeIndex=Math.max(0,Math.min(Number(index)||0,list.length-1));
+  const item=list[safeIndex];
+  detailAccountIndex=safeIndex;
+  detailAccountKey=item.account;
+  store.set("thr_detail_account",detailAccountKey);
+  return item;
+}
+function syncDetailAccountSelection(list){
+  if(!list.length){
+    detailAccountIndex=0;
+    return null;
+  }
+  if(detailAccountKey){
+    const idx=list.findIndex(item=>item.account===detailAccountKey);
+    if(idx>=0){
+      detailAccountIndex=idx;
+      return list[idx];
+    }
+  }
+  const idx=detailAccountIndex<list.length?detailAccountIndex:0;
+  if(!detailAccountKey)return setDetailAccountSelection(list,idx);
+  detailAccountIndex=idx;
+  return list[idx];
+}
 function updateDetailControls(list){
   const nav=$("detailNav"), sel=$("detailAccountSelect"), count=$("detailCount");
   if(!nav||!sel||!count)return list;
   nav.classList.toggle("show",resultView==="detail");
   if(resultView!=="detail")return list;
-  if(detailAccountIndex>=list.length)detailAccountIndex=0;
   sel.innerHTML="";
   list.forEach((item,i)=>{
     const opt=document.createElement("option");
@@ -1137,8 +1166,8 @@ function updateDetailControls(list){
     opt.textContent=(item.nick||item.account)+" (@"+item.account+") · "+total+" 部";
     sel.appendChild(opt);
   });
+  const current=syncDetailAccountSelection(list);
   sel.value=String(detailAccountIndex);
-  const current=list[detailAccountIndex];
   const total=current?dramaRows.filter(row=>accountOf(row)===current.account).length:0;
   count.textContent=current?("第 "+(detailAccountIndex+1)+"/"+list.length+" 个账号 · "+total+" 部短剧"):"暂无账号明细";
   return list;
@@ -1724,19 +1753,21 @@ function init(){
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";renderResultTable();});
   $("detailAccountSelect").addEventListener("change",()=>{
-    detailAccountIndex=Number($("detailAccountSelect").value)||0;
+    setDetailAccountSelection(detailAccounts(),Number($("detailAccountSelect").value)||0);
     renderResultTable();
   });
   $("detailPrevBtn").addEventListener("click",()=>{
     const list=detailAccounts();
     if(!list.length)return;
-    detailAccountIndex=(detailAccountIndex+list.length-1)%list.length;
+    syncDetailAccountSelection(list);
+    setDetailAccountSelection(list,(detailAccountIndex+list.length-1)%list.length);
     renderResultTable();
   });
   $("detailNextBtn").addEventListener("click",()=>{
     const list=detailAccounts();
     if(!list.length)return;
-    detailAccountIndex=(detailAccountIndex+1)%list.length;
+    syncDetailAccountSelection(list);
+    setDetailAccountSelection(list,(detailAccountIndex+1)%list.length);
     renderResultTable();
   });
   $("schedEnabled").addEventListener("change",()=>{store.set("thr_sched_on",$("schedEnabled").checked?"1":"0");if($("schedEnabled").checked){toast("已开启每天定时");$("schedDetails").open=true;}refreshSchedUI();});
