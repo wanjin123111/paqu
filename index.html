@@ -121,6 +121,8 @@
   .result-tabs{display:flex;gap:6px;padding:4px;background:var(--paper);border:1px solid var(--line);border-radius:10px}
   .tab-btn{border:0;background:transparent;border-radius:7px;padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer}
   .tab-btn.active{background:var(--card);color:var(--accent);box-shadow:0 1px 2px rgba(20,22,29,.07)}
+  .result-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+  .sort-btn{min-width:52px}
   .detail-nav{display:none;align-items:center;gap:8px;flex-wrap:wrap}
   .detail-nav.show{display:flex}
   .detail-select{min-width:220px;max-width:360px;border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--ink)}
@@ -423,11 +425,17 @@ shortdramatime"></textarea>
           <button class="tab-btn active" id="summaryTabBtn" type="button" data-view="summary">账号汇总</button>
           <button class="tab-btn" id="detailTabBtn" type="button" data-view="detail">账号明细</button>
         </div>
-        <div class="detail-nav" id="detailNav">
-          <button class="mini-btn" id="detailPrevBtn" type="button">上一账号</button>
-          <select class="detail-select" id="detailAccountSelect" aria-label="选择账号"></select>
-          <button class="mini-btn" id="detailNextBtn" type="button">下一账号</button>
-          <span class="detail-count" id="detailCount"></span>
+        <div class="result-controls">
+          <div class="result-tabs" role="group" aria-label="排序筛选">
+            <button class="tab-btn sort-btn" id="sortHotBtn" type="button" aria-pressed="false">最热</button>
+            <button class="tab-btn sort-btn active" id="sortLatestBtn" type="button" aria-pressed="true">最新</button>
+          </div>
+          <div class="detail-nav" id="detailNav">
+            <button class="mini-btn" id="detailPrevBtn" type="button">上一账号</button>
+            <select class="detail-select" id="detailAccountSelect" aria-label="选择账号"></select>
+            <button class="mini-btn" id="detailNextBtn" type="button">下一账号</button>
+            <span class="detail-count" id="detailCount"></span>
+          </div>
         </div>
       </div>
       <div class="table-scroll">
@@ -508,6 +516,7 @@ let cfg={};                 // 运行时从设置读取
 let rows=[];                // 结果行(账号汇总)
 let dramaRows=[];           // 全部短剧明细(用于 All Drama List / Top Dramas 两个表)
 let resultView="summary";
+let resultSort=store.get("thr_result_sort")||"latest";
 let detailAccountIndex=0;
 let detailAccountKey=store.get("thr_detail_account")||"";
 let running=false, cancelled=false;
@@ -1049,6 +1058,33 @@ async function hydrateChineseTitles(targetRows){
 function dramaViewsOf(row){return toInt(valueOf(row,["Views / 观看数","累计观看"],0));}
 function dramaEpisodesOf(row){return toInt(valueOf(row,["Episodes / 集数","集数"],0));}
 function dramaRankOf(row,index){return toInt(valueOf(row,["Rank in Account / 账号内排序"],index+1));}
+function summaryHotOf(row){return toInt(valueOf(row,[DISPLAY_COLUMNS[5],COLUMNS[7]],0));}
+function sortedSummaryRows(){
+  const list=[...rows];
+  if(resultSort==="hot")list.sort((a,b)=>summaryHotOf(b)-summaryHotOf(a));
+  return list;
+}
+function sortedDetailRows(details){
+  const list=[...details];
+  if(resultSort==="hot"){
+    return list.sort((a,b)=>dramaViewsOf(b)-dramaViewsOf(a)||dramaRankOf(a,9999)-dramaRankOf(b,9999));
+  }
+  return list.sort((a,b)=>dramaRankOf(a,9999)-dramaRankOf(b,9999));
+}
+function updateSortControls(){
+  const hot=$("sortHotBtn"), latest=$("sortLatestBtn");
+  if(!hot||!latest)return;
+  hot.classList.toggle("active",resultSort==="hot");
+  latest.classList.toggle("active",resultSort==="latest");
+  hot.setAttribute("aria-pressed",resultSort==="hot"?"true":"false");
+  latest.setAttribute("aria-pressed",resultSort==="latest"?"true":"false");
+}
+function setResultSort(mode){
+  resultSort=mode==="hot"?"hot":"latest";
+  store.set("thr_result_sort",resultSort);
+  updateSortControls();
+  renderResultTable();
+}
 function setHeader(columns){
   const thead=$("resultTable").querySelector("thead");
   thead.innerHTML="";
@@ -1196,13 +1232,14 @@ function renderResultTable(){
   card.classList.toggle("summary-view",resultView!=="detail");
   $("summaryTabBtn").classList.toggle("active",resultView==="summary");
   $("detailTabBtn").classList.toggle("active",resultView==="detail");
+  updateSortControls();
   tb.innerHTML="";
   const list=updateDetailControls(detailAccounts());
   if(resultView==="detail"){
     setHeader(DRAMA_DETAIL_COLUMNS);
     const current=list[detailAccountIndex];
     let details=current?dramaRows.filter(row=>accountOf(row)===current.account):dramaRows;
-    details=[...details].sort((a,b)=>dramaRankOf(a,9999)-dramaRankOf(b,9999));
+    details=sortedDetailRows(details);
     if(!details.length){
       const tr=document.createElement("tr");
       const td=document.createElement("td");
@@ -1221,7 +1258,7 @@ function renderResultTable(){
     return;
   }
   setHeader(DISPLAY_COLUMNS);
-  for(const row of rows){
+  for(const row of sortedSummaryRows()){
     const tr=document.createElement("tr");
     for(const c of DISPLAY_COLUMNS)appendSummaryCell(tr,c,row);
     tb.appendChild(tr);
@@ -1767,6 +1804,9 @@ function init(){
   }
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";renderResultTable();});
+  $("sortHotBtn").addEventListener("click",()=>setResultSort("hot"));
+  $("sortLatestBtn").addEventListener("click",()=>setResultSort("latest"));
+  updateSortControls();
   $("detailAccountSelect").addEventListener("change",()=>{
     setDetailAccountSelection(detailAccounts(),Number($("detailAccountSelect").value)||0);
     renderResultTable();
