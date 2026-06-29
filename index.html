@@ -120,7 +120,26 @@
   td.num{text-align:right;font-family:var(--mono)}
   td.name{white-space:normal;max-width:320px}
   td.link a{font-family:var(--mono);font-size:11.5px}
+  td.account-cell{white-space:normal}
+  .account-nick{font-weight:600;color:var(--ink);line-height:1.35;word-break:break-word}
+  .account-id{display:inline-block;margin-top:3px;font-family:var(--mono);font-size:11.5px;color:var(--accent);word-break:break-all}
   .row-err td{background:var(--err-soft)}
+  body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin-left:50%;transform:translateX(-50%)}
+  body.public-mode #resultCard .card-body{padding:18px 22px 22px}
+  body.public-mode #resultCard .table-scroll{max-height:none;overflow:visible}
+  body.public-mode #resultCard table{table-layout:fixed;white-space:normal;font-size:12px}
+  body.public-mode #resultCard thead th{top:63px}
+  body.public-mode #resultCard tbody td{vertical-align:top;padding:12px 10px}
+  body.public-mode #resultCard th:nth-child(1),body.public-mode #resultCard td:nth-child(1){width:190px}
+  body.public-mode #resultCard th:nth-child(2),body.public-mode #resultCard td:nth-child(2),
+  body.public-mode #resultCard th:nth-child(3),body.public-mode #resultCard td:nth-child(3){width:110px}
+  body.public-mode #resultCard th:nth-child(4),body.public-mode #resultCard td:nth-child(4),
+  body.public-mode #resultCard th:nth-child(5),body.public-mode #resultCard td:nth-child(5){width:76px}
+  body.public-mode #resultCard th:nth-child(6),body.public-mode #resultCard td:nth-child(6),
+  body.public-mode #resultCard th:nth-child(7),body.public-mode #resultCard td:nth-child(7),
+  body.public-mode #resultCard th:nth-child(9),body.public-mode #resultCard td:nth-child(9){width:118px}
+  body.public-mode #resultCard th:nth-child(8),body.public-mode #resultCard td:nth-child(8){width:auto}
+  body.public-mode #resultCard th:nth-child(10),body.public-mode #resultCard td:nth-child(10){width:150px}
 
   .foot-note{font-size:12px;color:var(--ink-faint);line-height:1.6;padding:0 4px}
 
@@ -137,9 +156,16 @@
   .history-empty{padding:14px 16px;color:var(--ink-faint);font-size:13px}
   .history-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border-top:1px solid var(--line)}
   .history-item:first-child{border-top:0}
+  .history-current{background:linear-gradient(180deg,#fff,#fbfcff)}
   .history-title{font-family:var(--mono);font-size:12.5px;color:var(--ink)}
   .history-meta{font-size:12px;color:var(--ink-faint);margin-top:2px}
   .history-links{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .history-archive{border-top:1px solid var(--line)}
+  .history-archive summary{cursor:pointer;list-style:none;padding:10px 13px;font-size:12.5px;font-weight:600;color:var(--ink-soft);background:var(--paper);display:flex;align-items:center;gap:8px}
+  .history-archive summary::-webkit-details-marker{display:none}
+  .history-archive summary::before{content:"▸";font-size:10px;transition:transform .15s}
+  .history-archive[open] summary::before{transform:rotate(90deg)}
+  .history-archive .history-item{background:#fff}
 
   .note-banner{display:none;background:var(--warn-soft);border:1px solid #F0D9A8;border-radius:11px;padding:13px 16px}
   .note-banner.show{display:block}
@@ -424,6 +450,7 @@ const VCOUNT_KEYS=["videoCount","aweme_count","video_count"];
 const SECUID_KEYS=["secUid","sec_uid","sec_user_id","secUserId"];
 
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
+const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 
 const DEFAULT_RENDER_PROXY="https://paqu-tikhub-proxy.onrender.com/?url={url}";
@@ -744,7 +771,7 @@ function ensureHeader(){
   const thead=$("resultTable").querySelector("thead");
   if(thead.children.length)return;
   const tr=document.createElement("tr");
-  for(const c of COLUMNS){const th=document.createElement("th");th.textContent=c;tr.appendChild(th);}
+  for(const c of DISPLAY_COLUMNS){const th=document.createElement("th");th.textContent=c;tr.appendChild(th);}
   thead.appendChild(tr);
 }
 function addRow(row){
@@ -752,9 +779,23 @@ function addRow(row){
   ensureHeader();
   const tb=$("resultTable").querySelector("tbody");
   const tr=document.createElement("tr");
-  for(const c of COLUMNS){
+  for(const c of DISPLAY_COLUMNS){
     const td=document.createElement("td");
-    if(NUM_COLS.has(c)){td.className="num";td.textContent=fmt(row[c]);}
+    if(c==="账号 / 昵称"){
+      td.className="account-cell";
+      const nick=document.createElement("div");
+      nick.className="account-nick";
+      nick.textContent=row["昵称"]||row["账号"]||"";
+      const a=document.createElement("a");
+      a.className="account-id";
+      a.href=row["主页链接"]||("https://www.tiktok.com/@"+row["账号"]);
+      a.target="_blank";
+      a.rel="noopener";
+      a.textContent="@"+(row["账号"]||"");
+      td.appendChild(nick);
+      td.appendChild(a);
+    }
+    else if(NUM_COLS.has(c)){td.className="num";td.textContent=fmt(row[c]);}
     else if(c==="主页链接"){td.className="link";const a=document.createElement("a");a.href=row[c];a.target="_blank";a.rel="noopener";a.textContent="@"+row["账号"];td.appendChild(a);}
     else if(c==="最高观看短剧"){td.className="name";td.textContent=row[c];}
     else td.textContent=row[c];
@@ -917,21 +958,24 @@ function renderHistoryList(items, source){
     box.innerHTML='<div class="history-empty">还没有历史记录。等云端定时任务跑完后会自动出现在这里。</div>';
     return;
   }
-  box.innerHTML=items.map(item=>{
+  const itemHtml=(item, isCurrent)=>{
     const jsonUrl=item.url||item.path||"";
     const csvUrl=item.summary_url||item.summaryPath||"";
     const dramasUrl=item.dramas_url||item.dramasPath||"";
     const displayTime=reportTimeLabel(item.generated_at)||reportTimeLabel(reportStamp(item.name))||item.title||reportStamp(item.name);
     const stats=(item.accounts||item.dramas)?(" · "+(item.accounts||0)+" 个账号 / "+(item.dramas||0)+" 条短剧"):"";
-    return '<div class="history-item">'+
+    return '<div class="history-item'+(isCurrent?' history-current':'')+'">'+
       '<div><div class="history-title">'+esc(displayTime)+'</div>'+
-      '<div class="history-meta">'+esc(source||"云端记录")+stats+'</div></div>'+
+      '<div class="history-meta">'+esc(isCurrent?"当前记录":(source||"云端记录"))+stats+'</div></div>'+
       '<div class="history-links">'+
         '<button class="mini-btn" type="button" data-report-json="'+esc(jsonUrl)+'">查看</button>'+
         (csvUrl?'<button class="mini-btn" type="button" data-report-download="'+esc(csvUrl)+'">账号CSV</button>':"")+
         (dramasUrl?'<button class="mini-btn" type="button" data-report-download="'+esc(dramasUrl)+'">短剧CSV</button>':"")+
       '</div></div>';
-  }).join("");
+  };
+  const current=items[0];
+  const archived=items.slice(1);
+  box.innerHTML=itemHtml(current, true)+(archived.length?'<details class="history-archive"><summary>历史记录 '+archived.length+' 条</summary>'+archived.map(item=>itemHtml(item, false)).join("")+'</details>':"");
   box.querySelectorAll("[data-report-json]").forEach(btn=>btn.addEventListener("click",async()=>{
     try{
       backendSetStatus("正在加载历史记录…");
