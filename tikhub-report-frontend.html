@@ -145,6 +145,10 @@
   .account-id{display:inline-block;margin-top:3px;font-family:var(--mono);font-size:11.5px;color:var(--accent);word-break:break-all}
   td.detail-title{white-space:normal;min-width:220px;line-height:1.35}
   td.detail-text{white-space:normal;min-width:180px;line-height:1.38;color:var(--ink-soft)}
+  td.detail-description{color:var(--ink-soft)}
+  .description-text{display:block;max-height:9em;overflow:auto;padding-right:8px;line-height:1.45;white-space:normal}
+  .description-text::-webkit-scrollbar{width:6px}
+  .description-text::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:999px}
   .theme-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start}
   .theme-tag{display:inline-flex;align-items:center;max-width:100%;padding:3px 7px;border:1px solid #dbe4f0;border-radius:999px;background:#f8fafc;color:#334155;font-size:11.5px;line-height:1.2;white-space:normal;word-break:break-word}
   td.detail-id{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);word-break:break-all}
@@ -156,7 +160,9 @@
   body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin-left:50%;transform:translateX(-50%)}
   body.public-mode #resultCard .card-body{padding:18px 22px 22px}
   body.public-mode #resultCard .table-scroll{max-height:none;overflow:visible}
+  body.public-mode #resultCard.detail-view .table-scroll{overflow:auto}
   body.public-mode #resultCard table{table-layout:fixed;white-space:normal;font-size:12px}
+  body.public-mode #resultCard.detail-view table{width:2220px;min-width:2220px}
   body.public-mode #resultCard thead th{top:63px}
   body.public-mode #resultCard tbody td{vertical-align:top;padding:12px 10px}
   body.public-mode #resultCard th:nth-child(1),body.public-mode #resultCard td:nth-child(1){width:190px}
@@ -171,15 +177,17 @@
   body.public-mode #resultCard th:nth-child(10),body.public-mode #resultCard td:nth-child(10){width:150px}
   body.public-mode #resultCard.detail-view td.detail-title,
   body.public-mode #resultCard.detail-view td.detail-text{min-width:0}
+  body.public-mode #resultCard.detail-view td.num{white-space:nowrap}
   body.public-mode #resultCard.detail-view th:nth-child(1),body.public-mode #resultCard.detail-view td:nth-child(1){width:170px}
   body.public-mode #resultCard.detail-view th:nth-child(2),body.public-mode #resultCard.detail-view td:nth-child(2),
   body.public-mode #resultCard.detail-view th:nth-child(3),body.public-mode #resultCard.detail-view td:nth-child(3){width:220px}
-  body.public-mode #resultCard.detail-view th:nth-child(4),body.public-mode #resultCard.detail-view td:nth-child(4){width:78px}
-  body.public-mode #resultCard.detail-view th:nth-child(5),body.public-mode #resultCard.detail-view td:nth-child(5){width:105px}
-  body.public-mode #resultCard.detail-view th:nth-child(6),body.public-mode #resultCard.detail-view td:nth-child(6){width:115px}
+  body.public-mode #resultCard.detail-view th:nth-child(4),body.public-mode #resultCard.detail-view td:nth-child(4){width:112px}
+  body.public-mode #resultCard.detail-view th:nth-child(5),body.public-mode #resultCard.detail-view td:nth-child(5){width:70px}
+  body.public-mode #resultCard.detail-view th:nth-child(6),body.public-mode #resultCard.detail-view td:nth-child(6){width:110px}
   body.public-mode #resultCard.detail-view th:nth-child(7),body.public-mode #resultCard.detail-view td:nth-child(7){width:150px}
-  body.public-mode #resultCard.detail-view th:nth-child(8),body.public-mode #resultCard.detail-view td:nth-child(8){width:auto}
-  body.public-mode #resultCard.detail-view th:nth-child(9),body.public-mode #resultCard.detail-view td:nth-child(9){width:135px}
+  body.public-mode #resultCard.detail-view th:nth-child(8),body.public-mode #resultCard.detail-view td:nth-child(8){width:230px}
+  body.public-mode #resultCard.detail-view th:nth-child(9),body.public-mode #resultCard.detail-view td:nth-child(9){width:780px}
+  body.public-mode #resultCard.detail-view th:nth-child(10),body.public-mode #resultCard.detail-view td:nth-child(10){width:150px}
 
   .foot-note{font-size:12px;color:var(--ink-faint);line-height:1.6;padding:0 4px}
 
@@ -1286,8 +1294,16 @@ function appendDetailCell(tr,c,row,index){
     else if(detailFieldAwaiting(row,c))setAwaitingCell(td);
     else setMutedCell(td,"暂无");
   }else if(c==="简介"){
-    td.className="detail-text";
-    setDetailOptionalCell(td,dramaDescriptionTextOf(row),row,c);
+    td.className="detail-text detail-description";
+    const description=dramaDescriptionTextOf(row);
+    if(description){
+      const text=document.createElement("div");
+      text.className="description-text";
+      text.textContent=description;
+      td.appendChild(text);
+    }else{
+      setDetailOptionalCell(td,description,row,c);
+    }
   }else if(c==="主页链接"){
     td.className="link";
     const a=document.createElement("a");
