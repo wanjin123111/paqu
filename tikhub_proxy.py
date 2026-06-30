@@ -90,6 +90,7 @@ SCHEDULE_DELAY_MS = _env_int("SCHEDULE_DELAY_MS", 300, 0, 60000)
 SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
 SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
 AUTO_REFRESH_COOLDOWN_SECONDS = _env_int("AUTO_REFRESH_COOLDOWN_SECONDS", 300, 30, 86400)
+VIDEO_PLAY_URL_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_URL_CACHE_TTL_SECONDS", 600, 0, 86400)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
 
@@ -109,6 +110,11 @@ POST_EP_CANDIDATES = [
 PLAYLIST_VIDEO_EP_CANDIDATES = [
     "/api/v1/tiktok/web/fetch_user_mix",
     "/api/v1/tiktok/web/fetch_play_list_videos",
+]
+SINGLE_VIDEO_EP_CANDIDATES = [
+    "/api/v1/tiktok/app/v3/fetch_one_video",
+    "/api/v1/tiktok/app/v3/fetch_one_video_v2",
+    "/api/v1/tiktok/app/v3/fetch_one_video_v3",
 ]
 PLAY_KEYS = ("play_count", "playCount", "play_cnt")
 DESC_KEYS = ("desc", "title", "content", "aweme_title", "text")
@@ -165,6 +171,8 @@ LAST_AUTO_REFRESH_AT = 0.0
 DRAMA_DETAIL_CACHE = None
 DRAMA_DETAIL_CACHE_LOCK = threading.Lock()
 TITLE_TRANSLATION_CACHE = {}
+VIDEO_PLAY_URL_CACHE = {}
+VIDEO_PLAY_URL_CACHE_LOCK = threading.Lock()
 THEME_TRANSLATION_MAP = {
     "rural area": "乡村",
     "ensemble cast": "群像",
@@ -318,6 +326,90 @@ def _build_tiktok_video_url(uid, video_id):
 
 def _video_link_from_item(uid, item):
     return _first_http_url(item, VIDEO_LINK_KEYS) or _build_tiktok_video_url(uid, _get_video_id(item))
+
+
+def _first_addr_url(value):
+    if isinstance(value, dict):
+        for key in ("url_list", "urlList", "urls"):
+            urls = value.get(key)
+            if isinstance(urls, list):
+                for url in urls:
+                    text = _to_text(url)
+                    if text.startswith("http"):
+                        return text
+            elif isinstance(urls, str) and urls.startswith("http"):
+                return urls
+        for key in ("url", "uri"):
+            text = _to_text(value.get(key))
+            if text.startswith("http"):
+                return text
+    elif isinstance(value, list):
+        for item in value:
+            text = _to_text(item)
+            if text.startswith("http"):
+                return text
+    return ""
+
+
+def _video_play_url_from_item(item):
+    if not isinstance(item, dict):
+        return ""
+    video = item.get("video")
+    if not isinstance(video, dict):
+        return ""
+    containers = []
+    for key in (
+        "play_addr_h264", "playAddrH264", "play_addr",
+        "playAddr", "play_addr_bytevc1", "playAddrBytevc1",
+    ):
+        containers.append(video.get(key))
+    bit_rates = video.get("bit_rate") or video.get("bitRate") or []
+    if isinstance(bit_rates, list):
+        for item_rate in bit_rates:
+            if isinstance(item_rate, dict):
+                containers.append(item_rate.get("play_addr") or item_rate.get("playAddr"))
+    for key in ("download_addr", "downloadAddr"):
+        containers.append(video.get(key))
+    for container in containers:
+        url = _first_addr_url(container)
+        if url:
+            return url
+    return ""
+
+
+def _video_play_url_from_tree(obj, depth=0):
+    if depth > 8 or obj is None:
+        return ""
+    if isinstance(obj, dict):
+        url = _video_play_url_from_item(obj)
+        if url:
+            return url
+        for key in (
+            "aweme_detail", "awemeDetail", "item_info", "itemInfo",
+            "item", "aweme", "video_detail", "videoDetail", "data",
+        ):
+            if key in obj:
+                url = _video_play_url_from_tree(obj.get(key), depth + 1)
+                if url:
+                    return url
+        for key in ("aweme_list", "awemeList", "item_list", "itemList"):
+            value = obj.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    url = _video_play_url_from_tree(item, depth + 1)
+                    if url:
+                        return url
+        for value in obj.values():
+            if isinstance(value, (dict, list)):
+                url = _video_play_url_from_tree(value, depth + 1)
+                if url:
+                    return url
+    elif isinstance(obj, list):
+        for item in obj:
+            url = _video_play_url_from_tree(item, depth + 1)
+            if url:
+                return url
+    return ""
 
 
 def _direct_find_any(obj, keys):
@@ -777,6 +869,35 @@ def _get_video_id(video):
     return "" if found is None else str(found)
 
 
+def _get_video_play_url(video_id, started=None):
+    clean_id = _clean_drama_id(video_id)
+    if not clean_id or (started is not None and _runtime_exceeded(started)):
+        return ""
+    now = time.time()
+    if VIDEO_PLAY_URL_CACHE_TTL_SECONDS:
+        with VIDEO_PLAY_URL_CACHE_LOCK:
+            cached = VIDEO_PLAY_URL_CACHE.get(clean_id)
+            if cached and now - cached.get("ts", 0) < VIDEO_PLAY_URL_CACHE_TTL_SECONDS:
+                return cached.get("url", "")
+    for endpoint in SINGLE_VIDEO_EP_CANDIDATES:
+        if started is not None and _runtime_exceeded(started):
+            return ""
+        params = {"aweme_id": clean_id}
+        if endpoint.endswith("_v3"):
+            params["region"] = TIKTOK_REGION
+        try:
+            data = _send_tikhub_get(endpoint, params, "TikHub single video endpoint")
+        except TikHubError:
+            continue
+        url = _video_play_url_from_tree(data)
+        if url:
+            if VIDEO_PLAY_URL_CACHE_TTL_SECONDS:
+                with VIDEO_PLAY_URL_CACHE_LOCK:
+                    VIDEO_PLAY_URL_CACHE[clean_id] = {"url": url, "ts": now}
+            return url
+    return ""
+
+
 def _get_playlist_id(playlist):
     if isinstance(playlist, dict):
         for key in PLAYLIST_ID_KEYS:
@@ -921,9 +1042,11 @@ def _get_all_videos(secuid, uid):
             video_id = _get_video_id(video)
             if video_id and video_id not in seen:
                 seen.add(video_id)
+                video_play_url = _video_play_url_from_item(video)
                 video_link = _first_http_url(video, VIDEO_LINK_KEYS) or _build_tiktok_video_url(uid, video_id)
                 videos.append({"id": video_id, "desc": _get_desc(video), "views": _get_play_count(video),
-                               "publish_time": _publish_time_of(video), "url": video_link})
+                               "publish_time": _publish_time_of(video), "url": video_link,
+                               "play_url": video_play_url})
                 added += 1
         if SCHEDULE_MAX_VIDEOS and len(videos) >= SCHEDULE_MAX_VIDEOS:
             return videos[:SCHEDULE_MAX_VIDEOS]
@@ -1024,7 +1147,7 @@ def _get_playlist_video_stats(playlist_id, started, uid=""):
             if video_id:
                 seen.add(video_id)
             if not first_link:
-                first_link = _video_link_from_item(uid, video)
+                first_link = _video_play_url_from_item(video) or _video_link_from_item(uid, video)
             episodes += 1
             total_views += _get_play_count(video)
             added += 1
@@ -1106,7 +1229,7 @@ def _get_drama_first_episode_publish_time(drama_id, uid, started):
     return min(candidates, key=lambda item: _publish_epoch(item) or float("inf"))
 
 
-def _get_drama_episode_link(drama_id, uid, started=None):
+def _get_drama_episode_link(drama_id, uid, started=None, target="play"):
     clean_id = _clean_drama_id(drama_id)
     if not clean_id or (started is not None and _runtime_exceeded(started)):
         return ""
@@ -1127,11 +1250,19 @@ def _get_drama_episode_link(drama_id, uid, started=None):
     batch = data.get("itemList") or data.get("item_list") or []
     if not isinstance(batch, list):
         return ""
+    fallback = ""
+    prefer_play = str(target or "").strip().lower() in ("", "play", "source", "direct", "media")
     for item in batch:
-        link = _video_link_from_item(uid, item)
-        if link:
-            return link
-    return ""
+        if prefer_play:
+            play_url = _video_play_url_from_item(item)
+            if play_url:
+                return play_url
+            play_url = _get_video_play_url(_get_video_id(item), started)
+            if play_url:
+                return play_url
+        if not fallback:
+            fallback = _video_link_from_item(uid, item)
+    return fallback
 
 
 def _get_tiktok_drama_library(secuid, uid):
@@ -1274,7 +1405,7 @@ def _group_by_title(videos):
         publish_time = min(publish_times, key=lambda item: _publish_epoch(item) or float("inf")) if publish_times else ""
         dramas.append({"name": name, "episodes": len(episodes), "views": total_views,
                        "publish_time": publish_time, "top_video_id": top.get("id", ""),
-                       "drama_link": top.get("url", "")})
+                       "drama_link": top.get("play_url") or top.get("url", "")})
     return dramas
 
 
@@ -1570,11 +1701,16 @@ class Handler(BaseHTTPRequestHandler):
         uid = (qs.get("uid", [""])[0] or qs.get("account", [""])[0]).strip().lstrip("@")
         drama_id = qs.get("drama_id", [""])[0] or qs.get("dramaID", [""])[0]
         video_id = qs.get("video_id", [""])[0] or qs.get("item_id", [""])[0]
+        target = qs.get("target", ["play"])[0] or "play"
+        prefer_play = str(target or "").strip().lower() in ("", "play", "source", "direct", "media")
         link = ""
         if video_id:
-            link = _build_tiktok_video_url(uid, video_id)
+            if prefer_play:
+                link = _get_video_play_url(video_id)
+            if not link:
+                link = _build_tiktok_video_url(uid, video_id)
         if not link and drama_id:
-            link = _get_drama_episode_link(drama_id, uid)
+            link = _get_drama_episode_link(drama_id, uid, target=target)
         if not link:
             self._send_json(404, {"ok": False, "error": "drama link not found"})
             return
@@ -1582,11 +1718,11 @@ class Handler(BaseHTTPRequestHandler):
         if redirect:
             self.send_response(302)
             self.send_header("Location", link)
-            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        self._send_json(200, {"ok": True, "url": link})
+        self._send_json(200, {"ok": True, "url": link, "target": target})
 
     def _run_scheduled_endpoint(self, qs):
         if not self._require_schedule_secret(qs):

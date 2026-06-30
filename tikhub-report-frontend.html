@@ -706,7 +706,7 @@ async function getAllVideos(secUid,uid,onPage){
     else{const r=await fetchPostsPage(epList,params,ep=>{lockedEp=ep;if(ep!==cfg.epPosts)log("视频接口改用 "+ep,"c-dim");});data=r.data;}
     if(!stats){stats={nickname:(deepFind(data,NICK_KEYS)||"")+"",followers:toInt(deepFind(data,FOLLOWER_KEYS)),hearts:toInt(deepFind(data,HEART_KEYS)),videoCount:toInt(deepFind(data,VCOUNT_KEYS))};}
     const batch=findVideoList(data);let added=0;
-    for(const v of batch){const id=getAwemeId(v);if(id&&!seen.has(id)){seen.add(id);videos.push({id,desc:getDesc(v)||"",views:getPlayCount(v),url:"https://www.tiktok.com/@"+encodeURIComponent(uid)+"/video/"+encodeURIComponent(id)});added++;}}
+    for(const v of batch){const id=getAwemeId(v);if(id&&!seen.has(id)){seen.add(id);videos.push({id,desc:getDesc(v)||"",views:getPlayCount(v),url:"https://www.tiktok.com/@"+encodeURIComponent(uid)+"/video/"+encodeURIComponent(id),play_url:videoPlayUrlOf(v)});added++;}}
     onPage(page,added,videos.length);
     if(cfg.maxVideos&&videos.length>=cfg.maxVideos){stop="达到设置的上限 "+cfg.maxVideos;break;}
     const[hasMore,next]=readPagination(data);
@@ -740,7 +740,7 @@ function groupByTitle(videos){
   const g=new Map();
   for(const v of videos){const key=titleKey(v.desc)||("__"+v.id);if(!g.has(key))g.set(key,[]);g.get(key).push(v);}
   const dramas=[];
-  for(const[key,eps]of g){const total=eps.reduce((s,e)=>s+e.views,0);const top=eps.reduce((a,b)=>b.views>a.views?b:a);const name=prettyName(top.desc)||top.desc.slice(0,40)||key;dramas.push({name,episodes:eps.length,views:total,top_video_id:top.id||"",drama_link:top.url||""});}
+  for(const[key,eps]of g){const total=eps.reduce((s,e)=>s+e.views,0);const top=eps.reduce((a,b)=>b.views>a.views?b:a);const name=prettyName(top.desc)||top.desc.slice(0,40)||key;dramas.push({name,episodes:eps.length,views:total,top_video_id:top.id||"",drama_link:top.play_url||top.url||""});}
   return dramas;
 }
 
@@ -763,7 +763,7 @@ async function groupByPlaylist(secUid,uid,onLog){
         if(cancelled)break;
         const pv=await apiGet(cfg.epPlaylistVideos,{mixId,mix_id:mixId,playlistId:mixId,count:"30",cursor:String(c2),max_cursor:String(c2)},"播放列表内视频接口");
         const vids=findVideoList(pv);if(!vids.length)break;
-        for(const v of vids){const vid=getAwemeId(v);if(!firstLink&&vid)firstLink=buildVideoLink(uid,vid);total+=getPlayCount(v);cnt++;}
+        for(const v of vids){const vid=getAwemeId(v);if(!firstLink)firstLink=videoPlayUrlOf(v)||(vid?buildVideoLink(uid,vid):"");total+=getPlayCount(v);cnt++;}
         const[hm,nc]=readPagination(pv);if(hm===false||hm===0||hm==="0"||nc==null||String(nc)===String(p2))break;p2=c2;c2=nc;await sleep(cfg.delay);
       }
       onLog("播放列表《"+String(nm).slice(0,26)+"》集"+cnt+" 观看"+fmt(total),"c-dim");
@@ -917,10 +917,13 @@ function nickOf(row){return valueOf(row,["昵称","Nickname / 昵称"],accountOf
 function linkOf(row){const acc=accountOf(row);return valueOf(row,["主页链接","Source Profile URL / 来源主页"],acc?("https://www.tiktok.com/@"+acc):"");}
 function dramaTitleOf(row){return valueOf(row,["English Title / 英文剧名","短剧名"],"");}
 function cleanDramaId(value){return String(value||"").trim().replace(/^ID\s+/i,"").replace(/[^0-9A-Za-z_-]/g,"");}
+function addrUrlOf(value){if(!value)return "";if(Array.isArray(value)){for(const item of value){if(typeof item==="string"&&/^https?:\/\//i.test(item))return item;}}else if(typeof value==="object"){const urls=value.url_list||value.urlList||value.urls;if(Array.isArray(urls)){for(const url of urls){if(typeof url==="string"&&/^https?:\/\//i.test(url))return url;}}for(const k of["url","uri"]){if(typeof value[k]==="string"&&/^https?:\/\//i.test(value[k]))return value[k];}}return "";}
+function videoPlayUrlOf(item){const video=item&&item.video;if(!video||typeof video!=="object")return "";const containers=[video.play_addr_h264,video.playAddrH264,video.play_addr,video.playAddr,video.play_addr_bytevc1,video.playAddrBytevc1];const bitRates=video.bit_rate||video.bitRate||[];if(Array.isArray(bitRates)){for(const rate of bitRates){if(rate&&typeof rate==="object")containers.push(rate.play_addr||rate.playAddr);}}containers.push(video.download_addr,video.downloadAddr);for(const box of containers){const url=addrUrlOf(box);if(url)return url;}return "";}
 function buildVideoLink(acc,id){const clean=cleanDramaId(id);return acc&&clean?("https://www.tiktok.com/@"+encodeURIComponent(acc)+"/video/"+encodeURIComponent(clean)):"";}
 function isGuessedDramaLink(url){return /^https:\/\/www\.tiktok\.com\/@[^/]+\/(?:series|playlist)\//i.test(String(url||""));}
-function dramaResolveLinkOf(row){const acc=accountOf(row), dramaId=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID"],"")), videoId=valueOf(row,["Top Video ID / 最高观看视频ID","top_video_id"],"");if(videoId)return buildVideoLink(acc,videoId);return acc&&dramaId?("/drama-link?uid="+encodeURIComponent(acc)+"&drama_id="+encodeURIComponent(dramaId)+"&redirect=1"):"";}
-function dramaLinkOf(row){const direct=valueOf(row,DRAMA_LINK_FIELDS,"");if(/^https?:\/\//i.test(String(direct))&&!isGuessedDramaLink(direct))return direct;return dramaResolveLinkOf(row);}
+function isMediaSourceLink(url){return /^https?:\/\/[^/]*(?:tiktokcdn|byteoversea|ibyte|bytecdn)/i.test(String(url||""))||/[?&]mime_type=video_/i.test(String(url||""));}
+function dramaResolveLinkOf(row){const acc=accountOf(row), dramaId=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID"],"")), videoId=cleanDramaId(valueOf(row,["Top Video ID / 最高观看视频ID","top_video_id"],""));if(acc&&dramaId)return "/drama-link?uid="+encodeURIComponent(acc)+"&drama_id="+encodeURIComponent(dramaId)+"&target=play&redirect=1";if(videoId)return "/drama-link?"+(acc?("uid="+encodeURIComponent(acc)+"&"):"")+"video_id="+encodeURIComponent(videoId)+"&target=play&redirect=1";return "";}
+function dramaLinkOf(row){const direct=valueOf(row,DRAMA_LINK_FIELDS,"");const resolved=dramaResolveLinkOf(row);if(resolved)return resolved;if(/^https?:\/\//i.test(String(direct))&&isMediaSourceLink(direct))return direct;if(/^https?:\/\//i.test(String(direct))&&!isGuessedDramaLink(direct))return direct;return "";}
 function readJsonStore(key){
   try{
     const value=store.get(key);
