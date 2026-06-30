@@ -1232,7 +1232,7 @@ function setAwaitingCell(td){
   td.classList.add("cell-muted");
   const span=document.createElement("span");
   span.className="loading-inline";
-  span.textContent="待补全";
+  span.textContent="补全中";
   td.appendChild(span);
 }
 function setOptionalCell(td,value,isLoading=false){
