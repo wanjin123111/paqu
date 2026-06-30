@@ -1252,30 +1252,37 @@ async function fetchReportPayloadForItem(item){
   if(!url)throw new Error("missing report url");
   return url.startsWith("http")||url.startsWith("public_reports/")?await fetchJsonUrl(url):await backendFetchJson(url,{}, {sendSecret:false});
 }
-function summaryGrowthOf(row){
-  if(!growthFilterState.baselineMap)return 0;
-  const key=summaryAccountKey(row);
-  const before=growthFilterState.baselineMap.has(key)?growthFilterState.baselineMap.get(key):0;
-  return summaryHotOf(row)-before;
+function dramaGrowthKey(row){
+  const id=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID","Drama ID"],""));
+  if(id)return "id:"+id;
+  const acc=summaryAccountKey(row);
+  const title=String(dramaTitleOf(row)||chineseTitleOf(row)||"").trim().toLowerCase();
+  return acc&&title?("title:"+acc+"|"+title):"";
 }
-function filteredSummaryRows(list){
+function dramaGrowthOf(row){
+  if(!growthFilterState.baselineMap)return 0;
+  const key=dramaGrowthKey(row);
+  const before=growthFilterState.baselineMap.has(key)?growthFilterState.baselineMap.get(key):0;
+  return dramaViewsOf(row)-before;
+}
+function filteredDetailRows(list){
   if(!growthFilterState.enabled||!growthFilterState.baselineMap)return list;
-  return list.filter(row=>summaryGrowthOf(row)>=growthFilterState.minValue);
+  return list.filter(row=>dramaGrowthOf(row)>=growthFilterState.minValue);
 }
 function growthFilterLabel(){
   if(!growthFilterState.enabled||!growthFilterState.baselineItem)return growthFilterState.status||"";
   const baseTime=reportTimeLabel(growthFilterState.baselineItem.generated_at)||reportTimeLabel(reportStamp(growthFilterState.baselineItem.name));
   return "\u8fd1"+growthFilterState.days+"\u5929 \u2265"+fmtPlay(growthFilterState.minValue)+" \u00b7 \u57fa\u51c6 "+baseTime;
 }
-function updateGrowthFilterControls(matchCount){
+function updateGrowthFilterControls(matchCount,totalCount){
   const box=$("growthFilter");if(!box)return;
-  box.hidden=resultView!=="summary";
+  box.hidden=resultView!=="detail";
   const days=$("growthDaysInput"), min=$("growthMinInput"), status=$("growthFilterStatus");
   if(days&&document.activeElement!==days)days.value=String(growthFilterState.days||7);
   if(min&&document.activeElement!==min)min.value=growthFilterState.minText||"100\u4e07";
   if(status){
     let text=growthFilterLabel();
-    if(growthFilterState.enabled&&growthFilterState.baselineMap&&typeof matchCount==="number")text+=" \u00b7 \u547d\u4e2d "+matchCount+"/"+rows.length;
+    if(growthFilterState.enabled&&growthFilterState.baselineMap&&typeof matchCount==="number")text+=" \u00b7 \u547d\u4e2d "+matchCount+"/"+(typeof totalCount==="number"?totalCount:dramaRows.length);
     status.textContent=text;
   }
 }
@@ -1292,9 +1299,12 @@ async function applyGrowthFilter(){
     const base=findGrowthBaselineItem(days);
     if(!base){growthFilterState.enabled=false;growthFilterState.baselineMap=null;growthFilterState.status="\u6ca1\u6709\u53ef\u5bf9\u6bd4\u7684\u5386\u53f2\u8bb0\u5f55";updateGrowthFilterControls();return;}
     const payload=await fetchReportPayloadForItem(base);
-    const summary=Array.isArray(payload.summary)?payload.summary:[];
+    const details=Array.isArray(payload.dramas_detail)?payload.dramas_detail:[];
     const map=new Map();
-    for(const row of summary){const key=summaryAccountKey(row);if(key)map.set(key,summaryHotOf(row));}
+    for(const row of details){
+      const key=dramaGrowthKey(row);
+      if(key)map.set(key,Math.max(map.get(key)||0,dramaViewsOf(row)));
+    }
     growthFilterState.enabled=true;growthFilterState.baselineItem=base;growthFilterState.baselineMap=map;growthFilterState.status="";
     resetDetailPage();renderResultTable();
   }catch(e){growthFilterState.enabled=false;growthFilterState.baselineMap=null;growthFilterState.status="\u7b5b\u9009\u5931\u8d25: "+(e.message||e);updateGrowthFilterControls();}
@@ -1304,12 +1314,12 @@ function clearGrowthFilter(){
   resetDetailPage();renderResultTable();
 }
 function sortedSummaryRows(){
-  const list=filteredSummaryRows([...rows]);
+  const list=[...rows];
   if(resultSort==="hot")list.sort((a,b)=>summaryHotOf(b)-summaryHotOf(a));
   return list;
 }
 function sortedDetailRows(details){
-  const list=[...details];
+  const list=filteredDetailRows([...details]);
   if(resultSort==="hot"){
     return list.sort((a,b)=>dramaViewsOf(b)-dramaViewsOf(a)||dramaRankOf(a,9999)-dramaRankOf(b,9999));
   }
@@ -1563,13 +1573,15 @@ function renderResultTable(){
     setHeader(DRAMA_DETAIL_COLUMNS);
     const current=list[detailAccountIndex];
     let details=current?dramaRows.filter(row=>accountOf(row)===current.account):dramaRows;
+    const detailTotal=details.length;
     details=sortedDetailRows(details);
+    updateGrowthFilterControls(details.length,detailTotal);
     if(!details.length){
       const tr=document.createElement("tr");
       const td=document.createElement("td");
       td.colSpan=DRAMA_DETAIL_COLUMNS.length;
       td.className="detail-text";
-      td.textContent="这个账号暂时没有短剧明细。";
+      td.textContent=growthFilterState.enabled&&growthFilterState.baselineMap?"\u6ca1\u6709\u7b26\u5408\u589e\u957f\u7b5b\u9009\u7684\u77ed\u5267\u3002":"这个账号暂时没有短剧明细。";
       tr.appendChild(td);
       tb.appendChild(tr);
       return;
@@ -1587,13 +1599,12 @@ function renderResultTable(){
   }
   setHeader(DISPLAY_COLUMNS);
   const summaryList=sortedSummaryRows();
-  updateGrowthFilterControls(summaryList.length);
   if(!summaryList.length){
     const tr=document.createElement("tr");
     const td=document.createElement("td");
     td.colSpan=DISPLAY_COLUMNS.length;
     td.className="detail-text";
-    td.textContent="\u6ca1\u6709\u7b26\u5408\u589e\u957f\u7b5b\u9009\u7684\u8d26\u53f7\u3002";
+    td.textContent="\u6682\u65e0\u8d26\u53f7\u6c47\u603b\u3002";
     tr.appendChild(td);
     tb.appendChild(tr);
     return;
