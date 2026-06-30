@@ -123,6 +123,12 @@
   .tab-btn.active{background:var(--card);color:var(--accent);box-shadow:0 1px 2px rgba(20,22,29,.07)}
   .result-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
   .sort-btn{min-width:52px}
+  .growth-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:38px;flex:1 1 320px}
+  .growth-filter[hidden]{display:none!important}
+  .growth-filter label{display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 9px;border:1px solid var(--line);background:#fff;border-radius:8px;color:var(--ink-soft);font-size:12px;white-space:nowrap}
+  .growth-filter input{width:78px;border:0;outline:0;background:transparent;color:var(--ink);font-family:var(--mono);font-size:12px;padding:0}
+  .growth-filter .growth-min-input{width:96px}
+  .growth-filter-status{font-size:12px;color:var(--ink-faint);max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .detail-nav{display:none;align-items:center;gap:8px;flex-wrap:wrap}
   .detail-nav.show{display:flex}
   .detail-select{min-width:220px;max-width:360px;border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--ink)}
@@ -444,6 +450,13 @@ shortdramatime"></textarea>
           <button class="tab-btn active" id="summaryTabBtn" type="button" data-view="summary">账号汇总</button>
           <button class="tab-btn" id="detailTabBtn" type="button" data-view="detail">账号明细</button>
         </div>
+        <div class="growth-filter" id="growthFilter">
+          <label><span>&#36817;</span><input id="growthDaysInput" type="number" min="1" step="1" value="7" aria-label="growth days"><span>&#22825;</span></label>
+          <label><span>&#22686;&#38271;&#8805;</span><input class="growth-min-input" id="growthMinInput" type="text" value="100&#19975;" placeholder="100&#19975;" aria-label="growth plays"></label>
+          <button class="mini-btn" id="growthApplyBtn" type="button">&#31579;&#36873;</button>
+          <button class="mini-btn" id="growthClearBtn" type="button">&#28165;&#38500;</button>
+          <span class="growth-filter-status" id="growthFilterStatus"></span>
+        </div>
         <div class="result-controls">
           <div class="result-tabs" role="group" aria-label="排序筛选">
             <button class="tab-btn sort-btn" id="sortHotBtn" type="button" aria-pressed="false">最热</button>
@@ -542,6 +555,8 @@ let rows=[];                // 结果行(账号汇总)
 let dramaRows=[];           // 全部短剧明细(用于 All Drama List / Top Dramas 两个表)
 let resultView="summary";
 let resultSort=store.get("thr_result_sort")||"latest";
+let reportHistoryItems=[];
+let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7)||7,minText:store.get("thr_growth_min_text")||"100\u4e07",minValue:0,baselineMap:null,baselineItem:null,status:""};
 let detailAccountIndex=0;
 let detailAccountKey=store.get("thr_detail_account")||"";
 const DETAIL_PAGE_SIZE=7;
@@ -1195,8 +1210,101 @@ function detailEnrichmentPending(){
   );
 }
 function summaryHotOf(row){return toInt(valueOf(row,[DISPLAY_COLUMNS[5],COLUMNS[7]],0));}
+function summaryAccountKey(row){return String(accountOf(row)||"").trim().toLowerCase();}
+function parseChineseNumber(text){
+  const digits={"\u96f6":0,"\u3007":0,"\u4e00":1,"\u4e8c":2,"\u4e24":2,"\u4e09":3,"\u56db":4,"\u4e94":5,"\u516d":6,"\u4e03":7,"\u516b":8,"\u4e5d":9};
+  const small={"\u5341":10,"\u767e":100,"\u5343":1000};
+  let total=0,section=0,num=0,used=false;
+  for(const ch of String(text||"")){
+    if(ch in digits){num=digits[ch];used=true;continue;}
+    if(ch in small){section+=(num||1)*small[ch];num=0;used=true;continue;}
+    if(ch==="\u4e07"){total+=(section+num||1)*10000;section=0;num=0;used=true;continue;}
+    if(ch==="\u4ebf"){total+=(section+num||1)*100000000;section=0;num=0;used=true;continue;}
+  }
+  const value=total+section+num;
+  return used?value:NaN;
+}
+function parseGrowthNumber(value){
+  let text=String(value||"").trim();
+  if(!text)return 0;
+  text=text.replace(/[,\uff0c\s]/g,"").replace(/>=|\u2265/g,"");
+  const unit=/\u4ebf/.test(text)?100000000:(/\u4e07/.test(text)?10000:1);
+  const numeric=text.replace(/[\u4e07\u4ebf]/g,"").match(/-?\d+(?:\.\d+)?/);
+  if(numeric)return Math.max(0,Math.round(Number(numeric[0])*unit));
+  const cn=parseChineseNumber(text.replace(/[\u4e07\u4ebf]/g,""));
+  return Number.isFinite(cn)?Math.max(0,Math.round(cn*unit)):0;
+}
+function reportItemMs(item){
+  const candidates=[item&&item.generated_at,item&&item.modified,item&&reportStamp(item.name),item&&item.title];
+  for(const value of candidates){const d=parseReportDate(value);if(d)return d.getTime();}
+  return 0;
+}
+function currentReportMs(){const d=parseReportDate(currentReportGeneratedAt);return d?d.getTime():Date.now();}
+function findGrowthBaselineItem(days){
+  const now=currentReportMs();
+  const target=now-Math.max(1,days)*86400000;
+  const candidates=(reportHistoryItems||[]).map(item=>({item,ms:reportItemMs(item)})).filter(x=>x.ms&&x.ms<now-60000).sort((a,b)=>b.ms-a.ms);
+  if(!candidates.length)return null;
+  return (candidates.find(x=>x.ms<=target)||candidates[candidates.length-1]).item;
+}
+async function fetchReportPayloadForItem(item){
+  const url=(item&& (item.url||item.path))||"";
+  if(!url)throw new Error("missing report url");
+  return url.startsWith("http")||url.startsWith("public_reports/")?await fetchJsonUrl(url):await backendFetchJson(url,{}, {sendSecret:false});
+}
+function summaryGrowthOf(row){
+  if(!growthFilterState.baselineMap)return 0;
+  const key=summaryAccountKey(row);
+  const before=growthFilterState.baselineMap.has(key)?growthFilterState.baselineMap.get(key):0;
+  return summaryHotOf(row)-before;
+}
+function filteredSummaryRows(list){
+  if(!growthFilterState.enabled||!growthFilterState.baselineMap)return list;
+  return list.filter(row=>summaryGrowthOf(row)>=growthFilterState.minValue);
+}
+function growthFilterLabel(){
+  if(!growthFilterState.enabled||!growthFilterState.baselineItem)return growthFilterState.status||"";
+  const baseTime=reportTimeLabel(growthFilterState.baselineItem.generated_at)||reportTimeLabel(reportStamp(growthFilterState.baselineItem.name));
+  return "\u8fd1"+growthFilterState.days+"\u5929 \u2265"+fmtPlay(growthFilterState.minValue)+" \u00b7 \u57fa\u51c6 "+baseTime;
+}
+function updateGrowthFilterControls(matchCount){
+  const box=$("growthFilter");if(!box)return;
+  box.hidden=resultView!=="summary";
+  const days=$("growthDaysInput"), min=$("growthMinInput"), status=$("growthFilterStatus");
+  if(days&&document.activeElement!==days)days.value=String(growthFilterState.days||7);
+  if(min&&document.activeElement!==min)min.value=growthFilterState.minText||"100\u4e07";
+  if(status){
+    let text=growthFilterLabel();
+    if(growthFilterState.enabled&&growthFilterState.baselineMap&&typeof matchCount==="number")text+=" \u00b7 \u547d\u4e2d "+matchCount+"/"+rows.length;
+    status.textContent=text;
+  }
+}
+async function applyGrowthFilter(){
+  const daysInput=$("growthDaysInput"), minInput=$("growthMinInput");
+  const days=Math.max(1,toInt(daysInput&&daysInput.value)||7);
+  const minText=(minInput&&minInput.value?minInput.value:"100\u4e07").trim();
+  const minValue=parseGrowthNumber(minText);
+  growthFilterState.days=days;growthFilterState.minText=minText;growthFilterState.minValue=minValue;growthFilterState.status="\u6b63\u5728\u52a0\u8f7d\u57fa\u51c6...";
+  store.set("thr_growth_days",String(days));store.set("thr_growth_min_text",minText);
+  updateGrowthFilterControls();
+  try{
+    if(!reportHistoryItems.length)await loadBackendReports();
+    const base=findGrowthBaselineItem(days);
+    if(!base){growthFilterState.enabled=false;growthFilterState.baselineMap=null;growthFilterState.status="\u6ca1\u6709\u53ef\u5bf9\u6bd4\u7684\u5386\u53f2\u8bb0\u5f55";updateGrowthFilterControls();return;}
+    const payload=await fetchReportPayloadForItem(base);
+    const summary=Array.isArray(payload.summary)?payload.summary:[];
+    const map=new Map();
+    for(const row of summary){const key=summaryAccountKey(row);if(key)map.set(key,summaryHotOf(row));}
+    growthFilterState.enabled=true;growthFilterState.baselineItem=base;growthFilterState.baselineMap=map;growthFilterState.status="";
+    resetDetailPage();renderResultTable();
+  }catch(e){growthFilterState.enabled=false;growthFilterState.baselineMap=null;growthFilterState.status="\u7b5b\u9009\u5931\u8d25: "+(e.message||e);updateGrowthFilterControls();}
+}
+function clearGrowthFilter(){
+  growthFilterState.enabled=false;growthFilterState.baselineMap=null;growthFilterState.baselineItem=null;growthFilterState.status="";
+  resetDetailPage();renderResultTable();
+}
 function sortedSummaryRows(){
-  const list=[...rows];
+  const list=filteredSummaryRows([...rows]);
   if(resultSort==="hot")list.sort((a,b)=>summaryHotOf(b)-summaryHotOf(a));
   return list;
 }
@@ -1448,6 +1556,7 @@ function renderResultTable(){
   $("summaryTabBtn").classList.toggle("active",resultView==="summary");
   $("detailTabBtn").classList.toggle("active",resultView==="detail");
   updateSortControls();
+  updateGrowthFilterControls();
   tb.innerHTML="";
   const list=updateDetailControls(detailAccounts());
   if(resultView==="detail"){
@@ -1477,7 +1586,19 @@ function renderResultTable(){
     return;
   }
   setHeader(DISPLAY_COLUMNS);
-  for(const row of sortedSummaryRows()){
+  const summaryList=sortedSummaryRows();
+  updateGrowthFilterControls(summaryList.length);
+  if(!summaryList.length){
+    const tr=document.createElement("tr");
+    const td=document.createElement("td");
+    td.colSpan=DISPLAY_COLUMNS.length;
+    td.className="detail-text";
+    td.textContent="\u6ca1\u6709\u7b26\u5408\u589e\u957f\u7b5b\u9009\u7684\u8d26\u53f7\u3002";
+    tr.appendChild(td);
+    tb.appendChild(tr);
+    return;
+  }
+  for(const row of summaryList){
     const tr=document.createElement("tr");
     for(const c of DISPLAY_COLUMNS)appendSummaryCell(tr,c,row);
     tb.appendChild(tr);
@@ -1680,6 +1801,11 @@ function loadBackendPayload(payload,opts){
   const dramas=Array.isArray(payload.dramas_detail)?payload.dramas_detail:[];
   rows=[...summary];
   dramaRows=[...dramas];
+  if(growthFilterState.enabled){
+    growthFilterState.baselineMap=null;
+    growthFilterState.baselineItem=null;
+    growthFilterState.status="\u6570\u636e\u5df2\u66f4\u65b0\uff0c\u8bf7\u91cd\u65b0\u7b5b\u9009";
+  }
   fillSummaryTopChineseTitles();
   renderResultTable();
   const failed=(payload.errors||[]).map(e=>e.account||e.error||"未知");
@@ -2083,6 +2209,10 @@ function init(){
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
   $("sortHotBtn").addEventListener("click",()=>setResultSort("hot"));
   $("sortLatestBtn").addEventListener("click",()=>setResultSort("latest"));
+  const growthApply=$("growthApplyBtn"), growthClear=$("growthClearBtn"), growthDays=$("growthDaysInput"), growthMin=$("growthMinInput");
+  if(growthApply)growthApply.addEventListener("click",()=>applyGrowthFilter());
+  if(growthClear)growthClear.addEventListener("click",()=>clearGrowthFilter());
+  [growthDays,growthMin].forEach(el=>{if(el)el.addEventListener("keydown",e=>{if(e.key==="Enter")applyGrowthFilter();});});
   updateSortControls();
   $("detailAccountSelect").addEventListener("change",()=>{
     setDetailAccountSelection(detailAccounts(),Number($("detailAccountSelect").value)||0);
