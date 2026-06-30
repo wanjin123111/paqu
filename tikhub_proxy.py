@@ -31,6 +31,7 @@ if os.environ.get("RENDER") or os.environ.get("PORT"):
 ROOT = os.path.dirname(os.path.abspath(__file__))  # 托管脚本所在文件夹
 DEFAULT_PAGE = "tikhub-report-frontend.html"
 REPORTS_DIR = os.path.join(ROOT, "reports")   # 定时监控存盘目录
+PUBLIC_REPORTS_DIR = os.path.join(ROOT, "public_reports")
 DRAMA_DETAIL_CACHE_FILE = os.path.join(REPORTS_DIR, "drama_detail_cache.json")
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
@@ -527,8 +528,12 @@ def _drama_cache_key(uid, drama_id, title):
 
 
 def _seed_cache_from_latest(cache):
-    latest = os.path.join(REPORTS_DIR, "latest_report.json")
-    if not os.path.isfile(latest):
+    candidates = [
+        os.path.join(REPORTS_DIR, "latest_report.json"),
+        os.path.join(PUBLIC_REPORTS_DIR, "latest_report.json"),
+    ]
+    latest = next((path for path in candidates if os.path.isfile(path)), "")
+    if not latest:
         return
     try:
         with open(latest, "r", encoding="utf-8") as handle:
@@ -1512,8 +1517,12 @@ class Handler(BaseHTTPRequestHandler):
         name = os.path.basename(urllib.parse.unquote(path[len("/reports/"):]))
         full = os.path.normpath(os.path.join(REPORTS_DIR, name))
         if not full.startswith(REPORTS_DIR) or not os.path.isfile(full):
-            self._send_json(404, {"ok": False, "error": "report not found"})
-            return
+            public_full = os.path.normpath(os.path.join(PUBLIC_REPORTS_DIR, name))
+            if public_full.startswith(PUBLIC_REPORTS_DIR) and os.path.isfile(public_full):
+                full = public_full
+            else:
+                self._send_json(404, {"ok": False, "error": "report not found"})
+                return
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
         with open(full, "rb") as handle:
             data = handle.read()
