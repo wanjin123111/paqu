@@ -527,10 +527,11 @@ const HEART_KEYS=["heartCount","heart_count","total_favorited","favoriting_count
 const NICK_KEYS=["nickname","nick_name","nick"];
 const VCOUNT_KEYS=["videoCount","aweme_count","video_count"];
 const SECUID_KEYS=["secUid","sec_uid","sec_user_id","secUserId"];
+const DRAMA_LINK_FIELDS=["短剧链接","Drama Link / 短剧链接","Drama URL / 短剧链接","Share URL / 分享链接"];
 
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
-const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","时长","题材","简介","主页链接"];
+const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","时长","题材","简介","短剧链接"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
 
@@ -698,7 +699,7 @@ async function getAllVideos(secUid,uid,onPage){
     else{const r=await fetchPostsPage(epList,params,ep=>{lockedEp=ep;if(ep!==cfg.epPosts)log("视频接口改用 "+ep,"c-dim");});data=r.data;}
     if(!stats){stats={nickname:(deepFind(data,NICK_KEYS)||"")+"",followers:toInt(deepFind(data,FOLLOWER_KEYS)),hearts:toInt(deepFind(data,HEART_KEYS)),videoCount:toInt(deepFind(data,VCOUNT_KEYS))};}
     const batch=findVideoList(data);let added=0;
-    for(const v of batch){const id=getAwemeId(v);if(id&&!seen.has(id)){seen.add(id);videos.push({id,desc:getDesc(v)||"",views:getPlayCount(v)});added++;}}
+    for(const v of batch){const id=getAwemeId(v);if(id&&!seen.has(id)){seen.add(id);videos.push({id,desc:getDesc(v)||"",views:getPlayCount(v),url:"https://www.tiktok.com/@"+encodeURIComponent(uid)+"/video/"+encodeURIComponent(id)});added++;}}
     onPage(page,added,videos.length);
     if(cfg.maxVideos&&videos.length>=cfg.maxVideos){stop="达到设置的上限 "+cfg.maxVideos;break;}
     const[hasMore,next]=readPagination(data);
@@ -732,7 +733,7 @@ function groupByTitle(videos){
   const g=new Map();
   for(const v of videos){const key=titleKey(v.desc)||("__"+v.id);if(!g.has(key))g.set(key,[]);g.get(key).push(v);}
   const dramas=[];
-  for(const[key,eps]of g){const total=eps.reduce((s,e)=>s+e.views,0);const top=eps.reduce((a,b)=>b.views>a.views?b:a);const name=prettyName(top.desc)||top.desc.slice(0,40)||key;dramas.push({name,episodes:eps.length,views:total});}
+  for(const[key,eps]of g){const total=eps.reduce((s,e)=>s+e.views,0);const top=eps.reduce((a,b)=>b.views>a.views?b:a);const name=prettyName(top.desc)||top.desc.slice(0,40)||key;dramas.push({name,episodes:eps.length,views:total,top_video_id:top.id||"",drama_link:top.url||""});}
   return dramas;
 }
 
@@ -759,7 +760,7 @@ async function groupByPlaylist(secUid,uid,onLog){
         const[hm,nc]=readPagination(pv);if(hm===false||hm===0||hm==="0"||nc==null||String(nc)===String(p2))break;p2=c2;c2=nc;await sleep(cfg.delay);
       }
       onLog("播放列表《"+String(nm).slice(0,26)+"》集"+cnt+" 观看"+fmt(total),"c-dim");
-      dramas.push({name:prettyName(String(nm))||String(nm),episodes:cnt,views:total});
+      dramas.push({name:prettyName(String(nm))||String(nm),episodes:cnt,views:total,playlist_id:String(mixId||""),drama_link:buildPlaylistLink(uid,mixId,nm)});
     }
     const[hm,nc]=readPagination(data);if(hm===false||hm===0||hm==="0"||nc==null||String(nc)===String(prev))break;prev=cursor;cursor=nc;await sleep(cfg.delay);
   }
@@ -869,7 +870,7 @@ async function scrapeAccount(acc,log){
   }else dramas=groupByTitle(videos);
   const row=buildRow(acc,prof,videos,dramas);
   addRow(row);
-  for(const [idx,d] of dramas.entries()){dramaRows.push({"账号":acc,"昵称":prof.nickname,"短剧名":d.name,"Rank in Account / 账号内排序":idx+1,"English Title / 英文剧名":d.name,"Publish Time / 发布时间":d.publish_time||"","Episodes / 集数":d.episodes,"Views / 观看数":d.views,"集数":d.episodes,"累计观看":d.views,"单集均观看":d.episodes?Math.round(d.views/d.episodes):0,"主页链接":"https://www.tiktok.com/@"+acc,"Source Profile URL / 来源主页":"https://www.tiktok.com/@"+acc});}
+  for(const [idx,d] of dramas.entries()){const dramaLink=d.drama_link||buildPlaylistLink(acc,d.playlist_id,d.name)||buildVideoLink(acc,d.top_video_id);dramaRows.push({"账号":acc,"昵称":prof.nickname,"短剧名":d.name,"Rank in Account / 账号内排序":idx+1,"English Title / 英文剧名":d.name,"Publish Time / 发布时间":d.publish_time||"","Episodes / 集数":d.episodes,"Views / 观看数":d.views,"集数":d.episodes,"累计观看":d.views,"单集均观看":d.episodes?Math.round(d.views/d.episodes):0,"主页链接":"https://www.tiktok.com/@"+acc,"短剧链接":dramaLink,"Drama Link / 短剧链接":dramaLink,"Playlist ID / 播放列表ID":d.playlist_id||"","Top Video ID / 最高观看视频ID":d.top_video_id||"","Source Profile URL / 来源主页":"https://www.tiktok.com/@"+acc});}
   renderResultTable();
   log("完成 → 短剧 "+row.短剧数+" 总集 "+row.总集数+" 累计观看 "+fmt(row.累计观看)+" 最高《"+row.最高观看短剧.slice(0,20)+"》"+fmt(row.最高观看),"c-ok");
 }
@@ -900,6 +901,12 @@ function accountOf(row){return valueOf(row,["账号","Account / 账号"],"");}
 function nickOf(row){return valueOf(row,["昵称","Nickname / 昵称"],accountOf(row));}
 function linkOf(row){const acc=accountOf(row);return valueOf(row,["主页链接","Source Profile URL / 来源主页"],acc?("https://www.tiktok.com/@"+acc):"");}
 function dramaTitleOf(row){return valueOf(row,["English Title / 英文剧名","短剧名"],"");}
+function cleanDramaId(value){return String(value||"").trim().replace(/^ID\s+/i,"").replace(/[^0-9A-Za-z_-]/g,"");}
+function tiktokSlug(value){return String(value||"").trim().replace(/[^0-9A-Za-z]+/g,"-").replace(/^-+|-+$/g,"");}
+function buildSeriesLink(acc,id,title){const clean=cleanDramaId(id);if(!acc||!clean)return "";const slug=tiktokSlug(title);return "https://www.tiktok.com/@"+encodeURIComponent(acc)+"/series/"+(slug?encodeURIComponent(slug)+"-":"")+encodeURIComponent(clean);}
+function buildPlaylistLink(acc,id,title){const clean=cleanDramaId(id);if(!acc||!clean)return "";const slug=tiktokSlug(title);return "https://www.tiktok.com/@"+encodeURIComponent(acc)+"/playlist/"+(slug?encodeURIComponent(slug)+"-":"")+encodeURIComponent(clean);}
+function buildVideoLink(acc,id){const clean=cleanDramaId(id);return acc&&clean?("https://www.tiktok.com/@"+encodeURIComponent(acc)+"/video/"+encodeURIComponent(clean)):"";}
+function dramaLinkOf(row){const direct=valueOf(row,DRAMA_LINK_FIELDS,"");if(/^https?:\/\//i.test(String(direct)))return direct;const acc=accountOf(row), title=dramaTitleOf(row);return buildSeriesLink(acc,valueOf(row,["Drama ID / 短剧ID","短剧ID"],""),title)||buildPlaylistLink(acc,valueOf(row,["Playlist ID / 播放列表ID","playlist_id"],""),title)||buildVideoLink(acc,valueOf(row,["Top Video ID / 最高观看视频ID","top_video_id"],""))||linkOf(row);}
 function readJsonStore(key){
   try{
     const value=store.get(key);
@@ -1272,13 +1279,15 @@ function appendDetailCell(tr,c,row,index){
     }else{
       setOptionalCell(td,description);
     }
-  }else if(c==="主页链接"){
+  }else if(c==="短剧链接"||c==="主页链接"){
     td.className="link";
     const a=document.createElement("a");
-    a.href=linkOf(row);
+    const href=dramaLinkOf(row);
+    a.href=href;
     a.target="_blank";
     a.rel="noopener";
-    a.textContent="@"+accountOf(row);
+    a.title=href;
+    a.textContent=href&&href!==linkOf(row)?"打开":"@"+accountOf(row);
     td.appendChild(a);
   }
   tr.appendChild(td);
@@ -1424,7 +1433,7 @@ function exportCSV(){
   downloadBlob(new Blob(["\ufeff"+head+"\n"+body],{type:"text/csv;charset=utf-8"}),"tikhub_report.csv");
   toast("已导出 CSV");
 }
-const DRAMA_COLS=["Account / 账号","Nickname / 昵称","Screenshot Name / 截图名称","Rank in Account / 账号内排序","Drama ID / 短剧ID","English Title / 英文剧名","Chinese Title / 中文剧名","Publish Time / 发布时间","Episodes / 集数","Views / 观看数","Duration Seconds / 总时长(秒)","Duration Minutes / 总时长(分钟)","Limited Free / 是否限免","English Themes / 英文题材","Chinese Themes / 中文题材","English Description Preview / 英文简介预览","Chinese Description / 中文简介","Description Truncated / 简介是否截断","Source Profile URL / 来源主页"];
+const DRAMA_COLS=["Account / 账号","Nickname / 昵称","Screenshot Name / 截图名称","Rank in Account / 账号内排序","Drama ID / 短剧ID","English Title / 英文剧名","Chinese Title / 中文剧名","Publish Time / 发布时间","Episodes / 集数","Views / 观看数","Duration Seconds / 总时长(秒)","Duration Minutes / 总时长(分钟)","Limited Free / 是否限免","English Themes / 英文题材","Chinese Themes / 中文题材","English Description Preview / 英文简介预览","Chinese Description / 中文简介","Description Truncated / 简介是否截断","Drama Link / 短剧链接","Source Profile URL / 来源主页"];
 const TOP_COLS=["排名","短剧名","账号","昵称","累计观看","集数","单集均观看"];
 function normalizeDramaRow(d,index){
   const episodes=dramaEpisodesOf(d);
@@ -1450,6 +1459,7 @@ function normalizeDramaRow(d,index){
     "English Description Preview / 英文简介预览":enDesc,
     "Chinese Description / 中文简介":cnDesc,
     "Description Truncated / 简介是否截断":valueOf(d,["Description Truncated / 简介是否截断"],(enDesc.length>=600||cnDesc.length>=600)?"是 / Yes":""),
+    "Drama Link / 短剧链接":dramaLinkOf(d),
     "Source Profile URL / 来源主页":linkOf(d),
   };
 }

@@ -121,6 +121,8 @@ DRAMA_ID_KEYS = ("dramaID", "dramaId", "drama_id", "id")
 DRAMA_NAME_KEYS = ("dramaName", "drama_name", "name", "title")
 DRAMA_COUNT_KEYS = ("numVideos", "num_videos", "videoCount", "video_count", "episodeCount", "episode_count")
 DRAMA_VIEW_KEYS = ("numWatched", "num_watched", "play_count", "playCount", "view_count", "viewCount")
+DRAMA_LINK_KEYS = ("shareUrl", "share_url", "shareLink", "share_link", "dramaUrl", "drama_url", "webUrl", "web_url")
+VIDEO_LINK_KEYS = ("shareUrl", "share_url", "shareLink", "share_link", "videoUrl", "video_url", "webUrl", "web_url")
 DRAMA_EN_TITLE_KEYS = ("englishTitle", "english_title", "enTitle", "titleEn", "title_en", "dramaName", "drama_name", "name", "title")
 DRAMA_CN_TITLE_KEYS = ("chineseTitle", "chinese_title", "cnTitle", "titleCn", "title_cn", "zhTitle", "title_zh")
 DRAMA_DURATION_SECONDS_KEYS = ("durationSeconds", "duration_seconds", "durationSec", "duration_sec", "duration", "totalDuration", "total_duration")
@@ -149,7 +151,8 @@ DRAMA_COLUMNS = ["Account / 账号", "Nickname / 昵称", "Screenshot Name / 截
                  "Duration Minutes / 总时长(分钟)", "Limited Free / 是否限免",
                  "English Themes / 英文题材", "Chinese Themes / 中文题材",
                  "English Description Preview / 英文简介预览", "Chinese Description / 中文简介",
-                 "Description Truncated / 简介是否截断", "Source Profile URL / 来源主页"]
+                 "Description Truncated / 简介是否截断", "Drama Link / 短剧链接",
+                 "Source Profile URL / 来源主页"]
 DRAMA_DETAIL_CACHE_FIELDS = (
     "english_title", "chinese_title", "publish_time", "duration_seconds", "duration_minutes",
     "limited_free", "english_themes", "chinese_themes", "english_description",
@@ -287,6 +290,56 @@ def _to_text(value, limit=None):
     if limit and len(text) > limit:
         return text[:limit].rstrip()
     return text
+
+
+def _clean_drama_id(value):
+    text = str(value or "").strip()
+    if text.upper().startswith("ID "):
+        text = text[3:].strip()
+    return re.sub(r"[^0-9A-Za-z_-]", "", text)
+
+
+def _slugify_link_part(value):
+    text = _to_text(value, 120)
+    text = re.sub(r"[^0-9A-Za-z]+", "-", text).strip("-")
+    return urllib.parse.quote(text, safe="") if text else ""
+
+
+def _first_http_url(obj, keys):
+    for value in _collect_key_values(obj, keys):
+        text = _to_text(value)
+        match = re.search(r"https?://[^\s\"\'<>]+", text)
+        if match:
+            return match.group(0).rstrip(").,;")
+    return ""
+
+
+def _build_tiktok_series_url(uid, drama_id, title=""):
+    account = str(uid or "").strip().lstrip("@")
+    clean_id = _clean_drama_id(drama_id)
+    if not account or not clean_id:
+        return ""
+    slug = _slugify_link_part(title)
+    tail = (slug + "-" if slug else "") + urllib.parse.quote(clean_id, safe="")
+    return "https://www.tiktok.com/@%s/series/%s" % (urllib.parse.quote(account, safe="._-"), tail)
+
+
+def _build_tiktok_playlist_url(uid, playlist_id, title=""):
+    account = str(uid or "").strip().lstrip("@")
+    clean_id = _clean_drama_id(playlist_id)
+    if not account or not clean_id:
+        return ""
+    slug = _slugify_link_part(title)
+    tail = (slug + "-" if slug else "") + urllib.parse.quote(clean_id, safe="")
+    return "https://www.tiktok.com/@%s/playlist/%s" % (urllib.parse.quote(account, safe="._-"), tail)
+
+
+def _build_tiktok_video_url(uid, video_id):
+    account = str(uid or "").strip().lstrip("@")
+    clean_id = _clean_drama_id(video_id)
+    if not account or not clean_id:
+        return ""
+    return "https://www.tiktok.com/@%s/video/%s" % (urllib.parse.quote(account, safe="._-"), urllib.parse.quote(clean_id, safe=""))
 
 
 def _direct_find_any(obj, keys):
@@ -890,8 +943,9 @@ def _get_all_videos(secuid, uid):
             video_id = _get_video_id(video)
             if video_id and video_id not in seen:
                 seen.add(video_id)
+                video_link = _first_http_url(video, VIDEO_LINK_KEYS) or _build_tiktok_video_url(uid, video_id)
                 videos.append({"id": video_id, "desc": _get_desc(video), "views": _get_play_count(video),
-                               "publish_time": _publish_time_of(video)})
+                               "publish_time": _publish_time_of(video), "url": video_link})
                 added += 1
         if SCHEDULE_MAX_VIDEOS and len(videos) >= SCHEDULE_MAX_VIDEOS:
             return videos[:SCHEDULE_MAX_VIDEOS]
@@ -1034,7 +1088,10 @@ def _get_playlist_dramas(secuid, uid):
                 if exc.status in (401, 402, 403):
                     raise
         name = (_clean_title(playlist["name"])[:60].strip() or playlist["name"] or playlist["id"])
-        dramas.append({"name": name, "episodes": episodes, "views": views, "publish_time": playlist.get("publish_time", "")})
+        dramas.append({"name": name, "episodes": episodes, "views": views,
+                       "publish_time": playlist.get("publish_time", ""),
+                       "playlist_id": playlist.get("id", ""),
+                       "drama_link": _build_tiktok_playlist_url(uid, playlist.get("id", ""), name)})
     return dramas
 
 
@@ -1120,6 +1177,7 @@ def _get_tiktok_drama_library(secuid, uid):
             chinese_themes = _theme_text(_deep_find_any(item, DRAMA_CN_THEMES_KEYS))
             if not chinese_themes:
                 chinese_themes = _theme_text(english_themes_source, translate=True)
+            drama_link = _first_http_url(item, DRAMA_LINK_KEYS) or _build_tiktok_series_url(uid, drama_key, english_title or name)
             detail = _apply_cached_drama_detail(uid, drama_key, name, {
                 "english_title": english_title,
                 "chinese_title": chinese_title,
@@ -1141,6 +1199,7 @@ def _get_tiktok_drama_library(secuid, uid):
                 "episodes": episodes,
                 "views": views,
                 "drama_id": ("ID " + drama_key) if drama_key and not drama_key.upper().startswith("ID ") else drama_key,
+                "drama_link": drama_link,
                 **detail,
             })
             added += 1
@@ -1204,7 +1263,9 @@ def _group_by_title(videos):
         name = (_clean_title(top.get("desc", ""))[:60].strip() or top.get("desc", "")[:40] or key)
         publish_times = [ep.get("publish_time", "") for ep in episodes if ep.get("publish_time")]
         publish_time = min(publish_times, key=lambda item: _publish_epoch(item) or float("inf")) if publish_times else ""
-        dramas.append({"name": name, "episodes": len(episodes), "views": total_views, "publish_time": publish_time})
+        dramas.append({"name": name, "episodes": len(episodes), "views": total_views,
+                       "publish_time": publish_time, "top_video_id": top.get("id", ""),
+                       "drama_link": top.get("url", "")})
     return dramas
 
 
@@ -1266,6 +1327,10 @@ def _scrape_account(uid):
         title = drama.get("english_title") or drama.get("name") or ""
         chinese_title = _chinese_title_or_translate(drama.get("chinese_title", ""), title)
         profile_url = "https://www.tiktok.com/@" + uid
+        drama_link = (drama.get("drama_link", "") or
+                      _build_tiktok_series_url(uid, drama.get("drama_id", ""), title) or
+                      _build_tiktok_playlist_url(uid, drama.get("playlist_id", ""), title) or
+                      _build_tiktok_video_url(uid, drama.get("top_video_id", "")))
         drama_rows.append({
             "Account / 账号": uid,
             "Nickname / 昵称": profile["nickname"],
@@ -1285,6 +1350,7 @@ def _scrape_account(uid):
             "English Description Preview / 英文简介预览": drama.get("english_description", ""),
             "Chinese Description / 中文简介": drama.get("chinese_description", ""),
             "Description Truncated / 简介是否截断": drama.get("description_truncated", ""),
+            "Drama Link / 短剧链接": drama_link,
             "Source Profile URL / 来源主页": profile_url,
             "账号": uid,
             "昵称": profile["nickname"],
@@ -1293,6 +1359,7 @@ def _scrape_account(uid):
             "累计观看": views,
             "单集均观看": avg_views,
             "主页链接": profile_url,
+            "短剧链接": drama_link,
         })
     return summary, drama_rows
 
