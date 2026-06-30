@@ -173,9 +173,10 @@
   body.public-mode #resultCard th:nth-child(5),body.public-mode #resultCard td:nth-child(5){width:76px}
   body.public-mode #resultCard th:nth-child(6),body.public-mode #resultCard td:nth-child(6),
   body.public-mode #resultCard th:nth-child(7),body.public-mode #resultCard td:nth-child(7),
-  body.public-mode #resultCard th:nth-child(9),body.public-mode #resultCard td:nth-child(9){width:118px}
+  body.public-mode #resultCard th:nth-child(10),body.public-mode #resultCard td:nth-child(10){width:108px}
   body.public-mode #resultCard th:nth-child(8),body.public-mode #resultCard td:nth-child(8){width:auto}
-  body.public-mode #resultCard th:nth-child(10),body.public-mode #resultCard td:nth-child(10){width:150px}
+  body.public-mode #resultCard th:nth-child(9),body.public-mode #resultCard td:nth-child(9){width:auto}
+  body.public-mode #resultCard th:nth-child(11),body.public-mode #resultCard td:nth-child(11){width:145px}
   body.public-mode #resultCard.detail-view td.detail-title,
   body.public-mode #resultCard.detail-view td.detail-text{min-width:0}
   body.public-mode #resultCard.detail-view th,
@@ -527,8 +528,8 @@ const NICK_KEYS=["nickname","nick_name","nick"];
 const VCOUNT_KEYS=["videoCount","aweme_count","video_count"];
 const SECUID_KEYS=["secUid","sec_uid","sec_user_id","secUserId"];
 
-const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
-const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看","主页链接"];
+const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
+const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","时长","题材","简介","主页链接"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
@@ -921,6 +922,29 @@ function chineseTitleOf(row){
   if(direct)return direct;
   return titleTranslationCache.get(dramaTitleOf(row))||"";
 }
+function topDramaTitleOf(row){return valueOf(row,["最高观看短剧","Top Drama / 最高观看短剧"],"");}
+function topDramaChineseTitleOf(row){
+  const direct=valueOf(row,["最高观看短剧中文名","最高观看短剧中文译名","Top Drama Chinese Title / 最高观看短剧中文名"],"");
+  if(direct)return direct;
+  const title=topDramaTitleOf(row);
+  if(!title)return "";
+  const cached=titleTranslationCache.get(title);
+  if(cached)return cached;
+  const account=accountOf(row);
+  const key=titleKey(title);
+  const match=dramaRows.find(item=>
+    (!account||accountOf(item)===account)&&
+    (dramaTitleOf(item)===title||titleKey(dramaTitleOf(item))===key)
+  );
+  return match?chineseTitleOf(match):"";
+}
+function fillSummaryTopChineseTitles(){
+  for(const row of rows){
+    if(valueOf(row,["最高观看短剧中文名","最高观看短剧中文译名"],""))continue;
+    const chineseTitle=topDramaChineseTitleOf(row);
+    if(chineseTitle)row["最高观看短剧中文名"]=chineseTitle;
+  }
+}
 const CJK_RE=/[\u3400-\u9fff]/;
 const THEME_CN_MAP={
   "Rural Area":"乡村",
@@ -1067,6 +1091,7 @@ async function hydrateChineseTitles(targetRows){
   )].slice(0,1000);
   const missing=titles.filter(title=>!titleTranslationCache.has(title));
   if(!missing.length){
+    fillSummaryTopChineseTitles();
     renderResultTable();
     return;
   }
@@ -1097,6 +1122,7 @@ async function hydrateChineseTitles(targetRows){
   }finally{
     if(run===titleHydrateRun){
       titleHydrating=false;
+      fillSummaryTopChineseTitles();
       renderResultTable();
     }
   }
@@ -1176,7 +1202,8 @@ function appendSummaryCell(tr,c,row){
     a.rel="noopener";
     a.textContent="@"+accountOf(row);
     td.appendChild(a);
-  }else if(c==="最高观看短剧"){td.className="name";td.textContent=row[c]||"";}
+  }else if(c==="最高观看短剧"){td.className="name";td.textContent=topDramaTitleOf(row);}
+  else if(c==="最高观看短剧中文名"){td.className="name";setOptionalCell(td,topDramaChineseTitleOf(row),titleHydrating&&!!topDramaTitleOf(row));}
   else td.textContent=row[c]||"";
   tr.appendChild(td);
 }
@@ -1526,6 +1553,7 @@ function loadBackendPayload(payload){
   const dramas=Array.isArray(payload.dramas_detail)?payload.dramas_detail:[];
   rows=[...summary];
   dramaRows=[...dramas];
+  fillSummaryTopChineseTitles();
   renderResultTable();
   const failed=(payload.errors||[]).map(e=>e.account||e.error||"未知");
   const dataTime=reportTimeLabel(payload.generated_at);

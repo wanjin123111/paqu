@@ -142,7 +142,7 @@ NICK_KEYS = ("nickname", "nick_name", "nick")
 VCOUNT_KEYS = ("videoCount", "aweme_count", "video_count")
 SECUID_KEYS = ("secUid", "sec_uid", "sec_user_id", "secUserId")
 SUMMARY_COLUMNS = ["截图名称", "账号", "昵称", "粉丝", "点赞", "短剧数", "总集数", "累计观看",
-                   "单剧均观看", "最高观看短剧", "最高观看", "主页链接"]
+                   "单剧均观看", "最高观看短剧", "最高观看短剧中文名", "最高观看", "主页链接"]
 DRAMA_COLUMNS = ["Account / 账号", "Nickname / 昵称", "Screenshot Name / 截图名称", "Rank in Account / 账号内排序",
                  "Drama ID / 短剧ID", "English Title / 英文剧名", "Chinese Title / 中文剧名",
                  "Publish Time / 发布时间", "Episodes / 集数", "Views / 观看数", "Duration Seconds / 总时长(秒)",
@@ -1213,10 +1213,11 @@ def _build_summary_row(uid, profile, videos, dramas):
     total_views = sum(_to_int(drama.get("views")) for drama in dramas) if dramas else sum(video["views"] for video in videos)
     drama_count = len(dramas)
     avg_views = round(total_views / drama_count) if drama_count else 0
-    top_name, top_views = "", 0
+    top_name, top_chinese_title, top_views = "", "", 0
     if dramas:
         top = max(dramas, key=lambda item: item["views"])
         top_name, top_views = top["name"], top["views"]
+        top_chinese_title = _chinese_title_or_translate(top.get("chinese_title", ""), top.get("english_title") or top_name)
     return {
         "截图名称": profile["nickname"],
         "账号": uid,
@@ -1228,6 +1229,7 @@ def _build_summary_row(uid, profile, videos, dramas):
         "累计观看": total_views,
         "单剧均观看": avg_views,
         "最高观看短剧": top_name,
+        "最高观看短剧中文名": top_chinese_title,
         "最高观看": top_views,
         "主页链接": "https://www.tiktok.com/@" + uid,
     }
