@@ -1138,7 +1138,7 @@ function detailFieldPending(row,column){
   return backendJobRunning&&detailFieldMissing(row,column);
 }
 function detailFieldAwaiting(row,column){
-  return !backendJobRunning&&detailFieldMissing(row,column);
+  return false;
 }
 function detailEnrichmentPending(){
   return currentReportSource==="latest"&&backendJobRunning&&dramaRows.some(row=>
@@ -1593,9 +1593,8 @@ function scheduleDetailAutoRefresh(){
     }
     window.__quietRefresh=true;
     try{
-      const runningJob=await refreshBackendJobState();
-      if(runningJob)await loadBackendLatest({quiet:true});
-      else renderResultTable();
+      await refreshBackendJobState();
+      await loadBackendLatest({quiet:true});
     }catch(_){
       scheduleDetailAutoRefresh();
     }finally{
@@ -1637,12 +1636,14 @@ async function loadBackendLatest(opts){
   let payload=null;
   try{
     payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+    await refreshBackendJobState();
   }catch(firstErr){
     if(backendSecret()){
       try{
         backendSetStatus("后端暂无最新结果，正在重新抓取…");
         await backendFetchJson("/run-scheduled",{wait:"1"}, {requireSecret:true});
         payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+        await refreshBackendJobState();
       }catch(_){
         payload=await fetchJsonUrl("public_reports/latest_report.json");
       }

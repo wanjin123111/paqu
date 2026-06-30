@@ -89,6 +89,7 @@ SCHEDULE_TRANSLATE_TITLES = _env_bool("SCHEDULE_TRANSLATE_TITLES", True)
 SCHEDULE_DELAY_MS = _env_int("SCHEDULE_DELAY_MS", 300, 0, 60000)
 SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
 SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
+AUTO_REFRESH_COOLDOWN_SECONDS = _env_int("AUTO_REFRESH_COOLDOWN_SECONDS", 300, 30, 86400)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
 
@@ -157,6 +158,7 @@ DRAMA_DETAIL_CACHE_FIELDS = (
 
 JOB_LOCK = threading.Lock()
 LAST_JOB = {"running": False, "started_at": None, "finished_at": None, "result": None, "error": None}
+LAST_AUTO_REFRESH_AT = 0.0
 DRAMA_DETAIL_CACHE = None
 DRAMA_DETAIL_CACHE_LOCK = threading.Lock()
 TITLE_TRANSLATION_CACHE = {}
@@ -1383,6 +1385,34 @@ def _execute_scheduled_job(accounts):
         raise
 
 
+def _start_configured_scheduled_job_if_idle():
+    global LAST_AUTO_REFRESH_AT
+    if not SERVER_API_KEY:
+        return False
+    accounts = _parse_accounts(SCHEDULE_ACCOUNTS)
+    if not accounts:
+        return False
+    if LAST_JOB.get("running"):
+        return False
+    now = time.time()
+    if now - LAST_AUTO_REFRESH_AT < AUTO_REFRESH_COOLDOWN_SECONDS:
+        return False
+    if not JOB_LOCK.acquire(blocking=False):
+        return False
+    LAST_AUTO_REFRESH_AT = now
+    LAST_JOB.update({"running": True, "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                     "finished_at": None, "result": None, "error": None})
+
+    def background():
+        try:
+            _execute_scheduled_job(accounts)
+        finally:
+            JOB_LOCK.release()
+
+    threading.Thread(target=background, daemon=True).start()
+    return True
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "tikhub-proxy/1.0"
 
@@ -1517,6 +1547,8 @@ class Handler(BaseHTTPRequestHandler):
         name = os.path.basename(urllib.parse.unquote(path[len("/reports/"):]))
         full = os.path.normpath(os.path.join(REPORTS_DIR, name))
         if not full.startswith(REPORTS_DIR) or not os.path.isfile(full):
+            if name == "latest_report.json":
+                _start_configured_scheduled_job_if_idle()
             public_full = os.path.normpath(os.path.join(PUBLIC_REPORTS_DIR, name))
             if public_full.startswith(PUBLIC_REPORTS_DIR) and os.path.isfile(public_full):
                 full = public_full
