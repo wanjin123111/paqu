@@ -1126,16 +1126,22 @@ function dramaDescriptionTextOf(row){
 function detailRowHasIdentity(row){
   return !!(dramaTitleOf(row)||valueOf(row,["Drama ID / 短剧ID"],"")||accountOf(row));
 }
-function detailFieldPending(row,column){
-  if(currentReportSource!=="latest"||!backendJobRunning||!detailRowHasIdentity(row))return false;
+function detailFieldMissing(row,column){
+  if(currentReportSource!=="latest"||!detailRowHasIdentity(row))return false;
   if(column==="发布时间")return !dramaPublishTimeOf(row);
   if(column==="时长")return !dramaDurationTextOf(row);
   if(column==="题材")return !themeDisplayList(row).length&&!englishThemeLabelsOf(row).length&&!chineseThemeLabelsOf(row).length;
   if(column==="简介")return !dramaDescriptionTextOf(row);
   return false;
 }
+function detailFieldPending(row,column){
+  return backendJobRunning&&detailFieldMissing(row,column);
+}
+function detailFieldAwaiting(row,column){
+  return !backendJobRunning&&detailFieldMissing(row,column);
+}
 function detailEnrichmentPending(){
-  return currentReportSource==="latest"&&dramaRows.some(row=>
+  return currentReportSource==="latest"&&backendJobRunning&&dramaRows.some(row=>
     detailFieldPending(row,"发布时间")||
     detailFieldPending(row,"时长")||
     detailFieldPending(row,"题材")||
@@ -1222,11 +1228,29 @@ function setLoadingCell(td,text){
   span.textContent=text||"加载中…";
   td.appendChild(span);
 }
+function setAwaitingCell(td){
+  td.classList.add("cell-muted");
+  const span=document.createElement("span");
+  span.className="loading-inline";
+  span.textContent="待补全";
+  td.appendChild(span);
+}
 function setOptionalCell(td,value,isLoading=false){
   if(value!=null&&value!==""){
     td.textContent=value;
   }else if(isLoading){
     setLoadingCell(td);
+  }else{
+    setMutedCell(td,"暂无");
+  }
+}
+function setDetailOptionalCell(td,value,row,column,loadingText){
+  if(value!=null&&value!==""){
+    td.textContent=value;
+  }else if(detailFieldPending(row,column)){
+    setLoadingCell(td,loadingText);
+  }else if(detailFieldAwaiting(row,column)){
+    setAwaitingCell(td);
   }else{
     setMutedCell(td,"暂无");
   }
@@ -1238,12 +1262,12 @@ function appendDetailCell(tr,c,row,index){
   else if(c==="短剧ID"){td.className="detail-id";td.textContent=valueOf(row,["Drama ID / 短剧ID"],"");}
   else if(c==="英文剧名"){td.className="detail-title";td.textContent=dramaTitleOf(row);}
   else if(c==="中文剧名"){td.className="detail-title";setOptionalCell(td,chineseTitleOf(row),titleHydrating&&!!dramaTitleOf(row));}
-  else if(c==="发布时间"){td.className="num";setOptionalCell(td,dramaPublishTimeOf(row),detailFieldPending(row,c));}
+  else if(c==="发布时间"){td.className="num";setDetailOptionalCell(td,dramaPublishTimeOf(row),row,c);}
   else if(c==="集数"){td.className="num";td.textContent=fmt(dramaEpisodesOf(row));}
   else if(c==="观看"){td.className="num";td.textContent=fmtPlay(dramaViewsOf(row));}
   else if(c==="时长"){
     td.className="num";
-    setOptionalCell(td,dramaDurationTextOf(row),detailFieldPending(row,c));
+    setDetailOptionalCell(td,dramaDurationTextOf(row),row,c);
   }else if(c==="限免")td.textContent=valueOf(row,["Limited Free / 是否限免"],"");
   else if(c==="题材"){
     td.className="detail-text";
@@ -1259,10 +1283,11 @@ function appendDetailCell(tr,c,row,index){
       });
       td.appendChild(wrap);
     }else if(detailFieldPending(row,c))setLoadingCell(td,"补全中…");
+    else if(detailFieldAwaiting(row,c))setAwaitingCell(td);
     else setMutedCell(td,"暂无");
   }else if(c==="简介"){
     td.className="detail-text";
-    setOptionalCell(td,dramaDescriptionTextOf(row),detailFieldPending(row,c));
+    setDetailOptionalCell(td,dramaDescriptionTextOf(row),row,c);
   }else if(c==="主页链接"){
     td.className="link";
     const a=document.createElement("a");
