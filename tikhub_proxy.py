@@ -20,7 +20,7 @@
  端口被占用?把下面的 PORT 改个数字,网页代理框也跟着改。
 ==============================================================================
 """
-import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, io, re, threading, time
+import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, html, io, re, threading, time
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -91,6 +91,8 @@ SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
 SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
 AUTO_REFRESH_COOLDOWN_SECONDS = _env_int("AUTO_REFRESH_COOLDOWN_SECONDS", 300, 30, 86400)
 VIDEO_PLAY_URL_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_URL_CACHE_TTL_SECONDS", 600, 0, 86400)
+DRAMA_LINK_PAGE_SIZE = _env_int("DRAMA_LINK_PAGE_SIZE", 50, 1, 50)
+DRAMA_LINK_MAX_EPISODES = _env_int("DRAMA_LINK_MAX_EPISODES", 500, 1, 5000)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
 
@@ -1229,27 +1231,72 @@ def _get_drama_first_episode_publish_time(drama_id, uid, started):
     return min(candidates, key=lambda item: _publish_epoch(item) or float("inf"))
 
 
+def _get_drama_episode_items(drama_id, uid, started=None, limit=None):
+    clean_id = _clean_drama_id(drama_id)
+    if not clean_id or (started is not None and _runtime_exceeded(started)):
+        return []
+    max_items = max(1, int(limit or DRAMA_LINK_MAX_EPISODES))
+    items, seen = [], set()
+    cursor, prev, stall = "0", None, 0
+    for _page in range(1, SCHEDULE_MAX_PAGES + 1):
+        if started is not None and _runtime_exceeded(started):
+            break
+        count = min(DRAMA_LINK_PAGE_SIZE, max_items - len(items))
+        if count <= 0:
+            break
+        try:
+            data = _send_tiktok_get("/api/drama/episode/item_list/", {
+                "dramaID": clean_id,
+                "aid": TIKTOK_AID,
+                "language": TIKTOK_LANGUAGE,
+                "region": TIKTOK_REGION,
+                "storeRegion": TIKTOK_REGION,
+                "count": str(count),
+                "cursor": str(cursor),
+            }, "TikTok drama episode endpoint", uid)
+        except TikHubError:
+            break
+        if not isinstance(data, dict):
+            break
+        batch = data.get("itemList") or data.get("item_list") or []
+        if not isinstance(batch, list):
+            batch = []
+        added = 0
+        for item in batch:
+            if not isinstance(item, dict):
+                continue
+            video_id = _get_video_id(item)
+            key = video_id or json.dumps(item, ensure_ascii=False, sort_keys=True)[:240]
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(item)
+            added += 1
+            if len(items) >= max_items:
+                return items
+        has_more, next_cursor = _read_pagination(data)
+        if has_more in (False, 0, "0"):
+            break
+        advanced = next_cursor not in (None, "", "0") and str(next_cursor) != str(cursor) and str(next_cursor) != str(prev)
+        if advanced:
+            prev, cursor = cursor, str(next_cursor)
+            stall = 0 if added else stall + 1
+            if stall >= 3:
+                break
+            continue
+        if not batch or not added:
+            break
+        stall += 1
+        if stall >= 3:
+            break
+    return items
+
+
 def _get_drama_episode_link(drama_id, uid, started=None, target="play"):
     clean_id = _clean_drama_id(drama_id)
     if not clean_id or (started is not None and _runtime_exceeded(started)):
         return ""
-    try:
-        data = _send_tiktok_get("/api/drama/episode/item_list/", {
-            "dramaID": clean_id,
-            "aid": TIKTOK_AID,
-            "language": TIKTOK_LANGUAGE,
-            "region": TIKTOK_REGION,
-            "storeRegion": TIKTOK_REGION,
-            "count": "5",
-            "cursor": "0",
-        }, "TikTok drama episode endpoint", uid)
-    except TikHubError:
-        return ""
-    if not isinstance(data, dict):
-        return ""
-    batch = data.get("itemList") or data.get("item_list") or []
-    if not isinstance(batch, list):
-        return ""
+    batch = _get_drama_episode_items(clean_id, uid, started, limit=5)
     fallback = ""
     prefer_play = str(target or "").strip().lower() in ("", "play", "source", "direct", "media")
     for item in batch:
@@ -1592,6 +1639,104 @@ def _execute_scheduled_job(accounts):
         raise
 
 
+def _html_text(value, limit=None):
+    return html.escape(_to_text(value, limit), quote=True)
+
+
+def _drama_episode_summary(item, uid, index):
+    video_id = _get_video_id(item)
+    page_url = _video_link_from_item(uid, item)
+    play_url = ""
+    if video_id:
+        play_url = "/drama-link?" + urllib.parse.urlencode({
+            "uid": uid,
+            "video_id": video_id,
+            "target": "play",
+            "redirect": "1",
+        })
+    return {
+        "index": index,
+        "video_id": video_id,
+        "title": _get_desc(item) or _to_text(_deep_find(item, DESC_KEYS), 160) or ("Episode %s" % index),
+        "publish_time": _publish_time_of(item),
+        "views": _get_play_count(item),
+        "video_url": page_url,
+        "play_url": play_url,
+    }
+
+
+def _render_drama_episode_list_page(uid, drama_id, episodes):
+    account = (uid or "").strip().lstrip("@")
+    title = "@%s · %s 集" % (account, len(episodes))
+    rows = []
+    for episode in episodes:
+        page_link = '<a class="link ghost" href="%s" target="_blank" rel="noopener">作品页</a>' % _html_text(episode["video_url"]) if episode.get("video_url") else '<span class="muted">无</span>'
+        play_link = '<a class="link primary" href="%s" target="_blank" rel="noopener">播放源</a>' % _html_text(episode["play_url"]) if episode.get("play_url") else '<span class="muted">无</span>'
+        rows.append("""<tr>
+  <td class="idx">%s</td>
+  <td><div class="name">%s</div><div class="meta">%s</div></td>
+  <td>%s</td>
+  <td>%s</td>
+  <td class="actions">%s%s</td>
+</tr>""" % (
+            episode["index"],
+            _html_text(episode.get("title"), 180),
+            "ID " + _html_text(episode.get("video_id")) if episode.get("video_id") else "",
+            _html_text(episode.get("publish_time") or "暂无"),
+            _html_text(episode.get("views") or 0),
+            play_link,
+            page_link,
+        ))
+    if not rows:
+        rows.append('<tr><td colspan="5" class="empty">没有取到该剧的视频列表</td></tr>')
+    source_url = "/drama-link?" + urllib.parse.urlencode({
+        "uid": account,
+        "drama_id": _clean_drama_id(drama_id),
+        "target": "list",
+        "redirect": "0",
+    })
+    body = """<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>短剧视频列表</title>
+<style>
+:root{color-scheme:light;--ink:#172033;--muted:#667085;--line:#e6eaf1;--head:#1d2633;--bg:#f5f7fb;--blue:#405cff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Arial,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:24px auto;padding:0 18px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(31,41,55,.08);overflow:hidden}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px}.tools{display:flex;gap:8px;flex-wrap:wrap}.btn,.link{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:6px;text-decoration:none;border:1px solid var(--line);white-space:nowrap}.btn{color:var(--ink);background:#fff}.link.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.ghost{color:var(--blue);background:#fff;margin-left:8px}table{width:100%%;border-collapse:collapse;table-layout:fixed}thead th{background:var(--head);color:#fff;text-align:left;font-weight:700;padding:12px 14px}tbody td{border-top:1px solid var(--line);padding:12px 14px;vertical-align:top}tbody tr:nth-child(even){background:#fafbfe}.idx{width:64px;color:var(--muted)}.name{font-weight:700;word-break:break-word}.meta{margin-top:3px;color:var(--muted);font-size:12px;word-break:break-all}.actions{white-space:nowrap}.empty{text-align:center;color:var(--muted);padding:34px}.note{color:var(--muted);font-size:12px;margin-top:12px}@media(max-width:760px){.top{display:block}.tools{margin-top:12px}table{table-layout:auto}.hide-sm{display:none}.actions{white-space:normal}.link.ghost{margin-left:0;margin-top:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="panel">
+    <div class="top">
+      <div>
+        <h1>短剧视频列表</h1>
+        <div class="sub">%s · 短剧ID %s · 共 %s 条</div>
+      </div>
+      <div class="tools">
+        <a class="btn" href="/" target="_self">返回报表</a>
+        <a class="btn" href="%s" target="_blank" rel="noopener">JSON</a>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th class="idx">#</th><th>视频</th><th class="hide-sm">发布时间</th><th class="hide-sm">观看</th><th>链接</th></tr></thead>
+      <tbody>%s</tbody>
+    </table>
+  </section>
+  <div class="note">播放源链接会在点击时实时向 TikHub 获取最新直链；如果直链失效，刷新本页后再点一次。</div>
+</div>
+</body>
+</html>""" % (
+        _html_text(title),
+        _html_text(_clean_drama_id(drama_id)),
+        len(episodes),
+        _html_text(source_url),
+        "\n".join(rows),
+    )
+    return body.encode("utf-8")
+
+
 def _start_configured_scheduled_job_if_idle():
     global LAST_AUTO_REFRESH_AT
     if not SERVER_API_KEY:
@@ -1702,7 +1847,27 @@ class Handler(BaseHTTPRequestHandler):
         drama_id = qs.get("drama_id", [""])[0] or qs.get("dramaID", [""])[0]
         video_id = qs.get("video_id", [""])[0] or qs.get("item_id", [""])[0]
         target = qs.get("target", ["play"])[0] or "play"
-        prefer_play = str(target or "").strip().lower() in ("", "play", "source", "direct", "media")
+        target_norm = str(target or "").strip().lower()
+        redirect = str(qs.get("redirect", ["1"])[0]).lower() not in ("0", "false", "no")
+        if target_norm in ("list", "episodes", "episode_list", "all"):
+            if not drama_id:
+                self._send_json(400, {"ok": False, "error": "missing drama_id"})
+                return
+            episode_items = _get_drama_episode_items(drama_id, uid, limit=DRAMA_LINK_MAX_EPISODES)
+            episodes = [_drama_episode_summary(item, uid, idx + 1) for idx, item in enumerate(episode_items)]
+            if not redirect:
+                self._send_json(200, {
+                    "ok": True,
+                    "target": "list",
+                    "uid": uid,
+                    "drama_id": _clean_drama_id(drama_id),
+                    "count": len(episodes),
+                    "episodes": episodes,
+                })
+                return
+            self._send_bytes(200, _render_drama_episode_list_page(uid, drama_id, episodes), "text/html; charset=utf-8", no_cache=True)
+            return
+        prefer_play = target_norm in ("", "play", "source", "direct", "media")
         link = ""
         if video_id:
             if prefer_play:
@@ -1714,7 +1879,6 @@ class Handler(BaseHTTPRequestHandler):
         if not link:
             self._send_json(404, {"ok": False, "error": "drama link not found"})
             return
-        redirect = str(qs.get("redirect", ["1"])[0]).lower() not in ("0", "false", "no")
         if redirect:
             self.send_response(302)
             self.send_header("Location", link)
