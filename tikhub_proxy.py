@@ -1667,11 +1667,11 @@ def _drama_episode_summary(item, uid, index):
 
 def _render_drama_episode_list_page(uid, drama_id, episodes):
     account = (uid or "").strip().lstrip("@")
-    title = "@%s · %s 集" % (account, len(episodes))
+    title = "@%s - %s episodes" % (account, len(episodes))
     rows = []
     for episode in episodes:
-        page_link = '<a class="link ghost" href="%s" target="_blank" rel="noopener">作品页</a>' % _html_text(episode["video_url"]) if episode.get("video_url") else '<span class="muted">无</span>'
-        play_link = '<a class="link primary" href="%s" target="_blank" rel="noopener">播放源</a>' % _html_text(episode["play_url"]) if episode.get("play_url") else '<span class="muted">无</span>'
+        page_link = '<a class="link ghost" href="%s" target="_blank" rel="noopener">&#20316;&#21697;&#39029;</a>' % _html_text(episode["video_url"]) if episode.get("video_url") else '<span class="muted">&#26080;</span>'
+        play_link = '<a class="link primary" href="%s" target="_blank" rel="noopener">&#25773;&#25918;&#28304;</a>' % _html_text(episode["play_url"]) if episode.get("play_url") else '<span class="muted">&#26080;</span>'
         rows.append("""<tr>
   <td class="idx">%s</td>
   <td><div class="name">%s</div><div class="meta">%s</div></td>
@@ -1682,13 +1682,13 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
             episode["index"],
             _html_text(episode.get("title"), 180),
             "ID " + _html_text(episode.get("video_id")) if episode.get("video_id") else "",
-            _html_text(episode.get("publish_time") or "暂无"),
+            _html_text(episode.get("publish_time") or "N/A"),
             _html_text(episode.get("views") or 0),
             play_link,
             page_link,
         ))
     if not rows:
-        rows.append('<tr><td colspan="5" class="empty">没有取到该剧的视频列表</td></tr>')
+        rows.append('<tr><td colspan="5" class="empty">No videos found.</td></tr>')
     source_url = "/drama-link?" + urllib.parse.urlencode({
         "uid": account,
         "drama_id": _clean_drama_id(drama_id),
@@ -1700,7 +1700,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>短剧视频列表</title>
+<title>&#30701;&#21095;&#35270;&#39057;&#21015;&#34920;</title>
 <style>
 :root{color-scheme:light;--ink:#172033;--muted:#667085;--line:#e6eaf1;--head:#1d2633;--bg:#f5f7fb;--blue:#405cff}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Arial,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:24px auto;padding:0 18px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(31,41,55,.08);overflow:hidden}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px}.tools{display:flex;gap:8px;flex-wrap:wrap}.btn,.link{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:6px;text-decoration:none;border:1px solid var(--line);white-space:nowrap}.btn{color:var(--ink);background:#fff}.link.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.ghost{color:var(--blue);background:#fff;margin-left:8px}table{width:100%%;border-collapse:collapse;table-layout:fixed}thead th{background:var(--head);color:#fff;text-align:left;font-weight:700;padding:12px 14px}tbody td{border-top:1px solid var(--line);padding:12px 14px;vertical-align:top}tbody tr:nth-child(even){background:#fafbfe}.idx{width:64px;color:var(--muted)}.name{font-weight:700;word-break:break-word}.meta{margin-top:3px;color:var(--muted);font-size:12px;word-break:break-all}.actions{white-space:nowrap}.empty{text-align:center;color:var(--muted);padding:34px}.note{color:var(--muted);font-size:12px;margin-top:12px}@media(max-width:760px){.top{display:block}.tools{margin-top:12px}table{table-layout:auto}.hide-sm{display:none}.actions{white-space:normal}.link.ghost{margin-left:0;margin-top:6px}}
@@ -1711,20 +1711,20 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
   <section class="panel">
     <div class="top">
       <div>
-        <h1>短剧视频列表</h1>
-        <div class="sub">%s · 短剧ID %s · 共 %s 条</div>
+        <h1>&#30701;&#21095;&#35270;&#39057;&#21015;&#34920;</h1>
+        <div class="sub">%s ? &#30701;&#21095;ID %s ? &#20849; %s &#26465;</div>
       </div>
       <div class="tools">
-        <a class="btn" href="/" target="_self">返回报表</a>
+        <a class="btn" href="/" target="_self">&#36820;&#22238;&#25253;&#34920;</a>
         <a class="btn" href="%s" target="_blank" rel="noopener">JSON</a>
       </div>
     </div>
     <table>
-      <thead><tr><th class="idx">#</th><th>视频</th><th class="hide-sm">发布时间</th><th class="hide-sm">观看</th><th>链接</th></tr></thead>
+      <thead><tr><th class="idx">#</th><th>&#35270;&#39057;</th><th class="hide-sm">&#21457;&#24067;&#26102;&#38388;</th><th class="hide-sm">&#35266;&#30475;</th><th>&#38142;&#25509;</th></tr></thead>
       <tbody>%s</tbody>
     </table>
   </section>
-  <div class="note">播放源链接会在点击时实时向 TikHub 获取最新直链；如果直链失效，刷新本页后再点一次。</div>
+  <div class="note">&#25773;&#25918;&#28304;&#38142;&#25509;&#20250;&#22312;&#28857;&#20987;&#26102;&#23454;&#26102;&#33719;&#21462;&#26368;&#26032;&#30452;&#38142;&#12290;</div>
 </div>
 </body>
 </html>""" % (
@@ -1735,7 +1735,6 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
         "\n".join(rows),
     )
     return body.encode("utf-8")
-
 
 def _start_configured_scheduled_job_if_idle():
     global LAST_AUTO_REFRESH_AT
