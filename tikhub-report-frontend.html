@@ -538,6 +538,8 @@ let currentReportGeneratedAt="";
 let detailRefreshTimer=null;
 let detailRefreshCount=0;
 const DETAIL_REFRESH_LIMIT=24;
+const DETAIL_REFRESH_MS=5000;
+let backendJobRunning=false;
 let running=false, cancelled=false;
 let corsShown=false;
 
@@ -887,6 +889,14 @@ function clearResults(){
 }
 function valueOf(row,keys,fallback){
   for(const k of keys){if(row&&row[k]!=null&&row[k]!=="")return row[k];}
+  if(row&&typeof row==="object"){
+    const aliases=new Set(keys.map(k=>String(k||"").split(" / ")[0].trim().toLowerCase()).filter(Boolean));
+    for(const [key,value] of Object.entries(row)){
+      if(value==null||value==="")continue;
+      const alias=String(key||"").split(" / ")[0].trim().toLowerCase();
+      if(aliases.has(alias))return value;
+    }
+  }
   return fallback==null?"":fallback;
 }
 function accountOf(row){return valueOf(row,["账号","Account / 账号"],"");}
@@ -1117,7 +1127,7 @@ function detailRowHasIdentity(row){
   return !!(dramaTitleOf(row)||valueOf(row,["Drama ID / 短剧ID"],"")||accountOf(row));
 }
 function detailFieldPending(row,column){
-  if(currentReportSource!=="latest"||!detailRowHasIdentity(row))return false;
+  if(currentReportSource!=="latest"||!backendJobRunning||!detailRowHasIdentity(row))return false;
   if(column==="发布时间")return !dramaPublishTimeOf(row);
   if(column==="时长")return !dramaDurationTextOf(row);
   if(column==="题材")return !themeDisplayList(row).length&&!englishThemeLabelsOf(row).length&&!chineseThemeLabelsOf(row).length;
@@ -1238,7 +1248,7 @@ function appendDetailCell(tr,c,row,index){
   else if(c==="题材"){
     td.className="detail-text";
     const labels=themeDisplayList(row);
-    if(labels.length&&!(themeHydrating&&themeHasPendingTranslation(row))){
+    if(labels.length){
       const wrap=document.createElement("div");
       wrap.className="theme-tags";
       labels.forEach(label=>{
@@ -1248,8 +1258,7 @@ function appendDetailCell(tr,c,row,index){
         wrap.appendChild(tag);
       });
       td.appendChild(wrap);
-    }else if(themeHydrating&&englishThemeLabelsOf(row).length)setLoadingCell(td);
-    else if(detailFieldPending(row,c))setLoadingCell(td,"补全中…");
+    }else if(detailFieldPending(row,c))setLoadingCell(td,"补全中…");
     else setMutedCell(td,"暂无");
   }else if(c==="简介"){
     td.className="detail-text";
@@ -1535,6 +1544,15 @@ function stopDetailAutoRefresh(){
     detailRefreshTimer=null;
   }
 }
+async function refreshBackendJobState(){
+  try{
+    const data=await backendFetchJson("/schedule-status",{}, {sendSecret:false});
+    backendJobRunning=!!(data&&data.job&&data.job.running);
+  }catch(_){
+    backendJobRunning=false;
+  }
+  return backendJobRunning;
+}
 function scheduleDetailAutoRefresh(){
   stopDetailAutoRefresh();
   if(currentReportSource!=="latest"||!detailEnrichmentPending()){
@@ -1550,13 +1568,18 @@ function scheduleDetailAutoRefresh(){
     }
     window.__quietRefresh=true;
     try{
-      await loadBackendLatest({quiet:true});
+      const runningJob=await refreshBackendJobState();
+      if(runningJob)await loadBackendLatest({quiet:true});
+      else renderResultTable();
     }catch(_){
       scheduleDetailAutoRefresh();
     }finally{
       window.__quietRefresh=false;
     }
-  },15000);
+  },DETAIL_REFRESH_MS);
+}
+function shouldHydrateClientTranslations(){
+  return isAdminMode()||!isPublicMode();
 }
 function loadBackendPayload(payload,opts){
   opts=opts||{};
@@ -1576,13 +1599,16 @@ function loadBackendPayload(payload,opts){
   const pending=detailEnrichmentPending();
   backendSetStatus("数据时间 "+dataTime+" · 已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧"+(pending?" · 明细补全中，页面会自动刷新":""), !pending);
   scheduleDetailAutoRefresh();
-  hydrateChineseTitles(dramaRows);
-  hydrateThemeLabels(dramaRows);
+  if(shouldHydrateClientTranslations()){
+    hydrateChineseTitles(dramaRows);
+    hydrateThemeLabels(dramaRows);
+  }
   if(summary.length&&!window.__quietRefresh&&!opts.quiet)toast("已加载最新结果");
 }
 async function loadBackendLatest(opts){
   opts=opts||{};
   if(!opts.quiet)backendSetStatus("正在加载最新结果…");
+  await refreshBackendJobState();
   let payload=null;
   try{
     payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});

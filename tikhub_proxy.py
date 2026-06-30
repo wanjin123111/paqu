@@ -31,6 +31,7 @@ if os.environ.get("RENDER") or os.environ.get("PORT"):
 ROOT = os.path.dirname(os.path.abspath(__file__))  # 托管脚本所在文件夹
 DEFAULT_PAGE = "tikhub-report-frontend.html"
 REPORTS_DIR = os.path.join(ROOT, "reports")   # 定时监控存盘目录
+DRAMA_DETAIL_CACHE_FILE = os.path.join(REPORTS_DIR, "drama_detail_cache.json")
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
 ALLOW_HEADERS = "Authorization, Content-Type, Accept"
@@ -147,9 +148,16 @@ DRAMA_COLUMNS = ["Account / 账号", "Nickname / 昵称", "Screenshot Name / 截
                  "English Themes / 英文题材", "Chinese Themes / 中文题材",
                  "English Description Preview / 英文简介预览", "Chinese Description / 中文简介",
                  "Description Truncated / 简介是否截断", "Source Profile URL / 来源主页"]
+DRAMA_DETAIL_CACHE_FIELDS = (
+    "english_title", "chinese_title", "publish_time", "duration_seconds", "duration_minutes",
+    "limited_free", "english_themes", "chinese_themes", "english_description",
+    "chinese_description", "description_truncated",
+)
 
 JOB_LOCK = threading.Lock()
 LAST_JOB = {"running": False, "started_at": None, "finished_at": None, "result": None, "error": None}
+DRAMA_DETAIL_CACHE = None
+DRAMA_DETAIL_CACHE_LOCK = threading.Lock()
 TITLE_TRANSLATION_CACHE = {}
 THEME_TRANSLATION_MAP = {
     "rural area": "乡村",
@@ -501,6 +509,114 @@ def _duration_minutes(seconds, explicit_minutes=None):
         return round(minutes, 1)
     sec = _to_int(seconds)
     return round(sec / 60, 1) if sec else 0
+
+
+def _has_cache_value(value):
+    return value not in (None, "", [], {})
+
+
+def _drama_cache_key(uid, drama_id, title):
+    key = str(drama_id or "").strip()
+    if key.upper().startswith("ID "):
+        key = key[3:].strip()
+    if not key:
+        key = re.sub(r"\s+", " ", str(title or "").strip().lower())
+    if not key:
+        return ""
+    return "%s|%s" % (str(uid or "").strip().lower(), key)
+
+
+def _seed_cache_from_latest(cache):
+    latest = os.path.join(REPORTS_DIR, "latest_report.json")
+    if not os.path.isfile(latest):
+        return
+    try:
+        with open(latest, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return
+    for row in payload.get("dramas_detail", []) or []:
+        if not isinstance(row, dict):
+            continue
+        key = _drama_cache_key(row.get("Account / 账号") or row.get("账号"),
+                               row.get("Drama ID / 短剧ID"), row.get("English Title / 英文剧名") or row.get("短剧名"))
+        if not key:
+            continue
+        cached = cache.setdefault(key, {})
+        mapping = {
+            "english_title": row.get("English Title / 英文剧名"),
+            "chinese_title": row.get("Chinese Title / 中文剧名"),
+            "publish_time": row.get("Publish Time / 发布时间"),
+            "duration_seconds": row.get("Duration Seconds / 总时长(秒)"),
+            "duration_minutes": row.get("Duration Minutes / 总时长(分钟)"),
+            "limited_free": row.get("Limited Free / 是否限免"),
+            "english_themes": row.get("English Themes / 英文题材"),
+            "chinese_themes": row.get("Chinese Themes / 中文题材"),
+            "english_description": row.get("English Description Preview / 英文简介预览"),
+            "chinese_description": row.get("Chinese Description / 中文简介"),
+            "description_truncated": row.get("Description Truncated / 简介是否截断"),
+        }
+        for field, value in mapping.items():
+            if _has_cache_value(value):
+                cached[field] = value
+
+
+def _load_drama_detail_cache():
+    global DRAMA_DETAIL_CACHE
+    if DRAMA_DETAIL_CACHE is not None:
+        return DRAMA_DETAIL_CACHE
+    with DRAMA_DETAIL_CACHE_LOCK:
+        if DRAMA_DETAIL_CACHE is not None:
+            return DRAMA_DETAIL_CACHE
+        cache = {}
+        try:
+            with open(DRAMA_DETAIL_CACHE_FILE, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if isinstance(data, dict):
+                cache = data
+        except Exception:
+            cache = {}
+        if not cache:
+            _seed_cache_from_latest(cache)
+        DRAMA_DETAIL_CACHE = cache
+        return DRAMA_DETAIL_CACHE
+
+
+def _remember_drama_detail(uid, drama_id, title, detail):
+    key = _drama_cache_key(uid, drama_id, title)
+    if not key:
+        return
+    cache = _load_drama_detail_cache()
+    cached = cache.setdefault(key, {})
+    for field in DRAMA_DETAIL_CACHE_FIELDS:
+        value = detail.get(field)
+        if _has_cache_value(value):
+            cached[field] = value
+
+
+def _apply_cached_drama_detail(uid, drama_id, title, detail):
+    key = _drama_cache_key(uid, drama_id, title)
+    if not key:
+        return detail
+    cached = _load_drama_detail_cache().get(key)
+    if not isinstance(cached, dict):
+        return detail
+    for field in DRAMA_DETAIL_CACHE_FIELDS:
+        if not _has_cache_value(detail.get(field)) and _has_cache_value(cached.get(field)):
+            detail[field] = cached[field]
+    return detail
+
+
+def _save_drama_detail_cache():
+    cache = _load_drama_detail_cache()
+    if not cache:
+        return
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    tmp = DRAMA_DETAIL_CACHE_FILE + ".tmp"
+    with DRAMA_DETAIL_CACHE_LOCK:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(cache, handle, ensure_ascii=False, indent=2)
+        os.replace(tmp, DRAMA_DETAIL_CACHE_FILE)
 
 
 def _deep_find(obj, keys, depth=0):
@@ -997,13 +1113,7 @@ def _get_tiktok_drama_library(secuid, uid):
             chinese_themes = _theme_text(_deep_find_any(item, DRAMA_CN_THEMES_KEYS))
             if not chinese_themes:
                 chinese_themes = _theme_text(english_themes_source, translate=True)
-            if not publish_time and drama_key:
-                publish_time = _get_drama_first_episode_publish_time(drama_key, uid, started)
-            dramas.append({
-                "name": (_clean_title(name)[:80].strip() or name[:80] or key),
-                "episodes": episodes,
-                "views": views,
-                "drama_id": ("ID " + drama_key) if drama_key and not drama_key.upper().startswith("ID ") else drama_key,
+            detail = _apply_cached_drama_detail(uid, drama_key, name, {
                 "english_title": english_title,
                 "chinese_title": chinese_title,
                 "publish_time": publish_time,
@@ -1015,6 +1125,16 @@ def _get_tiktok_drama_library(secuid, uid):
                 "english_description": english_desc,
                 "chinese_description": chinese_desc,
                 "description_truncated": "是 / Yes" if len(english_desc) >= 600 or len(chinese_desc) >= 600 else "否 / No",
+            })
+            if not detail.get("publish_time") and drama_key:
+                detail["publish_time"] = _get_drama_first_episode_publish_time(drama_key, uid, started)
+            _remember_drama_detail(uid, drama_key, name, detail)
+            dramas.append({
+                "name": (_clean_title(name)[:80].strip() or name[:80] or key),
+                "episodes": episodes,
+                "views": views,
+                "drama_id": ("ID " + drama_key) if drama_key and not drama_key.upper().startswith("ID ") else drama_key,
+                **detail,
             })
             added += 1
             if SCHEDULE_MAX_DRAMAS and len(dramas) >= SCHEDULE_MAX_DRAMAS:
@@ -1227,6 +1347,10 @@ def _run_scheduled_job(accounts):
             drama_rows.extend(dramas)
         except Exception as exc:
             errors.append({"account": uid, "error": str(exc)})
+    try:
+        _save_drama_detail_cache()
+    except Exception:
+        pass
     files = _write_report_bundle(rows, drama_rows, errors)
     return {
         "ok": True,
@@ -1277,8 +1401,14 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/run-scheduled":
             self._run_scheduled_endpoint(qs)
         elif parsed.path == "/schedule-status":
-            if self._require_schedule_secret(qs):
-                self._send_json(200, {"ok": True, "job": LAST_JOB})
+            job = dict(LAST_JOB)
+            if not self._schedule_secret_matches(qs):
+                job = {
+                    "running": bool(LAST_JOB.get("running")),
+                    "started_at": LAST_JOB.get("started_at"),
+                    "finished_at": LAST_JOB.get("finished_at"),
+                }
+            self._send_json(200, {"ok": True, "job": job})
         elif parsed.path == "/reports":
             self._list_reports(qs)
         elif parsed.path.startswith("/reports/"):
@@ -1307,11 +1437,16 @@ class Handler(BaseHTTPRequestHandler):
         if not SCHEDULE_SECRET:
             self._send_json(503, {"ok": False, "error": "SCHEDULE_SECRET is not configured"})
             return False
-        supplied = qs.get("secret", [""])[0] or self.headers.get("X-Schedule-Secret", "")
-        if not hmac.compare_digest(str(supplied), SCHEDULE_SECRET):
+        if not self._schedule_secret_matches(qs):
             self._send_json(403, {"ok": False, "error": "bad or missing schedule secret"})
             return False
         return True
+
+    def _schedule_secret_matches(self, qs):
+        if not SCHEDULE_SECRET:
+            return False
+        supplied = qs.get("secret", [""])[0] or self.headers.get("X-Schedule-Secret", "")
+        return hmac.compare_digest(str(supplied), SCHEDULE_SECRET)
 
     def _allow_report_read(self, qs):
         if PUBLIC_REPORTS:
