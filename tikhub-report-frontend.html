@@ -758,16 +758,16 @@ async function groupByPlaylist(secUid,uid,onLog){
       if(cancelled)break;
       const mixId=deepFind(pl,["mixId","mix_id","playlist_id","playlistId"]);
       const nm=deepFind(pl,["mixName","mix_name","name","playlist_name"])||String(mixId);
-      let total=0,cnt=0,c2="0",p2=null;
+      let total=0,cnt=0,c2="0",p2=null,firstLink="";
       for(let i=0;i<200;i++){
         if(cancelled)break;
         const pv=await apiGet(cfg.epPlaylistVideos,{mixId,mix_id:mixId,playlistId:mixId,count:"30",cursor:String(c2),max_cursor:String(c2)},"播放列表内视频接口");
         const vids=findVideoList(pv);if(!vids.length)break;
-        for(const v of vids){total+=getPlayCount(v);cnt++;}
+        for(const v of vids){const vid=getAwemeId(v);if(!firstLink&&vid)firstLink=buildVideoLink(uid,vid);total+=getPlayCount(v);cnt++;}
         const[hm,nc]=readPagination(pv);if(hm===false||hm===0||hm==="0"||nc==null||String(nc)===String(p2))break;p2=c2;c2=nc;await sleep(cfg.delay);
       }
       onLog("播放列表《"+String(nm).slice(0,26)+"》集"+cnt+" 观看"+fmt(total),"c-dim");
-      dramas.push({name:prettyName(String(nm))||String(nm),episodes:cnt,views:total,playlist_id:String(mixId||""),drama_link:buildPlaylistLink(uid,mixId,nm)});
+      dramas.push({name:prettyName(String(nm))||String(nm),episodes:cnt,views:total,playlist_id:String(mixId||""),drama_link:firstLink});
     }
     const[hm,nc]=readPagination(data);if(hm===false||hm===0||hm==="0"||nc==null||String(nc)===String(prev))break;prev=cursor;cursor=nc;await sleep(cfg.delay);
   }
@@ -877,7 +877,7 @@ async function scrapeAccount(acc,log){
   }else dramas=groupByTitle(videos);
   const row=buildRow(acc,prof,videos,dramas);
   addRow(row);
-  for(const [idx,d] of dramas.entries()){const dramaLink=d.drama_link||buildPlaylistLink(acc,d.playlist_id,d.name)||buildVideoLink(acc,d.top_video_id);dramaRows.push({"账号":acc,"昵称":prof.nickname,"短剧名":d.name,"Rank in Account / 账号内排序":idx+1,"English Title / 英文剧名":d.name,"Publish Time / 发布时间":d.publish_time||"","Episodes / 集数":d.episodes,"Views / 观看数":d.views,"集数":d.episodes,"累计观看":d.views,"单集均观看":d.episodes?Math.round(d.views/d.episodes):0,"主页链接":"https://www.tiktok.com/@"+acc,"短剧链接":dramaLink,"Drama Link / 短剧链接":dramaLink,"Playlist ID / 播放列表ID":d.playlist_id||"","Top Video ID / 最高观看视频ID":d.top_video_id||"","Source Profile URL / 来源主页":"https://www.tiktok.com/@"+acc});}
+  for(const [idx,d] of dramas.entries()){const dramaLink=d.drama_link||buildVideoLink(acc,d.top_video_id);dramaRows.push({"账号":acc,"昵称":prof.nickname,"短剧名":d.name,"Rank in Account / 账号内排序":idx+1,"English Title / 英文剧名":d.name,"Publish Time / 发布时间":d.publish_time||"","Episodes / 集数":d.episodes,"Views / 观看数":d.views,"集数":d.episodes,"累计观看":d.views,"单集均观看":d.episodes?Math.round(d.views/d.episodes):0,"主页链接":"https://www.tiktok.com/@"+acc,"短剧链接":dramaLink,"Drama Link / 短剧链接":dramaLink,"Playlist ID / 播放列表ID":d.playlist_id||"","Top Video ID / 最高观看视频ID":d.top_video_id||"","Source Profile URL / 来源主页":"https://www.tiktok.com/@"+acc});}
   renderResultTable();
   log("完成 → 短剧 "+row.短剧数+" 总集 "+row.总集数+" 累计观看 "+fmt(row.累计观看)+" 最高《"+row.最高观看短剧.slice(0,20)+"》"+fmt(row.最高观看),"c-ok");
 }
@@ -917,11 +917,10 @@ function nickOf(row){return valueOf(row,["昵称","Nickname / 昵称"],accountOf
 function linkOf(row){const acc=accountOf(row);return valueOf(row,["主页链接","Source Profile URL / 来源主页"],acc?("https://www.tiktok.com/@"+acc):"");}
 function dramaTitleOf(row){return valueOf(row,["English Title / 英文剧名","短剧名"],"");}
 function cleanDramaId(value){return String(value||"").trim().replace(/^ID\s+/i,"").replace(/[^0-9A-Za-z_-]/g,"");}
-function tiktokSlug(value){return String(value||"").trim().replace(/[^0-9A-Za-z]+/g,"-").replace(/^-+|-+$/g,"");}
-function buildSeriesLink(acc,id,title){const clean=cleanDramaId(id);if(!acc||!clean)return "";const slug=tiktokSlug(title);return "https://www.tiktok.com/@"+encodeURIComponent(acc)+"/series/"+(slug?encodeURIComponent(slug)+"-":"")+encodeURIComponent(clean);}
-function buildPlaylistLink(acc,id,title){const clean=cleanDramaId(id);if(!acc||!clean)return "";const slug=tiktokSlug(title);return "https://www.tiktok.com/@"+encodeURIComponent(acc)+"/playlist/"+(slug?encodeURIComponent(slug)+"-":"")+encodeURIComponent(clean);}
 function buildVideoLink(acc,id){const clean=cleanDramaId(id);return acc&&clean?("https://www.tiktok.com/@"+encodeURIComponent(acc)+"/video/"+encodeURIComponent(clean)):"";}
-function dramaLinkOf(row){const direct=valueOf(row,DRAMA_LINK_FIELDS,"");if(/^https?:\/\//i.test(String(direct)))return direct;const acc=accountOf(row), title=dramaTitleOf(row);return buildSeriesLink(acc,valueOf(row,["Drama ID / 短剧ID","短剧ID"],""),title)||buildPlaylistLink(acc,valueOf(row,["Playlist ID / 播放列表ID","playlist_id"],""),title)||buildVideoLink(acc,valueOf(row,["Top Video ID / 最高观看视频ID","top_video_id"],""))||linkOf(row);}
+function isGuessedDramaLink(url){return /^https:\/\/www\.tiktok\.com\/@[^/]+\/(?:series|playlist)\//i.test(String(url||""));}
+function dramaResolveLinkOf(row){const acc=accountOf(row), dramaId=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID"],"")), videoId=valueOf(row,["Top Video ID / 最高观看视频ID","top_video_id"],"");if(videoId)return buildVideoLink(acc,videoId);return acc&&dramaId?("/drama-link?uid="+encodeURIComponent(acc)+"&drama_id="+encodeURIComponent(dramaId)+"&redirect=1"):"";}
+function dramaLinkOf(row){const direct=valueOf(row,DRAMA_LINK_FIELDS,"");if(/^https?:\/\//i.test(String(direct))&&!isGuessedDramaLink(direct))return direct;return dramaResolveLinkOf(row);}
 function readJsonStore(key){
   try{
     const value=store.get(key);
@@ -1345,14 +1344,18 @@ function appendDetailCell(tr,c,row,index){
     }
   }else if(c==="短剧链接"||c==="主页链接"){
     td.className="link";
-    const a=document.createElement("a");
     const href=dramaLinkOf(row);
-    a.href=href;
-    a.target="_blank";
-    a.rel="noopener";
-    a.title=href;
-    a.textContent=href&&href!==linkOf(row)?"打开":"@"+accountOf(row);
-    td.appendChild(a);
+    if(href){
+      const a=document.createElement("a");
+      a.href=href;
+      a.target="_blank";
+      a.rel="noopener";
+      a.title=href;
+      a.textContent="打开";
+      td.appendChild(a);
+    }else{
+      td.textContent="暂无";
+    }
   }
   tr.appendChild(td);
 }

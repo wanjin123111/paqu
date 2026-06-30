@@ -299,12 +299,6 @@ def _clean_drama_id(value):
     return re.sub(r"[^0-9A-Za-z_-]", "", text)
 
 
-def _slugify_link_part(value):
-    text = _to_text(value, 120)
-    text = re.sub(r"[^0-9A-Za-z]+", "-", text).strip("-")
-    return urllib.parse.quote(text, safe="") if text else ""
-
-
 def _first_http_url(obj, keys):
     for value in _collect_key_values(obj, keys):
         text = _to_text(value)
@@ -314,32 +308,16 @@ def _first_http_url(obj, keys):
     return ""
 
 
-def _build_tiktok_series_url(uid, drama_id, title=""):
-    account = str(uid or "").strip().lstrip("@")
-    clean_id = _clean_drama_id(drama_id)
-    if not account or not clean_id:
-        return ""
-    slug = _slugify_link_part(title)
-    tail = (slug + "-" if slug else "") + urllib.parse.quote(clean_id, safe="")
-    return "https://www.tiktok.com/@%s/series/%s" % (urllib.parse.quote(account, safe="._-"), tail)
-
-
-def _build_tiktok_playlist_url(uid, playlist_id, title=""):
-    account = str(uid or "").strip().lstrip("@")
-    clean_id = _clean_drama_id(playlist_id)
-    if not account or not clean_id:
-        return ""
-    slug = _slugify_link_part(title)
-    tail = (slug + "-" if slug else "") + urllib.parse.quote(clean_id, safe="")
-    return "https://www.tiktok.com/@%s/playlist/%s" % (urllib.parse.quote(account, safe="._-"), tail)
-
-
 def _build_tiktok_video_url(uid, video_id):
     account = str(uid or "").strip().lstrip("@")
     clean_id = _clean_drama_id(video_id)
     if not account or not clean_id:
         return ""
     return "https://www.tiktok.com/@%s/video/%s" % (urllib.parse.quote(account, safe="._-"), urllib.parse.quote(clean_id, safe=""))
+
+
+def _video_link_from_item(uid, item):
+    return _first_http_url(item, VIDEO_LINK_KEYS) or _build_tiktok_video_url(uid, _get_video_id(item))
 
 
 def _direct_find_any(obj, keys):
@@ -1018,8 +996,8 @@ def _get_user_playlists(secuid, uid, started):
     return playlists
 
 
-def _get_playlist_video_stats(playlist_id, started):
-    seen, total_views, episodes = set(), 0, 0
+def _get_playlist_video_stats(playlist_id, started, uid=""):
+    seen, total_views, episodes, first_link = set(), 0, 0, ""
     cursor, prev, stall, locked_endpoint = "0", None, 0, None
     ep_list = [DEFAULT_ENDPOINTS["playlist_videos"]] + [ep for ep in PLAYLIST_VIDEO_EP_CANDIDATES if ep != DEFAULT_ENDPOINTS["playlist_videos"]]
     for _page in range(1, SCHEDULE_MAX_PLAYLIST_VIDEO_PAGES + 1):
@@ -1045,6 +1023,8 @@ def _get_playlist_video_stats(playlist_id, started):
                 continue
             if video_id:
                 seen.add(video_id)
+            if not first_link:
+                first_link = _video_link_from_item(uid, video)
             episodes += 1
             total_views += _get_play_count(video)
             added += 1
@@ -1064,7 +1044,7 @@ def _get_playlist_video_stats(playlist_id, started):
         if stall >= 6:
             break
         time.sleep((SCHEDULE_DELAY_MS / 1000.0) * (1 + stall))
-    return {"episodes": episodes, "views": total_views}
+    return {"episodes": episodes, "views": total_views, "first_link": first_link}
 
 
 def _playlist_dramas_are_usable(dramas):
@@ -1080,10 +1060,11 @@ def _get_playlist_dramas(secuid, uid):
         views = playlist["views_hint"]
         if not _runtime_exceeded(started):
             try:
-                stats = _get_playlist_video_stats(playlist["id"], started)
+                stats = _get_playlist_video_stats(playlist["id"], started, uid)
                 if stats["episodes"]:
                     episodes = stats["episodes"]
                     views = stats["views"]
+                    playlist["first_link"] = stats.get("first_link", "")
             except TikHubError as exc:
                 if exc.status in (401, 402, 403):
                     raise
@@ -1091,7 +1072,7 @@ def _get_playlist_dramas(secuid, uid):
         dramas.append({"name": name, "episodes": episodes, "views": views,
                        "publish_time": playlist.get("publish_time", ""),
                        "playlist_id": playlist.get("id", ""),
-                       "drama_link": _build_tiktok_playlist_url(uid, playlist.get("id", ""), name)})
+                       "drama_link": playlist.get("first_link", "")})
     return dramas
 
 
@@ -1123,6 +1104,34 @@ def _get_drama_first_episode_publish_time(drama_id, uid, started):
     if not candidates:
         return ""
     return min(candidates, key=lambda item: _publish_epoch(item) or float("inf"))
+
+
+def _get_drama_episode_link(drama_id, uid, started=None):
+    clean_id = _clean_drama_id(drama_id)
+    if not clean_id or (started is not None and _runtime_exceeded(started)):
+        return ""
+    try:
+        data = _send_tiktok_get("/api/drama/episode/item_list/", {
+            "dramaID": clean_id,
+            "aid": TIKTOK_AID,
+            "language": TIKTOK_LANGUAGE,
+            "region": TIKTOK_REGION,
+            "storeRegion": TIKTOK_REGION,
+            "count": "5",
+            "cursor": "0",
+        }, "TikTok drama episode endpoint", uid)
+    except TikHubError:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    batch = data.get("itemList") or data.get("item_list") or []
+    if not isinstance(batch, list):
+        return ""
+    for item in batch:
+        link = _video_link_from_item(uid, item)
+        if link:
+            return link
+    return ""
 
 
 def _get_tiktok_drama_library(secuid, uid):
@@ -1177,7 +1186,7 @@ def _get_tiktok_drama_library(secuid, uid):
             chinese_themes = _theme_text(_deep_find_any(item, DRAMA_CN_THEMES_KEYS))
             if not chinese_themes:
                 chinese_themes = _theme_text(english_themes_source, translate=True)
-            drama_link = _first_http_url(item, DRAMA_LINK_KEYS) or _build_tiktok_series_url(uid, drama_key, english_title or name)
+            drama_link = _first_http_url(item, DRAMA_LINK_KEYS)
             detail = _apply_cached_drama_detail(uid, drama_key, name, {
                 "english_title": english_title,
                 "chinese_title": chinese_title,
@@ -1328,8 +1337,6 @@ def _scrape_account(uid):
         chinese_title = _chinese_title_or_translate(drama.get("chinese_title", ""), title)
         profile_url = "https://www.tiktok.com/@" + uid
         drama_link = (drama.get("drama_link", "") or
-                      _build_tiktok_series_url(uid, drama.get("drama_id", ""), title) or
-                      _build_tiktok_playlist_url(uid, drama.get("playlist_id", ""), title) or
                       _build_tiktok_video_url(uid, drama.get("top_video_id", "")))
         drama_rows.append({
             "Account / 账号": uid,
@@ -1513,6 +1520,8 @@ class Handler(BaseHTTPRequestHandler):
                     "finished_at": LAST_JOB.get("finished_at"),
                 }
             self._send_json(200, {"ok": True, "job": job})
+        elif parsed.path == "/drama-link":
+            self._resolve_drama_link(qs)
         elif parsed.path == "/reports":
             self._list_reports(qs)
         elif parsed.path.startswith("/reports/"):
@@ -1556,6 +1565,28 @@ class Handler(BaseHTTPRequestHandler):
         if PUBLIC_REPORTS:
             return True
         return self._require_schedule_secret(qs)
+
+    def _resolve_drama_link(self, qs):
+        uid = (qs.get("uid", [""])[0] or qs.get("account", [""])[0]).strip().lstrip("@")
+        drama_id = qs.get("drama_id", [""])[0] or qs.get("dramaID", [""])[0]
+        video_id = qs.get("video_id", [""])[0] or qs.get("item_id", [""])[0]
+        link = ""
+        if video_id:
+            link = _build_tiktok_video_url(uid, video_id)
+        if not link and drama_id:
+            link = _get_drama_episode_link(drama_id, uid)
+        if not link:
+            self._send_json(404, {"ok": False, "error": "drama link not found"})
+            return
+        redirect = str(qs.get("redirect", ["1"])[0]).lower() not in ("0", "false", "no")
+        if redirect:
+            self.send_response(302)
+            self.send_header("Location", link)
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._send_json(200, {"ok": True, "url": link})
 
     def _run_scheduled_endpoint(self, qs):
         if not self._require_schedule_secret(qs):
