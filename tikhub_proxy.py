@@ -131,6 +131,10 @@ DRAMA_COUNT_KEYS = ("numVideos", "num_videos", "videoCount", "video_count", "epi
 DRAMA_VIEW_KEYS = ("numWatched", "num_watched", "play_count", "playCount", "view_count", "viewCount")
 DRAMA_LINK_KEYS = ("shareUrl", "share_url", "shareLink", "share_link", "dramaUrl", "drama_url", "webUrl", "web_url")
 VIDEO_LINK_KEYS = ("shareUrl", "share_url", "shareLink", "share_link", "videoUrl", "video_url", "webUrl", "web_url")
+DRAMA_EPISODE_NUMBER_KEYS = (
+    "EpisodeNumber", "episodeNumber", "episode_number", "EpisodeNo", "episodeNo", "episode_no",
+    "EpisodeIndex", "episodeIndex", "episode_index", "Episode", "episode",
+)
 DRAMA_EN_TITLE_KEYS = ("englishTitle", "english_title", "enTitle", "titleEn", "title_en", "dramaName", "drama_name", "name", "title")
 DRAMA_CN_TITLE_KEYS = ("chineseTitle", "chinese_title", "cnTitle", "titleCn", "title_cn", "zhTitle", "title_zh")
 DRAMA_DURATION_SECONDS_KEYS = ("durationSeconds", "duration_seconds", "durationSec", "duration_sec", "duration", "totalDuration", "total_duration")
@@ -1643,8 +1647,44 @@ def _html_text(value, limit=None):
     return html.escape(_to_text(value, limit), quote=True)
 
 
+def _trim_decimal(value):
+    return ("%.2f" % value).rstrip("0").rstrip(".")
+
+
+def _format_chinese_count(value):
+    number = _to_int(value)
+    sign = "-" if number < 0 else ""
+    number = abs(number)
+    if number >= 100000000:
+        return sign + _trim_decimal(number / 100000000.0) + "\u4ebf"
+    if number >= 10000:
+        return sign + _trim_decimal(number / 10000.0) + "\u4e07"
+    return sign + str(number)
+
+
+def _get_drama_episode_number(item, fallback):
+    containers = []
+    if isinstance(item, dict):
+        drama_info = item.get("dramaInfo") or item.get("drama_info")
+        if isinstance(drama_info, dict):
+            video_data = drama_info.get("DramaVideoData") or drama_info.get("dramaVideoData") or drama_info.get("drama_video_data")
+            if isinstance(video_data, dict):
+                containers.append(video_data)
+            containers.append(drama_info)
+        containers.append(item)
+    for container in containers:
+        for key in DRAMA_EPISODE_NUMBER_KEYS:
+            if key in container:
+                value = _to_int(container.get(key))
+                if value > 0:
+                    return value
+    value = _to_int(_deep_find(item, DRAMA_EPISODE_NUMBER_KEYS))
+    return value if value > 0 else fallback
+
+
 def _drama_episode_summary(item, uid, index):
     video_id = _get_video_id(item)
+    episode_no = _get_drama_episode_number(item, index)
     page_url = _video_link_from_item(uid, item)
     play_url = ""
     if video_id:
@@ -1656,10 +1696,13 @@ def _drama_episode_summary(item, uid, index):
         })
     return {
         "index": index,
+        "episode_no": episode_no,
+        "episode_label": "\u7b2c%s\u96c6" % episode_no,
         "video_id": video_id,
         "title": _get_desc(item) or _to_text(_deep_find(item, DESC_KEYS), 160) or ("Episode %s" % index),
         "publish_time": _publish_time_of(item),
         "views": _get_play_count(item),
+        "views_text": _format_chinese_count(_get_play_count(item)),
         "video_url": page_url,
         "play_url": play_url,
     }
@@ -1667,7 +1710,6 @@ def _drama_episode_summary(item, uid, index):
 
 def _render_drama_episode_list_page(uid, drama_id, episodes):
     account = (uid or "").strip().lstrip("@")
-    title = "@%s - %s episodes" % (account, len(episodes))
     rows = []
     for episode in episodes:
         page_link = '<a class="link ghost" href="%s" target="_blank" rel="noopener">&#20316;&#21697;&#39029;</a>' % _html_text(episode["video_url"]) if episode.get("video_url") else '<span class="muted">&#26080;</span>'
@@ -1679,11 +1721,11 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
   <td>%s</td>
   <td class="actions">%s%s</td>
 </tr>""" % (
-            episode["index"],
+            _html_text(episode.get("episode_label") or episode.get("index")),
             _html_text(episode.get("title"), 180),
             "ID " + _html_text(episode.get("video_id")) if episode.get("video_id") else "",
             _html_text(episode.get("publish_time") or "N/A"),
-            _html_text(episode.get("views") or 0),
+            _html_text(episode.get("views_text") or _format_chinese_count(episode.get("views"))),
             play_link,
             page_link,
         ))
@@ -1712,7 +1754,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
     <div class="top">
       <div>
         <h1>&#30701;&#21095;&#35270;&#39057;&#21015;&#34920;</h1>
-        <div class="sub">%s ? &#30701;&#21095;ID %s ? &#20849; %s &#26465;</div>
+        <div class="sub">@%s &#183; &#20849; %s &#38598; &#183; &#30701;&#21095;ID %s</div>
       </div>
       <div class="tools">
         <a class="btn" href="/" target="_self">&#36820;&#22238;&#25253;&#34920;</a>
@@ -1720,7 +1762,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
       </div>
     </div>
     <table>
-      <thead><tr><th class="idx">#</th><th>&#35270;&#39057;</th><th class="hide-sm">&#21457;&#24067;&#26102;&#38388;</th><th class="hide-sm">&#35266;&#30475;</th><th>&#38142;&#25509;</th></tr></thead>
+      <thead><tr><th class="idx">&#38598;&#25968;</th><th>&#35270;&#39057;</th><th class="hide-sm">&#21457;&#24067;&#26102;&#38388;</th><th class="hide-sm">&#35266;&#30475;</th><th>&#38142;&#25509;</th></tr></thead>
       <tbody>%s</tbody>
     </table>
   </section>
@@ -1728,9 +1770,9 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
 </div>
 </body>
 </html>""" % (
-        _html_text(title),
-        _html_text(_clean_drama_id(drama_id)),
+        _html_text(account),
         len(episodes),
+        _html_text(_clean_drama_id(drama_id)),
         _html_text(source_url),
         "\n".join(rows),
     )
