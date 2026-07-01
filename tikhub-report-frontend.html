@@ -51,13 +51,25 @@
   .key-pill.set .key-dot{background:var(--ok)}
 
   .wrap{max-width:1180px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:16px}
-  .dashboard-page{display:none}
-  .report-page{display:block}
+  .dashboard-page,.report-page{display:block}
+  .page-switch{display:none}
   body.public-mode .wrap{max-width:none;padding:0;gap:0}
-  body.public-mode .dashboard-page[hidden]{display:none!important}
-  body.public-mode .dashboard-page{min-height:calc(100vh - 63px);display:flex;align-items:center;justify-content:center;padding:28px 16px 24px}
-  body.public-mode .report-page{min-height:calc(100vh - 63px);padding:18px 16px 26px}
+  body.public-mode.dashboard-view{overflow:hidden}
+  body.public-mode.report-view{overflow:auto}
+  body.public-mode.dashboard-view .topbar{display:none}
+  body.public-mode .dashboard-page[hidden],
+  body.public-mode .report-page[hidden]{display:none!important}
+  body.public-mode.dashboard-view .report-page,
+  body.public-mode.report-view .dashboard-page{display:none!important}
+  body.public-mode .dashboard-page{width:100vw;height:100vh;min-height:100vh;display:flex;align-items:stretch;justify-content:stretch;padding:0;overflow:hidden}
+  body.public-mode .report-page{min-height:100vh;padding:18px 16px 26px}
   body.public-mode .report-page .foot-note{width:calc(100vw - 32px);max-width:none;margin:14px auto 0}
+  body.public-mode .page-switch{display:flex;position:fixed;right:28px;z-index:60;gap:10px}
+  body.public-mode .dashboard-page-switch{top:34px}
+  body.public-mode .report-page-switch{bottom:24px}
+  body.public-mode .page-switch .mini-btn{box-shadow:0 10px 24px rgba(15,23,42,.14)}
+  body.public-mode .dashboard-next-btn{background:#0d86ca;color:#fff;border-color:#0d86ca}
+  body.public-mode .dashboard-next-btn:hover{background:#086da4;color:#fff;border-color:#086da4;text-decoration:none}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
   .card-head{display:flex;align-items:center;justify-content:space-between;padding:15px 18px 12px;border-bottom:1px solid var(--line)}
   .card-head h2{margin:0;font-family:var(--display);font-size:13px;font-weight:600;letter-spacing:.05em;color:var(--ink-soft)}
@@ -216,7 +228,17 @@
   .dash-stat-title{font-size:15px;font-weight:800}
   .dash-stat-sub{font-size:12px;color:rgba(255,255,255,.8);margin-top:2px}
   .dashboard-loading{padding:24px;color:var(--ink-faint)}
-  body.public-mode #dashboardCard{width:min(1140px,calc(100vw - 32px));max-width:none;margin:0;transform:none}
+  body.public-mode #dashboardCard{width:100vw;height:100vh;max-width:none;margin:0;transform:none;border:0;border-radius:0;box-shadow:none}
+  body.public-mode #dashboardCard::after{height:8px}
+  body.public-mode #dashboardCard .dashboard-inner{height:100%;display:flex;flex-direction:column;padding:34px 40px 36px}
+  body.public-mode #dashboardCard .dashboard-head{padding-right:145px}
+  body.public-mode #dashboardCard .dashboard-grid{flex:1;min-height:0;grid-template-rows:minmax(118px,.72fr) minmax(230px,1.55fr) minmax(230px,1.55fr)}
+  body.public-mode #dashboardCard .dash-panel{min-height:0}
+  body.public-mode #dashboardCard .dash-main,
+  body.public-mode #dashboardCard .dash-area,
+  body.public-mode #dashboardCard .dash-bars{display:flex;flex-direction:column}
+  body.public-mode #dashboardCard .dash-chart{flex:1;height:auto;min-height:0}
+  body.public-mode #dashboardCard .dash-chart.tall{height:auto}
   @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-side,.dash-bars{grid-column:auto;grid-row:auto}.dash-donut{grid-column:span 2}.dash-side{grid-column:span 2}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}}
   @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-side,.dash-bars{grid-column:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}}
 
@@ -494,9 +516,15 @@ shortdramatime"></textarea>
     <div class="card dashboard-card" id="dashboardCard">
       <div class="dashboard-loading">正在加载运营看板...</div>
     </div>
+    <div class="page-switch dashboard-page-switch">
+      <button class="mini-btn dashboard-next-btn" id="dashboardNextBtn" type="button">下一页：报表</button>
+    </div>
   </section>
 
-  <section class="report-page" id="reportPage">
+  <section class="report-page" id="reportPage" hidden>
+    <div class="page-switch report-page-switch">
+      <button class="mini-btn" id="dashboardBackBtn" type="button">上一页：看板</button>
+    </div>
     <div class="card" id="resultCard">
     <div class="card-head"><h2>报表</h2></div>
     <div class="card-body">
@@ -623,6 +651,7 @@ let reportHistoryItems=[];
 let currentReportPayload=null;
 let dashboardHistoryPayloads=[];
 let dashboardHistoryRun=0;
+let publicPageView="dashboard";
 let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7)||7,minText:store.get("thr_growth_min_text")||"100\u4e07",minValue:0,baselineMap:null,baselineItem:null,status:""};
 let detailAccountIndex=0;
 let detailAccountKey=store.get("thr_detail_account")||"";
@@ -976,8 +1005,10 @@ function clearResults(){
   resetDetailPage();
   currentReportPayload=null;
   const dashboardPage=$("dashboardPage");
+  const reportPage=$("reportPage");
   const dashboard=$("dashboardCard");
   if(dashboardPage)dashboardPage.hidden=true;
+  if(reportPage)reportPage.hidden=true;
   if(dashboard){dashboard.style.display="none";dashboard.innerHTML='<div class="dashboard-loading">正在加载运营看板...</div>';}
   $("resultCard").style.display="none";
   $("resultTable").querySelector("thead").innerHTML="";
@@ -986,6 +1017,18 @@ function clearResults(){
   if($("detailAccountSelect"))$("detailAccountSelect").innerHTML="";
   if($("detailCount"))$("detailCount").textContent="";
   if($("detailPager"))$("detailPager").classList.remove("show");
+}
+function setPublicPageView(view){
+  if(!isPublicMode())return;
+  publicPageView=view==="report"?"report":"dashboard";
+  const dashboardPage=$("dashboardPage");
+  const reportPage=$("reportPage");
+  const hasDashboard=!!(rows.length||dramaRows.length);
+  document.body.classList.toggle("dashboard-view",publicPageView==="dashboard");
+  document.body.classList.toggle("report-view",publicPageView==="report");
+  if(dashboardPage)dashboardPage.hidden=publicPageView!=="dashboard"||!hasDashboard;
+  if(reportPage)reportPage.hidden=publicPageView!=="report";
+  window.scrollTo({top:0,left:0,behavior:"auto"});
 }
 function valueOf(row,keys,fallback){
   for(const k of keys){if(row&&row[k]!=null&&row[k]!=="")return row[k];}
@@ -1499,7 +1542,6 @@ function renderDashboard(){
   const topAccounts=current.topAccounts||[];
   const progressBase=topAccounts[0]?topAccounts[0].views:1;
   const progress=topAccounts.slice(0,3).map((item,i)=>`<div class="dash-progress-row"><div class="dash-progress-icon">${i+1}</div><div><div class="dash-progress-label">${esc(item.name||item.account||"账号")}</div><div class="dash-progress-track"><div class="dash-progress-fill" style="width:${Math.max(3,Math.round(item.views/progressBase*100))}%"></div></div></div><div class="dash-progress-value">${Math.round(item.views/progressBase*100)}%</div></div>`).join("");
-  if(page)page.hidden=false;
   box.style.display="block";
   box.innerHTML=`<div class="dashboard-inner">
     <div class="dashboard-head"><h2 class="dashboard-title">短剧运营数据分析可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
@@ -1520,6 +1562,8 @@ function renderDashboard(){
       </div>
     </div>
   </div>`;
+  if(isPublicMode())setPublicPageView(publicPageView);
+  else if(page)page.hidden=false;
 }
 async function refreshDashboardHistory(){
   const run=++dashboardHistoryRun;
@@ -2445,6 +2489,10 @@ function init(){
     document.addEventListener("click",closeHistoryMenu);
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeHistoryMenu();});
   }
+  const dashboardNext=$("dashboardNextBtn"), dashboardBack=$("dashboardBackBtn");
+  if(dashboardNext)dashboardNext.addEventListener("click",()=>setPublicPageView("report"));
+  if(dashboardBack)dashboardBack.addEventListener("click",()=>setPublicPageView("dashboard"));
+  setPublicPageView("dashboard");
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
   $("sortHotBtn").addEventListener("click",()=>setResultSort("hot"));
