@@ -670,6 +670,8 @@ let reportHistoryItems=[];
 let currentReportPayload=null;
 let dashboardHistoryPayloads=[];
 let dashboardHistoryRun=0;
+let dashboardHistoryReady=false;
+let dashboardHistoryLoading=false;
 let publicPageView="dashboard";
 let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7)||7,minText:store.get("thr_growth_min_text")||"100\u4e07",minValue:0,baselineMap:null,baselineItem:null,status:""};
 let detailAccountIndex=0;
@@ -1682,6 +1684,10 @@ function renderDashboard(){
   const page=$("dashboardPage");
   if(!box)return;
   if(!rows.length&&!dramaRows.length){if(page)page.hidden=true;box.style.display="none";return;}
+  if(isPublicMode()&&!dashboardHistoryReady){
+    renderDashboardLoading(dashboardHistoryLoading?"正在加载历史对比数据...":"正在准备运营看板...");
+    return;
+  }
   const currentPayload=dashboardCurrentPayload();
   const snaps=dashboardSnapshots();
   const current=snaps[snaps.length-1]||dashboardSnapshotFromPayload({generated_at:currentReportGeneratedAt,summary:rows,dramas_detail:dramaRows});
@@ -1722,21 +1728,46 @@ function renderDashboard(){
   if(isPublicMode())setPublicPageView(publicPageView);
   else if(page)page.hidden=false;
 }
+function renderDashboardLoading(message){
+  const box=$("dashboardCard");
+  const page=$("dashboardPage");
+  if(!box)return;
+  box.style.display="block";
+  box.innerHTML='<div class="dashboard-loading">'+esc(message||"正在加载运营看板...")+'</div>';
+  if(isPublicMode()){
+    const reportPage=$("reportPage");
+    document.body.classList.toggle("dashboard-view",publicPageView==="dashboard");
+    document.body.classList.toggle("report-view",publicPageView==="report");
+    if(page)page.hidden=publicPageView!=="dashboard";
+    if(reportPage)reportPage.hidden=publicPageView!=="report";
+  }else if(page)page.hidden=false;
+}
 async function refreshDashboardHistory(){
   const run=++dashboardHistoryRun;
   const items=(reportHistoryItems||[]).slice(0,10);
-  if(!items.length){dashboardHistoryPayloads=[];renderDashboard();return;}
-  const payloads=[];
-  for(const item of items){
+  dashboardHistoryLoading=true;
+  dashboardHistoryReady=false;
+  if(!items.length){
+    dashboardHistoryPayloads=[];
+    dashboardHistoryLoading=false;
+    dashboardHistoryReady=true;
+    renderDashboard();
+    return [];
+  }
+  const payloads=(await Promise.all(items.map(async item=>{
     try{
       const payload=await fetchReportPayloadForItem(item);
-      if(run!==dashboardHistoryRun)return;
-      payloads.push(payload);
+      if(run!==dashboardHistoryRun)return null;
+      return payload;
     }catch(_){}
-  }
+    return null;
+  }))).filter(Boolean);
   if(run!==dashboardHistoryRun)return;
   dashboardHistoryPayloads=payloads;
+  dashboardHistoryLoading=false;
+  dashboardHistoryReady=true;
   renderDashboard();
+  return payloads;
 }
 function updateSortControls(){
   const hot=$("sortHotBtn"), latest=$("sortLatestBtn");
@@ -2362,6 +2393,9 @@ function mergeReportHistoryItems(...lists){
   return merged.sort((a,b)=>reportItemMs(b)-reportItemMs(a));
 }
 async function loadBackendReports(){
+  dashboardHistoryLoading=true;
+  dashboardHistoryReady=false;
+  if(rows.length||dramaRows.length)renderDashboard();
   backendSetStatus("正在刷新历史记录…");
   let published=[], render=[], lastErr=null;
   try{published=await loadPublishedHistory();}catch(e){lastErr=e;}
@@ -2369,26 +2403,45 @@ async function loadBackendReports(){
   const items=mergeReportHistoryItems(published,render);
   reportHistoryItems=items;
   updateGrowthFilterControls();
-  refreshDashboardHistory().catch(()=>{});
+  await refreshDashboardHistory();
   if(items.length){
     renderHistoryList(items,published.length&&render.length?"历史记录":(published.length?"历史存档":"Render 当前记录"));
     backendSetStatus("已加载 "+items.length+" 条历史记录", true);
     return items;
   }
+  dashboardHistoryLoading=false;
+  dashboardHistoryReady=true;
+  renderDashboard();
   renderHistoryList([], "");
   throw lastErr||new Error("empty history");
 }
 async function loadPublicDashboard(){
-  try{await loadBackendLatest();}catch(e){backendSetStatus("暂时没有最新结果:"+(e.message||e));}
-  try{await loadBackendReports();}catch(e){renderHistoryList([], "");}
+  dashboardHistoryLoading=true;
+  dashboardHistoryReady=false;
+  const latestPromise=loadBackendLatest();
+  const reportsPromise=loadBackendReports();
+  try{await latestPromise;}catch(e){backendSetStatus("暂时没有最新结果:"+(e.message||e));}
+  try{await reportsPromise;}catch(e){
+    dashboardHistoryLoading=false;
+    dashboardHistoryReady=true;
+    renderDashboard();
+    renderHistoryList([], "");
+  }
 }
 async function refreshPublicDashboardQuiet(){
   if(isAdminMode()||document.hidden)return;
   window.__quietRefresh=true;
   try{
-    await loadBackendLatest();
-    await loadBackendReports();
+    dashboardHistoryLoading=true;
+    dashboardHistoryReady=false;
+    const latestPromise=loadBackendLatest();
+    const reportsPromise=loadBackendReports();
+    await latestPromise;
+    await reportsPromise;
   }catch(_){
+    dashboardHistoryLoading=false;
+    dashboardHistoryReady=true;
+    renderDashboard();
   }finally{
     window.__quietRefresh=false;
   }
