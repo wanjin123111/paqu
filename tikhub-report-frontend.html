@@ -266,8 +266,8 @@
   .dash-theme-list::-webkit-scrollbar-track{background:rgba(31,39,51,.07);border-radius:99px}
   .dash-stat{display:grid;grid-template-columns:42px 1fr;align-items:center;gap:10px;min-height:58px;padding:10px 14px;background:linear-gradient(135deg,#1F2733,#2A2E3A);color:#fff}
   .dash-stat-icon{font-size:28px;opacity:.95}
-  .dash-stat-title{font-size:15px;font-weight:800}
-  .dash-stat-sub{font-size:12px;color:rgba(255,255,255,.8);margin-top:2px}
+  .dash-stat-title{font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dash-stat-sub{font-size:12px;color:rgba(255,255,255,.8);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dashboard-loading{padding:24px;color:var(--ink-faint)}
   body.public-mode #dashboardCard{width:100vw;height:100vh;max-width:none;margin:0;transform:none;border:0;border-radius:0;box-shadow:none}
   body.public-mode #dashboardCard::after{height:8px}
@@ -1566,6 +1566,57 @@ function dashboardDelta(current,previous,key){
   const rate=before?diff/before*100:0;
   return {diff,rate,hasPrevious:!!previous&&before>0};
 }
+function summaryDramaCountOf(row){
+  return toInt(valueOf(row,["短剧数","Dramas / 短剧数"],0));
+}
+function dashboardAccountDramaMap(payload){
+  const map=new Map();
+  const summary=Array.isArray(payload&&payload.summary)?payload.summary:[];
+  for(const row of summary){
+    const account=accountOf(row);
+    const key=String(account||nickOf(row)||"").trim().toLowerCase();
+    if(!key)continue;
+    map.set(key,{key,account,name:nickOf(row)||account,count:summaryDramaCountOf(row)});
+  }
+  if(map.size)return map;
+  const groups=new Map();
+  for(const row of dashboardPayloadDetails(payload)){
+    const account=accountOf(row);
+    const key=String(account||nickOf(row)||"").trim().toLowerCase();
+    if(!key)continue;
+    const group=groups.get(key)||{key,account,name:nickOf(row)||account,keys:new Set()};
+    const dramaKeys=dashboardDramaGrowthKeys(row);
+    group.keys.add(dramaKeys[0]||String(dramaTitleOf(row)||chineseTitleOf(row)||group.keys.size));
+    groups.set(key,group);
+  }
+  for(const group of groups.values())map.set(group.key,{key:group.key,account:group.account,name:group.name,count:group.keys.size});
+  return map;
+}
+function dashboardWeeklyDramaGrowth(payloads,currentPayload,days=7){
+  const currentMs=dashboardPayloadTime(currentPayload)||currentReportMs();
+  const baseline=dashboardBaselinePayload(payloads,currentMs,days);
+  const current=dashboardSnapshotFromPayload(currentPayload);
+  if(!baseline)return {days,currentCount:current.dramaCount,beforeCount:0,diff:0,hasBaseline:false};
+  const previous=dashboardSnapshotFromPayload(baseline);
+  const diff=Math.max(0,current.dramaCount-previous.dramaCount);
+  return {days,currentCount:current.dramaCount,beforeCount:previous.dramaCount,diff,hasBaseline:true,baselineTime:baseline.generated_at};
+}
+function dashboardTopAccountDramaGrowth(payloads,currentPayload,days=7){
+  const currentMs=dashboardPayloadTime(currentPayload)||currentReportMs();
+  const baseline=dashboardBaselinePayload(payloads,currentMs,days);
+  const currentMap=dashboardAccountDramaMap(currentPayload);
+  if(!baseline||!currentMap.size)return null;
+  const beforeMap=dashboardAccountDramaMap(baseline);
+  let best=null;
+  for(const item of currentMap.values()){
+    const before=beforeMap.get(item.key);
+    const beforeCount=before?before.count:0;
+    const diff=item.count-beforeCount;
+    const candidate={...item,beforeCount,diff,days,hasBaseline:true,baselineTime:baseline.generated_at};
+    if(!best||candidate.diff>best.diff||(candidate.diff===best.diff&&candidate.count>best.count))best=candidate;
+  }
+  return best;
+}
 function dashboardRateText(delta){
   if(!delta||!delta.hasPrevious||!Number.isFinite(delta.rate))return "暂无历史对比";
   const sign=delta.diff>=0?"+":"";
@@ -1911,8 +1962,12 @@ function renderDashboard(){
   const current=snaps[snaps.length-1]||dashboardSnapshotFromPayload({generated_at:currentReportGeneratedAt,summary:rows,dramas_detail:dramaRows});
   const previous=snaps.length>1?snaps[snaps.length-2]:null;
   const labels=snaps.map(s=>reportTimeLabel(s.generated_at).slice(5,10)||"本期");
-  const dramaDelta=dashboardDelta(current,previous,"dramaCount");
   const comparablePayloads=dashboardComparablePayloads();
+  const weeklyDramaGrowth=dashboardWeeklyDramaGrowth(comparablePayloads,currentPayload,7);
+  const topAccountGrowth=dashboardTopAccountDramaGrowth(comparablePayloads,currentPayload,7);
+  const weeklyDramaSub=weeklyDramaGrowth.hasBaseline?`近7天 ${fmt(weeklyDramaGrowth.beforeCount)}→${fmt(weeklyDramaGrowth.currentCount)}部`:"暂无历史基准";
+  const accountGrowthTitle=topAccountGrowth?`增长最多账号：${topAccountGrowth.name||topAccountGrowth.account||"未知账号"}`:"增长最多账号：暂无";
+  const accountGrowthSub=topAccountGrowth?(topAccountGrowth.diff>0?`近7天 +${fmt(topAccountGrowth.diff)}部 · 当前${fmt(topAccountGrowth.count)}部`:`近7天无新增 · 当前${fmt(topAccountGrowth.count)}部`):"暂无可对比账号";
   const latestHot=dashboardLatestHotDrama(currentPayload);
   const grow7=dashboardDramaGrowthItem(7,comparablePayloads,currentPayload);
   const grow3=dashboardDramaGrowthItem(3,comparablePayloads,currentPayload);
@@ -1938,9 +1993,9 @@ function renderDashboard(){
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#7C72FF")}</div>
       <div class="dash-panel dash-bars"><div class="dash-panel-title">全账号热门题材</div><div class="dash-theme-list">${themeProgress||'<div class="dashboard-loading">暂无题材数据</div>'}</div></div>
       <div class="dash-side">
-        <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">本期账号数：${fmt(current.accountCount)}</div><div class="dash-stat-sub">统计账号汇总记录</div></div></div>
-        <div class="dash-stat"><div class="dash-stat-icon">D</div><div><div class="dash-stat-title">本期短剧量：${fmt(current.dramaCount)}</div><div class="dash-stat-sub">历史对比 ${dashboardRateText(dramaDelta)}</div></div></div>
-        <div class="dash-stat"><div class="dash-stat-icon">E</div><div><div class="dash-stat-title">本期总集数：${fmt(current.episodeCount)}</div><div class="dash-stat-sub">最高剧 ${esc(current.topDramaTitle||"暂无")}</div></div></div>
+        <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">监控账号：${fmt(current.accountCount)}</div><div class="dash-stat-sub">账号汇总记录</div></div></div>
+        <div class="dash-stat"><div class="dash-stat-icon">N</div><div><div class="dash-stat-title">本周新增短剧：${fmt(weeklyDramaGrowth.diff)}部</div><div class="dash-stat-sub">${esc(weeklyDramaSub)}</div></div></div>
+        <div class="dash-stat"><div class="dash-stat-icon">G</div><div><div class="dash-stat-title">${esc(accountGrowthTitle)}</div><div class="dash-stat-sub">${esc(accountGrowthSub)}</div></div></div>
       </div>
     </div>
   </div>`;
