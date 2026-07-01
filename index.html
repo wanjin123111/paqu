@@ -218,7 +218,8 @@
   .dash-panel-title{font-weight:800;font-size:15px;color:var(--ink);margin:0 0 8px}
   .dash-chart{width:100%;height:116px;display:block}
   .dash-chart.tall{height:130px}
-  .dash-legend{display:flex;gap:16px;justify-content:flex-end;font-size:12px;color:var(--ink-soft);margin-bottom:4px}
+  .dash-legend{display:flex;gap:12px;justify-content:flex-end;font-size:12px;color:var(--ink-soft);margin-bottom:4px;min-width:0;flex-wrap:wrap}
+  .dash-legend span{min-width:0;max-width:48%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dash-legend i{display:inline-block;width:20px;height:3px;border-radius:99px;margin-right:5px;vertical-align:middle}
   .dash-donut-visual{width:154px;height:154px;margin:10px auto 8px;border-radius:50%;display:grid;place-items:center;box-shadow:inset 0 0 0 1px rgba(20,22,29,.08)}
   .dash-donut-core{width:68px;height:68px;border-radius:50%;background:#fff;display:grid;place-items:center;text-align:center;color:var(--accent);font-weight:800;font-size:12px;box-shadow:0 2px 10px rgba(85,70,255,.16)}
@@ -1614,6 +1615,70 @@ function dashboardLineSvg(primary,secondary,labels){
   const dots=a.map((pt,i)=>`<circle cx="${pt[0]}" cy="${pt[1]}" r="${i===a.length-1?4:2.4}" fill="#5546FF"/>`).join("");
   return `<svg class="dash-chart tall" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}<path d="${dashboardPath(b)}" fill="none" stroke="#1F2733" stroke-width="2.2"/><path d="${dashboardPath(a)}" fill="none" stroke="#5546FF" stroke-width="3"/><path d="${dashboardPath(a)} L ${w-p} ${h-p} L ${p} ${h-p} Z" fill="rgba(85,70,255,.1)"/>${dots}${xLabels}</svg>`;
 }
+function dashboardReportTickLabel(payload){
+  const d=parseReportDate(payload&&payload.generated_at);
+  if(!d)return {date:"--",time:""};
+  const bj=new Date(d.getTime()+8*60*60*1000);
+  return {
+    date:pad2(bj.getUTCMonth()+1)+"-"+pad2(bj.getUTCDate()),
+    time:pad2(bj.getUTCHours())+":"+pad2(bj.getUTCMinutes())
+  };
+}
+function dashboardDramaTrendTitle(item,fallback){
+  const row=item&&item.row;
+  return row?dashboardDramaDisplayTitle(row):(fallback||"暂无数据");
+}
+function dashboardDramaRowInPayload(payload,targetKeys){
+  if(!targetKeys||!targetKeys.size)return null;
+  let best=null;
+  for(const row of dashboardPayloadDetails(payload)){
+    if(dashboardDramaGrowthKeys(row).some(key=>targetKeys.has(key))){
+      if(!best||dramaViewsOf(row)>dramaViewsOf(best))best=row;
+    }
+  }
+  return best;
+}
+function dashboardDramaPointGrowthSeries(item,payloads){
+  const row=item&&item.row;
+  const targetKeys=new Set(row?dashboardDramaGrowthKeys(row):[]);
+  let prev=null;
+  return payloads.map(payload=>{
+    const matched=dashboardDramaRowInPayload(payload,targetKeys);
+    const views=matched?dramaViewsOf(matched):null;
+    let growth=0;
+    if(views!=null){
+      if(prev!=null)growth=Math.max(0,views-prev);
+      prev=views;
+    }
+    return growth;
+  });
+}
+function dashboardDramaGrowthLineSvg(primary,secondary,labels){
+  const w=760,h=170,p=64;
+  const all=[...primary,...secondary].map(Number).filter(Number.isFinite);
+  const min=0, max=Math.max(1,...all);
+  const a=dashboardChartPoints(primary,w,h,p,min,max), b=dashboardChartPoints(secondary,w,h,p,min,max);
+  const grid=[0,1,2,3].map(i=>{
+    const y=p+i*(h-p*2)/3;
+    const value=max-(max-min)*i/3;
+    return `<line x1="${p}" x2="${w-p}" y1="${y}" y2="${y}" stroke="#E6E8EE" stroke-width="1"/><text x="${p-6}" y="${y+3}" text-anchor="end" font-size="9" fill="#8A91A3">${esc(fmtPlay(value))}</text>`;
+  }).join("");
+  const guides=labels.map((_,i)=>{
+    const x=p+(labels.length<=1?0:(w-p*2)*i/(labels.length-1));
+    return `<line x1="${x}" x2="${x}" y1="${p}" y2="${h-p}" stroke="#EEF0F5" stroke-width=".8" stroke-dasharray="2 5"/>`;
+  }).join("");
+  const xLabels=labels.map((label,i)=>{
+    const x=p+(labels.length<=1?0:(w-p*2)*i/(labels.length-1));
+    return `<text x="${x}" y="${h-18}" text-anchor="middle" font-size="8.5" fill="#8A91A3"><tspan x="${x}" dy="0">${esc(label.date)}</tspan><tspan x="${x}" dy="10">${esc(label.time)}</tspan></text>`;
+  }).join("");
+  const pathA=dashboardPath(a), pathB=dashboardPath(b);
+  const dotsA=a.map((pt,i)=>`<circle cx="${pt[0]}" cy="${pt[1]}" r="${i===a.length-1?4:2.4}" fill="#5546FF"/>`).join("");
+  const dotsB=b.map((pt,i)=>`<circle cx="${pt[0]}" cy="${pt[1]}" r="${i===b.length-1?4:2.4}" fill="#1F2733"/>`).join("");
+  const lastA=a[a.length-1]||[w-p,h-p], lastB=b[b.length-1]||[w-p,h-p];
+  const labelA=primary.length?`<text x="${w-p-4}" y="${Math.max(p+10,lastA[1]-7)}" text-anchor="end" font-size="10" font-weight="700" fill="#5546FF">${esc(fmtPlay(primary[primary.length-1]||0))}</text>`:"";
+  const labelB=secondary.length?`<text x="${w-p-4}" y="${Math.min(h-p-6,lastB[1]+13)}" text-anchor="end" font-size="10" font-weight="700" fill="#1F2733">${esc(fmtPlay(secondary[secondary.length-1]||0))}</text>`:"";
+  return `<svg class="dash-chart tall" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}${guides}<path d="${pathA}" fill="none" stroke="#5546FF" stroke-width="3"/><path d="${pathB}" fill="none" stroke="#1F2733" stroke-width="2.4"/>${dotsA}${dotsB}${labelA}${labelB}${xLabels}</svg>`;
+}
 function dashboardAreaSvg(values,labels,color){
   const w=330,h=150,p=24;
   const max=Math.max(1,...values), min=0;
@@ -1652,6 +1717,12 @@ function renderDashboard(){
   const grow7=dashboardDramaGrowthItem(7,comparablePayloads,currentPayload);
   const grow3=dashboardDramaGrowthItem(3,comparablePayloads,currentPayload);
   const grow1=dashboardDramaGrowthItem(1,comparablePayloads,currentPayload);
+  const trendPayloads=comparablePayloads.slice(-10);
+  const trendLabels=trendPayloads.map(dashboardReportTickLabel);
+  const latestTrend=dashboardDramaPointGrowthSeries(latestHot,trendPayloads);
+  const grow3Trend=dashboardDramaPointGrowthSeries(grow3,trendPayloads);
+  const latestTrendTitle=dashboardDramaTrendTitle(latestHot,"暂无数据");
+  const grow3TrendTitle=dashboardDramaTrendTitle(grow3,"暂无数据");
   const topThemes=current.topThemes||[];
   const themeBase=topThemes[0]?topThemes[0].views:1;
   const themeProgress=topThemes.slice(0,5).map((item,i)=>{
@@ -1666,7 +1737,7 @@ function renderDashboard(){
       ${dashboardDramaCardHtml("近7天涨幅",grow7,{light:true,icon:"7"})}
       ${dashboardDramaCardHtml("近3天涨幅",grow3,{icon:"3"})}
       ${dashboardDramaCardHtml("近1天涨幅",grow1,{light:true,icon:"1"})}
-      <div class="dash-panel dash-main"><div class="dash-panel-title">近10次播放趋势 <span style="font-weight:500;font-size:12px;color:#8A91A3">按历史报表对比</span></div><div class="dash-legend"><span><i style="background:#5546FF"></i>累计播放</span><span><i style="background:#1F2733"></i>最高账号</span></div>${dashboardLineSvg(snaps.map(s=>s.totalViews),snaps.map(s=>s.topAccountViews),labels)}</div>
+      <div class="dash-panel dash-main"><div class="dash-panel-title">热剧每日涨幅走势 <span style="font-weight:500;font-size:12px;color:#8A91A3">按报表时间点</span></div><div class="dash-legend"><span title="${esc(latestTrendTitle)}"><i style="background:#5546FF"></i>最新热剧：${esc(latestTrendTitle)}</span><span title="${esc(grow3TrendTitle)}"><i style="background:#1F2733"></i>近3天涨幅：${esc(grow3TrendTitle)}</span></div>${dashboardDramaGrowthLineSvg(latestTrend,grow3Trend,trendLabels)}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#7C72FF")}</div>
