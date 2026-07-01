@@ -221,6 +221,7 @@
   .dash-progress-row{display:grid;grid-template-columns:34px minmax(0,1fr) 42px;align-items:center;gap:10px;margin:12px 0}
   .dash-progress-icon{width:32px;height:32px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#7C72FF);display:grid;place-items:center;color:#fff;font-size:18px}
   .dash-progress-label{font-size:12px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px}
+  .dash-progress-meta{font-size:11px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:-2px}
   .dash-progress-track{height:8px;background:var(--line);border-radius:99px;overflow:hidden}
   .dash-progress-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),#7C72FF)}
   .dash-progress-value{font-family:var(--display);font-weight:700;color:var(--accent);text-align:right}
@@ -1233,6 +1234,7 @@ async function hydrateThemeLabels(targetRows){
     if(run===themeHydrateRun){
       themeHydrating=false;
       renderResultTable();
+      renderDashboard();
     }
   }
 }
@@ -1458,11 +1460,30 @@ function dashboardSnapshotFromPayload(payload){
   const dramaViews=details.reduce((sum,row)=>sum+dramaViewsOf(row),0);
   const avgDramaViews=dramaCount?Math.round((dramaViews||totalViews)/dramaCount):0;
   const topAccounts=[...summary].sort((a,b)=>summaryHotOf(b)-summaryHotOf(a)).slice(0,5).map(row=>({name:nickOf(row)||accountOf(row),account:accountOf(row),views:summaryHotOf(row)}));
+  const themeMap=new Map();
+  for(const row of details){
+    const labels=themeDisplayList(row);
+    if(!labels.length)continue;
+    const views=dramaViewsOf(row);
+    const account=accountOf(row);
+    for(const label of labels){
+      const key=String(label).toLowerCase();
+      const item=themeMap.get(key)||{name:label,views:0,dramas:0,accounts:new Set()};
+      item.views+=views;
+      item.dramas+=1;
+      if(account)item.accounts.add(account);
+      themeMap.set(key,item);
+    }
+  }
+  const topThemes=Array.from(themeMap.values())
+    .map(item=>({name:item.name,views:item.views,dramas:item.dramas,accounts:item.accounts.size}))
+    .sort((a,b)=>b.views-a.views||b.dramas-a.dramas)
+    .slice(0,5);
   const topDrama=[...details].sort((a,b)=>dramaViewsOf(b)-dramaViewsOf(a))[0];
   return {
     generated_at:(payload&&payload.generated_at)||"",
     timeMs:dashboardPayloadTime(payload),
-    totalViews,accountCount,dramaCount,episodeCount,avgDramaViews,topAccounts,
+    totalViews,accountCount,dramaCount,episodeCount,avgDramaViews,topAccounts,topThemes,
     topAccountViews:topAccounts[0]?topAccounts[0].views:0,
     topDramaTitle:topDrama?dramaTitleOf(topDrama):"",
     topDramaViews:topDrama?dramaViewsOf(topDrama):0,
@@ -1541,8 +1562,12 @@ function renderDashboard(){
   const dramaDelta=dashboardDelta(current,previous,"dramaCount");
   const avgDelta=dashboardDelta(current,previous,"avgDramaViews");
   const topAccounts=current.topAccounts||[];
-  const progressBase=topAccounts[0]?topAccounts[0].views:1;
-  const progress=topAccounts.slice(0,3).map((item,i)=>`<div class="dash-progress-row"><div class="dash-progress-icon">${i+1}</div><div><div class="dash-progress-label">${esc(item.name||item.account||"账号")}</div><div class="dash-progress-track"><div class="dash-progress-fill" style="width:${Math.max(3,Math.round(item.views/progressBase*100))}%"></div></div></div><div class="dash-progress-value">${Math.round(item.views/progressBase*100)}%</div></div>`).join("");
+  const topThemes=current.topThemes||[];
+  const themeBase=topThemes[0]?topThemes[0].views:1;
+  const themeProgress=topThemes.slice(0,5).map((item,i)=>{
+    const pct=Math.round(item.views/themeBase*100);
+    return `<div class="dash-progress-row"><div class="dash-progress-icon">${i+1}</div><div><div class="dash-progress-label">${esc(item.name||"题材")}</div><div class="dash-progress-meta">${fmtPlay(item.views)} · ${fmt(item.dramas)}部短剧 · ${fmt(item.accounts)}个账号</div><div class="dash-progress-track"><div class="dash-progress-fill" style="width:${Math.max(3,pct)}%"></div></div></div><div class="dash-progress-value">${pct}%</div></div>`;
+  }).join("");
   box.style.display="block";
   box.innerHTML=`<div class="dashboard-inner">
     <div class="dashboard-head"><h2 class="dashboard-title">短剧运营数据分析可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
@@ -1555,7 +1580,7 @@ function renderDashboard(){
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期账号播放占比分析</div>${dashboardDonutHtml(topAccounts,current.totalViews)}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#7C72FF")}</div>
-      <div class="dash-panel dash-bars"><div class="dash-panel-title">账号播放贡献率</div>${progress||'<div class="dashboard-loading">暂无账号数据</div>'}</div>
+      <div class="dash-panel dash-bars"><div class="dash-panel-title">全账号热门题材</div>${themeProgress||'<div class="dashboard-loading">暂无题材数据</div>'}</div>
       <div class="dash-side">
         <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">本期账号数：${fmt(current.accountCount)}</div><div class="dash-stat-sub">统计账号汇总记录</div></div></div>
         <div class="dash-stat"><div class="dash-stat-icon">D</div><div><div class="dash-stat-title">本期短剧量：${fmt(current.dramaCount)}</div><div class="dash-stat-sub">历史对比 ${dashboardRateText(dramaDelta)}</div></div></div>
