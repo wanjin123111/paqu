@@ -203,6 +203,10 @@
   .dash-kpi.light .dash-kpi-value{color:var(--accent)}
   .dash-kpi.light .dash-kpi-sub{color:var(--ink-faint)}
   .dash-kpi-icon{position:absolute;right:16px;bottom:13px;font-size:34px;opacity:.24}
+  .dash-kpi.drama{padding-right:48px}
+  .dash-kpi.drama .dash-kpi-label,.dash-kpi.drama .dash-kpi-value,.dash-kpi.drama .dash-kpi-sub{position:relative;z-index:1}
+  .dash-kpi.drama .dash-kpi-value{font-size:18px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dash-kpi.drama .dash-kpi-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dash-main{grid-column:1 / span 4;min-height:160px;padding:11px}
   .dash-donut{grid-column:5;grid-row:1 / span 2;padding:14px 12px}
   .dash-area,.dash-bars{min-height:188px;padding:11px}
@@ -1266,6 +1270,7 @@ async function hydrateChineseTitles(targetRows){
     if(run===titleHydrateRun){
       titleHydrating=false;
       fillSummaryTopChineseTitles();
+      renderDashboard();
       renderResultTable();
     }
   }
@@ -1465,6 +1470,99 @@ function dashboardRateText(delta){
   const sign=delta.diff>=0?"+":"";
   return sign+(Math.round(delta.rate*100)/100).toFixed(2).replace(/\.00$/,"")+"%";
 }
+function dashboardCurrentPayload(){
+  return currentReportPayload||{generated_at:currentReportGeneratedAt,summary:rows,dramas_detail:dramaRows};
+}
+function dashboardPayloadDetails(payload){
+  return Array.isArray(payload&&payload.dramas_detail)?payload.dramas_detail:[];
+}
+function dashboardComparablePayloads(){
+  const payloads=[...dashboardHistoryPayloads];
+  const current=dashboardCurrentPayload();
+  if(current)payloads.push(current);
+  const map=new Map();
+  for(const payload of payloads){
+    if(!payload)continue;
+    const key=dashboardPayloadTime(payload)||(payload&&payload.generated_at)||String(map.size);
+    map.set(key,payload);
+  }
+  return Array.from(map.values()).sort((a,b)=>(dashboardPayloadTime(a)||0)-(dashboardPayloadTime(b)||0));
+}
+function dashboardBaselinePayload(payloads,currentMs,days){
+  const target=currentMs-Math.max(1,days)*86400000;
+  const candidates=payloads.filter(payload=>{
+    const ms=dashboardPayloadTime(payload);
+    return ms&&ms<currentMs-60000;
+  });
+  if(!candidates.length)return null;
+  const older=candidates.filter(payload=>(dashboardPayloadTime(payload)||0)<=target);
+  return older.length?older[older.length-1]:candidates[0];
+}
+function dashboardDramaDisplayTitle(row){
+  const cn=String(chineseTitleOf(row)||"").trim();
+  if(cn&&cn!=="暂无")return cn;
+  return dramaTitleOf(row)||"暂无";
+}
+function dashboardDramaDateLabel(row){
+  const ms=dramaPublishMsOf(row);
+  if(!ms)return "";
+  const d=new Date(ms);
+  return String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function dashboardLatestHotDrama(payload){
+  const details=dashboardPayloadDetails(payload).filter(row=>dramaViewsOf(row)>0);
+  if(!details.length)return null;
+  const currentMs=dashboardPayloadTime(payload)||currentReportMs();
+  const withDate=details.filter(row=>dramaPublishMsOf(row)>0);
+  const recent=withDate.filter(row=>{
+    const ms=dramaPublishMsOf(row);
+    return ms<=currentMs+86400000&&currentMs-ms<=7*86400000;
+  });
+  const pool=recent.length?recent:(withDate.length?withDate:details);
+  const row=[...pool].sort((a,b)=>{
+    if(recent.length)return dramaViewsOf(b)-dramaViewsOf(a)||dramaPublishMsOf(b)-dramaPublishMsOf(a);
+    return dramaPublishMsOf(b)-dramaPublishMsOf(a)||dramaViewsOf(b)-dramaViewsOf(a);
+  })[0];
+  const account=nickOf(row)||accountOf(row)||"";
+  const date=dashboardDramaDateLabel(row);
+  return {
+    row,
+    sub:`播放 ${fmtPlay(dramaViewsOf(row))}${account?" · "+account:""}${date?" · "+date:""}`
+  };
+}
+function dashboardDramaGrowthItem(days,payloads,currentPayload){
+  const currentMs=dashboardPayloadTime(currentPayload)||currentReportMs();
+  const baseline=dashboardBaselinePayload(payloads,currentMs,days);
+  if(!baseline)return null;
+  const baseMap=new Map();
+  for(const row of dashboardPayloadDetails(baseline)){
+    const key=dramaGrowthKey(row);
+    if(key)baseMap.set(key,Math.max(baseMap.get(key)||0,dramaViewsOf(row)));
+  }
+  let best=null;
+  for(const row of dashboardPayloadDetails(currentPayload)){
+    const key=dramaGrowthKey(row);
+    if(!key)continue;
+    const views=dramaViewsOf(row);
+    const before=baseMap.has(key)?baseMap.get(key):0;
+    const diff=views-before;
+    if(diff<=0)continue;
+    if(!best||diff>best.diff||(diff===best.diff&&views>best.views)){
+      best={row,views,diff,baseline};
+    }
+  }
+  if(!best)return null;
+  const baseLabel=reportTimeLabel(best.baseline.generated_at).slice(5,10)||"历史";
+  best.sub=`+${fmtPlay(best.diff)} · 当前 ${fmtPlay(best.views)} · 基准 ${baseLabel}`;
+  return best;
+}
+function dashboardDramaCardHtml(label,item,opts={}){
+  const row=item&&item.row;
+  const title=row?dashboardDramaDisplayTitle(row):"暂无数据";
+  const sub=item&&item.sub?item.sub:"暂无可对比历史";
+  const cls="dash-panel dash-kpi drama"+(opts.light?" light":"");
+  return `<div class="${cls}"><div class="dash-kpi-label">${esc(label)}</div><div class="dash-kpi-value" title="${esc(title)}">${esc(title)}</div><div class="dash-kpi-sub" title="${esc(sub)}">${esc(sub)}</div><div class="dash-kpi-icon">${esc(opts.icon||"")}</div></div>`;
+}
 function dashboardChartPoints(values,w,h,pad,min,max){
   const span=Math.max(1,max-min);
   return values.map((value,i)=>{
@@ -1508,13 +1606,17 @@ function renderDashboard(){
   const page=$("dashboardPage");
   if(!box)return;
   if(!rows.length&&!dramaRows.length){if(page)page.hidden=true;box.style.display="none";return;}
+  const currentPayload=dashboardCurrentPayload();
   const snaps=dashboardSnapshots();
   const current=snaps[snaps.length-1]||dashboardSnapshotFromPayload({generated_at:currentReportGeneratedAt,summary:rows,dramas_detail:dramaRows});
   const previous=snaps.length>1?snaps[snaps.length-2]:null;
   const labels=snaps.map(s=>reportTimeLabel(s.generated_at).slice(5,10)||"本期");
-  const playDelta=dashboardDelta(current,previous,"totalViews");
   const dramaDelta=dashboardDelta(current,previous,"dramaCount");
-  const avgDelta=dashboardDelta(current,previous,"avgDramaViews");
+  const comparablePayloads=dashboardComparablePayloads();
+  const latestHot=dashboardLatestHotDrama(currentPayload);
+  const grow7=dashboardDramaGrowthItem(7,comparablePayloads,currentPayload);
+  const grow3=dashboardDramaGrowthItem(3,comparablePayloads,currentPayload);
+  const grow1=dashboardDramaGrowthItem(1,comparablePayloads,currentPayload);
   const topThemes=current.topThemes||[];
   const themeBase=topThemes[0]?topThemes[0].views:1;
   const themeProgress=topThemes.slice(0,5).map((item,i)=>{
@@ -1525,10 +1627,10 @@ function renderDashboard(){
   box.innerHTML=`<div class="dashboard-inner">
     <div class="dashboard-head"><h2 class="dashboard-title">短剧运营数据分析可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
     <div class="dashboard-grid">
-      <div class="dash-panel dash-kpi"><div class="dash-kpi-label">本期累计播放</div><div class="dash-kpi-value">${fmtPlay(current.totalViews)}</div><div class="dash-kpi-sub">较上期 ${dashboardRateText(playDelta)}</div><div class="dash-kpi-icon">↗</div></div>
-      <div class="dash-panel dash-kpi light"><div class="dash-kpi-label">播放增长率</div><div class="dash-kpi-value">${dashboardRateText(playDelta)}</div><div class="dash-kpi-sub">增长 ${fmtPlay(Math.abs(playDelta.diff||0))}</div><div class="dash-kpi-icon">⌁</div></div>
-      <div class="dash-panel dash-kpi"><div class="dash-kpi-label">本期短剧数量</div><div class="dash-kpi-value">${fmt(current.dramaCount)}</div><div class="dash-kpi-sub">较上期 ${dashboardRateText(dramaDelta)}</div><div class="dash-kpi-icon">▣</div></div>
-      <div class="dash-panel dash-kpi light"><div class="dash-kpi-label">单剧均观看</div><div class="dash-kpi-value">${fmtPlay(current.avgDramaViews)}</div><div class="dash-kpi-sub">较上期 ${dashboardRateText(avgDelta)}</div><div class="dash-kpi-icon">⌄</div></div>
+      ${dashboardDramaCardHtml("全账号最新热剧",latestHot,{icon:"↗"})}
+      ${dashboardDramaCardHtml("近7天涨幅最猛",grow7,{light:true,icon:"7"})}
+      ${dashboardDramaCardHtml("近3天涨幅最猛",grow3,{icon:"3"})}
+      ${dashboardDramaCardHtml("近1天涨幅最猛",grow1,{light:true,icon:"1"})}
       <div class="dash-panel dash-main"><div class="dash-panel-title">近10次播放趋势 <span style="font-weight:500;font-size:12px;color:#8A91A3">按历史报表对比</span></div><div class="dash-legend"><span><i style="background:#5546FF"></i>累计播放</span><span><i style="background:#1F2733"></i>最高账号</span></div>${dashboardLineSvg(snaps.map(s=>s.totalViews),snaps.map(s=>s.topAccountViews),labels)}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
