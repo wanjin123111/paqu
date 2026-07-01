@@ -33,9 +33,10 @@ DEFAULT_PAGE = "tikhub-report-frontend.html"
 REPORTS_DIR = os.path.join(ROOT, "reports")   # 定时监控存盘目录
 PUBLIC_REPORTS_DIR = os.path.join(ROOT, "public_reports")
 DRAMA_DETAIL_CACHE_FILE = os.path.join(REPORTS_DIR, "drama_detail_cache.json")
+SCHEDULE_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "schedule_accounts.json")
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
-ALLOW_HEADERS = "Authorization, Content-Type, Accept"
+ALLOW_HEADERS = "Authorization, Content-Type, Accept, X-Schedule-Secret"
 ALLOWED_PROXY_HOSTS = {
     h.strip().lower()
     for h in os.environ.get("ALLOWED_PROXY_HOSTS", "api.tikhub.io,api.tikhub.dev").split(",")
@@ -962,6 +963,47 @@ def _parse_accounts(text):
     return accounts
 
 
+def _schedule_account_pool():
+    try:
+        with open(SCHEDULE_ACCOUNTS_FILE, "r", encoding="utf-8-sig") as handle:
+            payload = json.load(handle)
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        accounts = payload.get("accounts", [])
+        updated_at = payload.get("updated_at", "")
+    else:
+        accounts = payload
+        updated_at = ""
+    if isinstance(accounts, list):
+        accounts = _parse_accounts("\n".join(str(item) for item in accounts))
+    else:
+        accounts = _parse_accounts(accounts)
+    return {"accounts": accounts, "updated_at": updated_at, "source": "file" if accounts else ""}
+
+
+def _configured_schedule_accounts():
+    pool = _schedule_account_pool()
+    if pool["accounts"]:
+        return pool["accounts"], "backend_pool"
+    env_accounts = _parse_accounts(SCHEDULE_ACCOUNTS)
+    return env_accounts, "SCHEDULE_ACCOUNTS" if env_accounts else ""
+
+
+def _write_schedule_account_pool(accounts):
+    accounts = _parse_accounts("\n".join(str(item) for item in (accounts or [])))
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    payload = {
+        "updated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
+        "accounts": accounts,
+    }
+    tmp = SCHEDULE_ACCOUNTS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp, SCHEDULE_ACCOUNTS_FILE)
+    return payload
+
+
 def _resolve_secuid(uid):
     try:
         data = _send_tikhub_get(DEFAULT_ENDPOINTS["secuid"], {"username": uid, "unique_id": uid}, "secUid endpoint")
@@ -1782,7 +1824,7 @@ def _start_configured_scheduled_job_if_idle():
     global LAST_AUTO_REFRESH_AT
     if not SERVER_API_KEY:
         return False
-    accounts = _parse_accounts(SCHEDULE_ACCOUNTS)
+    accounts, _source = _configured_schedule_accounts()
     if not accounts:
         return False
     if LAST_JOB.get("running"):
@@ -1837,6 +1879,8 @@ class Handler(BaseHTTPRequestHandler):
                     "finished_at": LAST_JOB.get("finished_at"),
                 }
             self._send_json(200, {"ok": True, "job": job})
+        elif parsed.path == "/schedule-accounts":
+            self._schedule_accounts_endpoint(qs)
         elif parsed.path == "/drama-link":
             self._resolve_drama_link(qs)
         elif parsed.path == "/reports":
@@ -1850,13 +1894,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if parsed.path == "/schedule-accounts":
+            self._schedule_accounts_endpoint(qs)
+            return
         if parsed.path == "/save":
             self._save_file()
             return
         if parsed.path == "/translate-titles":
             self._translate_titles()
             return
-        qs = urllib.parse.parse_qs(parsed.query)
         target = qs.get("url", [None])[0]
         if not target:
             self._send_bytes(400, b'{"error":"missing url param"}', "application/json")
@@ -1927,7 +1974,45 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        self._send_json(200, {"ok": True, "url": link, "target": target})
+            self._send_json(200, {"ok": True, "url": link, "target": target})
+
+    def _schedule_accounts_endpoint(self, qs):
+        if not self._require_schedule_secret(qs):
+            return
+        if self.command == "GET":
+            pool = _schedule_account_pool()
+            accounts, source = _configured_schedule_accounts()
+            updated_at = pool.get("updated_at", "") if source == "backend_pool" else ""
+            self._send_json(200, {
+                "ok": True,
+                "accounts": accounts,
+                "count": len(accounts),
+                "source": source or "empty",
+                "updated_at": updated_at,
+                "runtime_file": "reports/schedule_accounts.json",
+            })
+            return
+        try:
+            ln = int(self.headers.get("Content-Length", 0) or 0)
+            payload = json.loads(self.rfile.read(ln) or b"{}")
+            accounts = payload.get("accounts", payload.get("text", ""))
+            if isinstance(accounts, str):
+                accounts = _parse_accounts(accounts)
+            elif isinstance(accounts, list):
+                accounts = _parse_accounts("\n".join(str(item) for item in accounts))
+            else:
+                accounts = []
+            saved = _write_schedule_account_pool(accounts)
+            self._send_json(200, {
+                "ok": True,
+                "accounts": saved["accounts"],
+                "count": len(saved["accounts"]),
+                "source": "backend_pool",
+                "updated_at": saved["updated_at"],
+                "runtime_file": "reports/schedule_accounts.json",
+            })
+        except Exception as exc:
+            self._send_json(500, {"ok": False, "error": str(exc)})
 
     def _run_scheduled_endpoint(self, qs):
         if not self._require_schedule_secret(qs):
@@ -1935,9 +2020,10 @@ class Handler(BaseHTTPRequestHandler):
         if not SERVER_API_KEY:
             self._send_json(503, {"ok": False, "error": "TIKHUB_API_KEY is not configured"})
             return
-        accounts = _parse_accounts(qs.get("accounts", [""])[0]) or _parse_accounts(SCHEDULE_ACCOUNTS)
+        configured_accounts, source = _configured_schedule_accounts()
+        accounts = _parse_accounts(qs.get("accounts", [""])[0]) or configured_accounts
         if not accounts:
-            self._send_json(400, {"ok": False, "error": "SCHEDULE_ACCOUNTS is empty"})
+            self._send_json(400, {"ok": False, "error": "schedule account pool is empty"})
             return
         if not JOB_LOCK.acquire(blocking=False):
             self._send_json(409, {"ok": False, "error": "scheduled job already running", "job": LAST_JOB})
@@ -1947,6 +2033,8 @@ class Handler(BaseHTTPRequestHandler):
         if wait:
             try:
                 result = _execute_scheduled_job(accounts)
+                if isinstance(result, dict):
+                    result["source"] = source
                 self._send_json(200, result)
             except Exception as exc:
                 self._send_json(500, {"ok": False, "error": str(exc), "job": LAST_JOB})
@@ -1961,7 +2049,7 @@ class Handler(BaseHTTPRequestHandler):
                 JOB_LOCK.release()
 
         threading.Thread(target=background, daemon=True).start()
-        self._send_json(202, {"ok": True, "started": True, "accounts": len(accounts), "job": LAST_JOB})
+        self._send_json(202, {"ok": True, "started": True, "accounts": len(accounts), "source": source, "job": LAST_JOB})
 
     def _list_reports(self, qs):
         if not self._allow_report_read(qs):
@@ -2001,8 +2089,11 @@ class Handler(BaseHTTPRequestHandler):
             data = handle.read()
         self.send_response(200)
         self._cors()
-        cache_control = "no-store" if full.startswith(REPORTS_DIR) else "public, max-age=120, stale-while-revalidate=600"
+        cache_control = "no-store" if name == "latest_report.json" or full.startswith(REPORTS_DIR) else "public, max-age=120, stale-while-revalidate=600"
         self.send_header("Cache-Control", cache_control)
+        if cache_control == "no-store":
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Disposition", "attachment; filename=%s" % name)
         self.send_header("Content-Length", str(len(data)))

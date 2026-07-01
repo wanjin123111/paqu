@@ -361,6 +361,23 @@
   .backend-admin{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px;align-items:end;margin-bottom:12px}
   .backend-admin .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
   .backend-admin .tf:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .report-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .account-pool-card{margin-bottom:14px}
+  .account-pool-badge{font:600 11px var(--mono);color:var(--accent);background:var(--accent-soft);border:1px solid #d9d5ff;border-radius:6px;padding:1px 7px;margin-left:6px}
+  .account-pool-grid{display:grid;grid-template-columns:minmax(240px,1fr) minmax(280px,1.2fr);gap:14px;align-items:start}
+  .account-pool-panel{border:1px solid var(--line);border-radius:10px;background:#fff;padding:12px}
+  .account-pool-panel h3{margin:0 0 8px;font-family:var(--display);font-size:13px;color:var(--ink)}
+  .account-pool-meta{font-size:12px;color:var(--ink-faint);margin-bottom:10px;line-height:1.5}
+  .account-pool-chips{display:flex;flex-wrap:wrap;gap:7px;max-height:138px;overflow:auto}
+  .account-chip{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:4px 8px;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .account-pool-text{min-height:132px}
+  .account-pool-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .account-pool-secret{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:8px;align-items:end;margin-top:10px}
+  .account-pool-secret .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
+  .account-pool-status{font-size:12px;color:var(--ink-faint);min-height:18px;margin-top:8px}
+  .account-pool-status.ok{color:var(--ok)}
+  .account-pool-status.err{color:var(--err)}
+  .account-pool-note{font-size:12px;color:var(--ink-faint);line-height:1.55;margin-top:8px}
   .history-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
   .history-list{margin-top:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
   .history-empty{padding:14px 16px;color:var(--ink-faint);font-size:13px}
@@ -408,6 +425,7 @@
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:500;opacity:0;pointer-events:none;transition:.22s;z-index:99}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
+  @media (max-width:860px){.account-pool-grid{grid-template-columns:1fr}.account-pool-secret{grid-template-columns:1fr}}
   @media (max-width:680px){ .wrap{padding:14px}.topbar{padding:12px 14px}.tagline{display:none}.history-popover{right:-2px;width:calc(100vw - 24px)}.history-item{align-items:flex-start;flex-direction:column}.history-links{justify-content:flex-start} }
   @media (prefers-reduced-motion:reduce){ *{animation-duration:.001ms!important;transition-duration:.001ms!important} }
 </style>
@@ -598,8 +616,45 @@ shortdramatime"></textarea>
     <div class="page-switch report-page-switch">
       <button class="mini-btn" id="dashboardBackBtn" type="button">上一页：看板</button>
     </div>
+    <div class="card account-pool-card" id="accountPoolCard">
+      <details class="settings" id="accountPoolDetails">
+        <summary>账号池 <span class="account-pool-badge" id="accountPoolBadge">当前报表 0 个</span></summary>
+        <div class="settings-body">
+          <div class="account-pool-grid">
+            <div class="account-pool-panel">
+              <h3>当前报表账号</h3>
+              <div class="account-pool-meta" id="accountPoolReportMeta">最新报表加载后会显示账号。</div>
+              <div class="account-pool-chips" id="accountPoolReportList"></div>
+              <div class="account-pool-actions">
+                <button class="mini-btn" id="accountPoolUseReportBtn" type="button">用当前报表填入</button>
+                <button class="mini-btn" id="accountPoolCopyManualBtn" type="button">同步到本页输入框</button>
+              </div>
+            </div>
+            <div class="account-pool-panel">
+              <h3>后端账号池</h3>
+              <div class="account-pool-meta">这里保存的是后端每天定时抓取使用的账号，一行一个，保存时会自动去重。</div>
+              <textarea class="accounts account-pool-text" id="accountPoolInput" spellcheck="false" placeholder="masturzo.clemen&#10;aidramalabs_pulse0&#10;shortdramatime"></textarea>
+              <div class="account-pool-secret">
+                <div>
+                  <label class="fl" for="accountPoolSecret">任务密码 <span class="hint">— SCHEDULE_SECRET</span></label>
+                  <input class="tf" id="accountPoolSecret" type="password" autocomplete="off" spellcheck="false" placeholder="输入后才能读取/保存后端账号池" />
+                </div>
+                <button class="mini-btn" id="accountPoolLoadBtn" type="button">读取后端</button>
+              </div>
+              <div class="account-pool-actions">
+                <button class="mini-btn" id="accountPoolSaveBtn" type="button">保存到后端</button>
+                <button class="mini-btn" id="accountPoolRunBtn" type="button">保存并立即抓取</button>
+                <span class="acct-count">池内 <b id="accountPoolCount">0</b> 个账号</span>
+              </div>
+              <div class="account-pool-status" id="accountPoolStatus"></div>
+              <div class="account-pool-note">Render 免费实例重新部署后，运行时文件可能丢失；长期稳定请仍保留 Render 环境变量 SCHEDULE_ACCOUNTS 作为兜底。</div>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
     <div class="card" id="resultCard">
-    <div class="card-head"><h2>报表</h2></div>
+    <div class="card-head"><h2>报表</h2><div class="report-head-actions"><button class="mini-btn" id="reportBackTopBtn" type="button">返回看板</button></div></div>
     <div class="card-body">
       <div class="result-top">
         <div class="result-sum" id="resultSum"></div>
@@ -1018,7 +1073,17 @@ function readCfg(){
     epPlaylistVideos:$("epPlaylistVideos").value.trim()||DEFAULTS.epPlaylistVideos,
   };
 }
-function parseAccounts(){return $("accountsInput").value.split("\n").map(s=>s.trim().replace(/^@/,"")).filter(Boolean);}
+function parseAccountsText(text){
+  const seen=new Set(), out=[];
+  String(text||"").split(/[\s,;，；]+/).forEach(item=>{
+    const uid=String(item||"").trim().replace(/^@/,"");
+    const key=uid.toLowerCase();
+    if(uid&&!seen.has(key)){seen.add(key);out.push(uid);}
+  });
+  return out;
+}
+function formatAccountList(accounts){return parseAccountsText(Array.isArray(accounts)?accounts.join("\n"):accounts).join("\n");}
+function parseAccounts(){return parseAccountsText($("accountsInput").value);}
 
 async function run(){
   if(running)return;
@@ -2069,6 +2134,10 @@ function renderDashboard(){
   const box=$("dashboardCard");
   const page=$("dashboardPage");
   if(!box)return;
+  if(isPublicMode()&&!dashboardHistoryReady){
+    renderDashboardLoading(dashboardHistoryLoading?"正在同步最新数据...":"正在准备运营看板...");
+    return;
+  }
   if(!rows.length&&!dramaRows.length){
     if(isPublicMode()&&!dashboardHistoryReady){
       renderDashboardLoading(dashboardHistoryLoading?"正在加载历史对比数据...":"正在准备运营看板...");
@@ -2158,11 +2227,11 @@ async function refreshDashboardHistory(opts){
     return null;
   }))).filter(Boolean);
   if(run!==dashboardHistoryRun)return;
-  if(payloads.length||!quiet)dashboardHistoryPayloads=payloads;
+  if(payloads.length||!quiet||opts.initial)dashboardHistoryPayloads=payloads;
   if(payloads.length)dashboardCacheSet(DASHBOARD_HISTORY_CACHE_KEY,payloads);
   dashboardHistoryLoading=false;
   dashboardHistoryReady=true;
-  if(payloads.length||!quiet)renderDashboard();
+  if(payloads.length||!quiet||opts.initial)renderDashboard();
   return payloads;
 }
 function updateSortControls(){
@@ -2539,7 +2608,16 @@ function backendBase(){
 }
 function backendSecret(){
   const el=$("backendSecret");
-  return (el&&el.value?el.value.trim():"") || store.get("thr_backend_secret") || "";
+  const pool=$("accountPoolSecret");
+  return (el&&el.value?el.value.trim():"") || (pool&&pool.value?pool.value.trim():"") || store.get("thr_backend_secret") || "";
+}
+function syncBackendSecretInputs(value){
+  value=String(value||"").trim();
+  const backend=$("backendSecret"), pool=$("accountPoolSecret");
+  if(backend&&backend.value!==value)backend.value=value;
+  if(pool&&pool.value!==value)pool.value=value;
+  if(value)store.set("thr_backend_secret",value);
+  else store.del("thr_backend_secret");
 }
 function backendSetStatus(text, ok){
   const el=$("backendStatus");
@@ -2568,9 +2646,28 @@ async function backendFetchJson(path, params, opts){
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
   return data;
 }
+async function backendPostJson(path, body, params, opts){
+  params=Object.assign({}, params||{});
+  opts=opts||{};
+  const secret=backendSecret();
+  if(opts.requireSecret&&!secret)throw new Error("missing SCHEDULE_SECRET");
+  if(secret&&opts.sendSecret!==false)params.secret=secret;
+  const r=await fetch(backendUrl(path,params),{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    cache:"no-store",
+    body:JSON.stringify(body||{})
+  });
+  const text=await r.text();
+  let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
+  if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
+  return data;
+}
 async function fetchJsonUrl(url,opts){
   opts=opts||{};
-  const shouldBust=opts.noStore!==false&&!String(url).startsWith("public_reports/");
+  const cleanUrl=String(url).split("?")[0];
+  const isLatestReport=/^(.+\/)?latest_report\.json$/.test(cleanUrl);
+  const shouldBust=opts.noStore!==false&&(!cleanUrl.startsWith("public_reports/")||isLatestReport);
   const sep=String(url).includes("?")?"&":"?";
   const finalUrl=shouldBust?url+sep+"_="+Date.now():url;
   const r=await fetch(finalUrl,{cache:shouldBust?"no-store":"default"});
@@ -2578,6 +2675,93 @@ async function fetchJsonUrl(url,opts){
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
   return data;
+}
+function accountPoolAccountsFromReport(){
+  return parseAccountsText(rows.map(row=>accountOf(row)).join("\n"));
+}
+function updateAccountPoolReport(){
+  const accounts=accountPoolAccountsFromReport();
+  const badge=$("accountPoolBadge"), meta=$("accountPoolReportMeta"), list=$("accountPoolReportList");
+  if(badge)badge.textContent="当前报表 "+accounts.length+" 个";
+  if(meta)meta.textContent=accounts.length?("最新报表里有 "+accounts.length+" 个账号，可以一键填入后端账号池。"):"最新报表加载后会显示账号。";
+  if(list){
+    const shown=accounts.slice(0,80).map(uid=>'<span class="account-chip">@'+esc(uid)+'</span>').join("");
+    list.innerHTML=shown+(accounts.length>80?'<span class="account-chip">+'+esc(accounts.length-80)+' more</span>':"");
+  }
+}
+function accountPoolInputAccounts(){
+  const el=$("accountPoolInput");
+  return parseAccountsText(el?el.value:"");
+}
+function updateAccountPoolInputCount(){
+  const count=$("accountPoolCount");
+  if(count)count.textContent=accountPoolInputAccounts().length;
+}
+function setAccountPoolStatus(text, type){
+  const el=$("accountPoolStatus");
+  if(!el)return;
+  el.textContent=text||"";
+  el.className="account-pool-status"+(type?(" "+type):"");
+}
+function requireAccountPoolSecret(){
+  if(backendSecret())return true;
+  setAccountPoolStatus("请先输入任务密码 SCHEDULE_SECRET。","err");
+  const el=$("accountPoolSecret");
+  if(el)el.focus();
+  return false;
+}
+function useReportAccountsForPool(){
+  const accounts=accountPoolAccountsFromReport();
+  if(!accounts.length){setAccountPoolStatus("当前报表还没有账号可填入。","err");return;}
+  $("accountPoolInput").value=formatAccountList(accounts);
+  updateAccountPoolInputCount();
+  setAccountPoolStatus("已用当前报表账号填入，保存后才会写入后端。","ok");
+}
+function copyPoolToManualInput(){
+  const accounts=accountPoolInputAccounts();
+  if(!accounts.length){setAccountPoolStatus("账号池为空，无法同步。","err");return;}
+  $("accountsInput").value=formatAccountList(accounts);
+  store.set("thr_accounts",$("accountsInput").value);
+  updateAcctCount();
+  setAccountPoolStatus("已同步到本页账号输入框。","ok");
+}
+async function loadAccountPool(){
+  if(!requireAccountPoolSecret())return;
+  setAccountPoolStatus("正在读取后端账号池...");
+  try{
+    const data=await backendFetchJson("/schedule-accounts",{}, {requireSecret:true});
+    $("accountPoolInput").value=formatAccountList(data.accounts||[]);
+    updateAccountPoolInputCount();
+    const source=data.source==="backend_pool"?"后端账号池":(data.source||"空");
+    setAccountPoolStatus("已读取 "+(data.count||0)+" 个账号 · 来源: "+source, "ok");
+  }catch(e){
+    setAccountPoolStatus("读取失败:"+(e.message||e),"err");
+    toast("账号池读取失败");
+  }
+}
+async function saveAccountPool(opts){
+  opts=opts||{};
+  if(!requireAccountPoolSecret())throw new Error("missing SCHEDULE_SECRET");
+  const accounts=accountPoolInputAccounts();
+  if(!accounts.length){
+    setAccountPoolStatus("账号池为空，未保存。","err");
+    throw new Error("account pool is empty");
+  }
+  setAccountPoolStatus("正在保存到后端...");
+  const data=await backendPostJson("/schedule-accounts",{accounts}, {}, {requireSecret:true});
+  $("accountPoolInput").value=formatAccountList(data.accounts||[]);
+  updateAccountPoolInputCount();
+  setAccountPoolStatus("已保存 "+(data.count||0)+" 个账号到后端账号池。","ok");
+  if(!opts.quiet)toast("账号池已保存");
+  return data;
+}
+async function saveAndRunAccountPool(){
+  try{
+    await saveAccountPool({quiet:true});
+    await runBackendJob(true);
+  }catch(e){
+    if((e.message||e)!=="account pool is empty")toast("账号池操作失败");
+  }
 }
 function parseReportDate(value){
   const s=String(value||"").trim();
@@ -2655,6 +2839,7 @@ function loadBackendPayload(payload,opts){
   const dramas=Array.isArray(payload.dramas_detail)?payload.dramas_detail:[];
   rows=[...summary];
   dramaRows=[...dramas];
+  updateAccountPoolReport();
   if(growthFilterState.enabled){
     growthFilterState.baselineMap=null;
     growthFilterState.baselineItem=null;
@@ -2813,8 +2998,8 @@ async function loadBackendReports(opts){
     backendSetStatus("已加载 "+items.length+" 条历史记录", true);
     if(isPublicMode()){
       dashboardHistoryLoading=true;
-      dashboardHistoryReady=true;
-      refreshDashboardHistory({quiet:true}).catch(()=>{
+      dashboardHistoryReady=!opts.initial;
+      refreshDashboardHistory({quiet:true,initial:opts.initial}).catch(()=>{
         dashboardHistoryLoading=false;
         dashboardHistoryReady=true;
         renderDashboard();
@@ -2834,16 +3019,26 @@ async function loadBackendReports(opts){
 }
 async function loadPublicDashboard(){
   dashboardHistoryLoading=true;
-  dashboardHistoryReady=loadCachedDashboardState();
-  if(!dashboardHistoryReady)renderDashboardLoading("正在加载最新数据...");
-  const latestPromise=loadBackendLatest();
-  const reportsPromise=loadBackendReports({quiet:true});
-  try{await latestPromise;}catch(e){backendSetStatus("暂时没有最新结果:"+(e.message||e));}
+  dashboardHistoryReady=false;
+  renderDashboardLoading("正在同步最新数据...");
+  // Public first paint must use the server report, not stale local cache.
+  try{
+    await loadBackendLatest();
+  }catch(e){
+    dashboardHistoryLoading=false;
+    dashboardHistoryReady=true;
+    backendSetStatus("暂时没有最新结果:"+(e.message||e));
+    renderDashboardLoading("暂时没有最新数据，请稍后刷新");
+    renderHistoryList([], "");
+    return;
+  }
+  dashboardHistoryLoading=true;
+  const reportsPromise=loadBackendReports({quiet:true,initial:true});
   reportsPromise.catch(()=>{
     dashboardHistoryLoading=false;
     dashboardHistoryReady=true;
     if(rows.length||dramaRows.length)renderDashboard();
-    else renderDashboardLoading("正在加载最新数据...");
+    else renderDashboardLoading("暂时没有最新数据，请稍后刷新");
     renderHistoryList([], "");
   });
 }
@@ -2896,7 +3091,7 @@ async function runBackendJob(manual){
       if(!/already running/i.test(e.message||""))throw e;
       log("后端已有任务在跑,开始等待结果","c-dim");
     }
-    if(started)log("后端已开始抓取,账号名单来自 Render 环境变量","c-ok");
+    if(started)log("后端已开始抓取,账号名单来自后端账号池或 Render 环境变量兜底","c-ok");
     await pollBackendJob();
     store.set("thr_sched_last",dayStr());
     log("后端结果已加载到前端表格,可以导出 CSV/Excel/Word","c-ok");
@@ -3090,15 +3285,26 @@ function init(){
   if(state.apiKey)$("rememberKey").checked=true;
   refreshKeyPill();
   updateAcctCount();
-  $("backendSecret").value=store.get("thr_backend_secret")||"";
+  updateAccountPoolReport();
+  updateAccountPoolInputCount();
+  syncBackendSecretInputs(store.get("thr_backend_secret")||"");
 
   $("accountsInput").addEventListener("input",updateAcctCount);
   $("accountsInput").addEventListener("input",()=>store.set("thr_accounts",$("accountsInput").value));
   if(store.get("thr_accounts")){$("accountsInput").value=store.get("thr_accounts");updateAcctCount();}
-  $("backendSecret").addEventListener("input",()=>store.set("thr_backend_secret",$("backendSecret").value.trim()));
+  ["backendSecret","accountPoolSecret"].forEach(id=>{
+    const el=$(id);
+    if(el)el.addEventListener("input",()=>syncBackendSecretInputs(el.value));
+  });
   $("backendRunBtn").addEventListener("click",()=>runBackendJob(true));
   $("backendLoadBtn").addEventListener("click",()=>loadBackendLatest().catch(e=>{backendSetStatus("出错:"+(e.message||e));toast("出错:"+(e.message||e));}));
   $("backendReportsBtn").addEventListener("click",openBackendReports);
+  $("accountPoolInput").addEventListener("input",updateAccountPoolInputCount);
+  $("accountPoolUseReportBtn").addEventListener("click",useReportAccountsForPool);
+  $("accountPoolCopyManualBtn").addEventListener("click",copyPoolToManualInput);
+  $("accountPoolLoadBtn").addEventListener("click",loadAccountPool);
+  $("accountPoolSaveBtn").addEventListener("click",()=>saveAccountPool().catch(e=>{if((e.message||e)!=="account pool is empty")setAccountPoolStatus("保存失败:"+(e.message||e),"err");}));
+  $("accountPoolRunBtn").addEventListener("click",saveAndRunAccountPool);
   const historyMenu=$("historyMenu");
   const historyMenuBtn=$("historyMenuBtn");
   if(historyMenu&&historyMenuBtn){
@@ -3113,9 +3319,10 @@ function init(){
     document.addEventListener("click",closeHistoryMenu);
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeHistoryMenu();});
   }
-  const dashboardNext=$("dashboardNextBtn"), dashboardBack=$("dashboardBackBtn");
+  const dashboardNext=$("dashboardNextBtn"), dashboardBack=$("dashboardBackBtn"), reportBackTop=$("reportBackTopBtn");
   if(dashboardNext)dashboardNext.addEventListener("click",()=>setPublicPageView("report"));
   if(dashboardBack)dashboardBack.addEventListener("click",()=>setPublicPageView("dashboard"));
+  if(reportBackTop)reportBackTop.addEventListener("click",()=>setPublicPageView("dashboard"));
   setPublicPageView("dashboard");
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
