@@ -1494,13 +1494,14 @@ function dashboardAreaSvg(values,labels,color){
   const xLabels=labels.map((label,i)=>i===0||i===labels.length-1?`<text x="${p+(labels.length<=1?0:(w-p*2)*i/(labels.length-1))}" y="${h-5}" text-anchor="middle" font-size="10" fill="#8A91A3">${esc(label)}</text>`:"").join("");
   return `<svg class="dash-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="area${color.replace("#","")}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".9"/><stop offset="1" stop-color="${color}" stop-opacity=".18"/></linearGradient></defs><path d="${path} L ${w-p} ${h-p} L ${p} ${h-p} Z" fill="url(#area${color.replace("#","")})"/><path d="${path}" fill="none" stroke="${color}" stroke-width="2.4"/>${xLabels}</svg>`;
 }
-function dashboardDonutHtml(accounts,totalViews){
+function dashboardDonutHtml(items,totalViews,coreLabel="播放<br>占比",fallbackLabel="账号"){
   const colors=["#5546FF","#1F2733","#7C72FF","#8A91A3","#D3D7E0"];
-  const total=accounts.reduce((sum,item)=>sum+item.views,0)||totalViews||1;
+  const list=(items||[]).filter(item=>item&&Number(item.views)>0);
+  const total=list.reduce((sum,item)=>sum+Number(item.views||0),0)||totalViews||1;
   let deg=0;
-  const stops=accounts.length?accounts.map((item,i)=>{const start=deg;deg+=item.views/total*360;return `${colors[i%colors.length]} ${start}deg ${deg}deg`;}).join(","):"#E6E8EE 0deg 360deg";
-  const legend=accounts.slice(0,4).map((item,i)=>`<span><i style="background:${colors[i%colors.length]}"></i><b>${Math.round(item.views/total*100)}%</b> ${esc(item.name||item.account||"账号")}</span>`).join("");
-  return `<div class="dash-donut-visual" style="background:conic-gradient(${stops})"><div class="dash-donut-core">播放<br>占比</div></div><div class="dash-donut-legend">${legend}</div>`;
+  const stops=list.length?list.map((item,i)=>{const start=deg;deg+=Number(item.views||0)/total*360;return `${colors[i%colors.length]} ${start}deg ${deg}deg`;}).join(","):"#E6E8EE 0deg 360deg";
+  const legend=list.slice(0,4).map((item,i)=>`<span><i style="background:${colors[i%colors.length]}"></i><b>${Math.round(Number(item.views||0)/total*100)}%</b> ${esc(item.name||item.account||fallbackLabel)}</span>`).join("");
+  return `<div class="dash-donut-visual" style="background:conic-gradient(${stops})"><div class="dash-donut-core">${coreLabel}</div></div><div class="dash-donut-legend">${legend||"<span>暂无数据</span>"}</div>`;
 }
 function renderDashboard(){
   const box=$("dashboardCard");
@@ -1514,7 +1515,6 @@ function renderDashboard(){
   const playDelta=dashboardDelta(current,previous,"totalViews");
   const dramaDelta=dashboardDelta(current,previous,"dramaCount");
   const avgDelta=dashboardDelta(current,previous,"avgDramaViews");
-  const topAccounts=current.topAccounts||[];
   const topThemes=current.topThemes||[];
   const themeBase=topThemes[0]?topThemes[0].views:1;
   const themeProgress=topThemes.slice(0,5).map((item,i)=>{
@@ -1530,7 +1530,7 @@ function renderDashboard(){
       <div class="dash-panel dash-kpi"><div class="dash-kpi-label">本期短剧数量</div><div class="dash-kpi-value">${fmt(current.dramaCount)}</div><div class="dash-kpi-sub">较上期 ${dashboardRateText(dramaDelta)}</div><div class="dash-kpi-icon">▣</div></div>
       <div class="dash-panel dash-kpi light"><div class="dash-kpi-label">单剧均观看</div><div class="dash-kpi-value">${fmtPlay(current.avgDramaViews)}</div><div class="dash-kpi-sub">较上期 ${dashboardRateText(avgDelta)}</div><div class="dash-kpi-icon">⌄</div></div>
       <div class="dash-panel dash-main"><div class="dash-panel-title">近10次播放趋势 <span style="font-weight:500;font-size:12px;color:#8A91A3">按历史报表对比</span></div><div class="dash-legend"><span><i style="background:#5546FF"></i>累计播放</span><span><i style="background:#1F2733"></i>最高账号</span></div>${dashboardLineSvg(snaps.map(s=>s.totalViews),snaps.map(s=>s.topAccountViews),labels)}</div>
-      <div class="dash-panel dash-donut"><div class="dash-panel-title">本期账号播放占比分析</div>${dashboardDonutHtml(topAccounts,current.totalViews)}</div>
+      <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#7C72FF")}</div>
       <div class="dash-panel dash-bars"><div class="dash-panel-title">全账号热门题材</div>${themeProgress||'<div class="dashboard-loading">暂无题材数据</div>'}</div>
