@@ -1382,6 +1382,15 @@ function dramaGrowthKey(row){
   const title=String(dramaTitleOf(row)||chineseTitleOf(row)||"").trim().toLowerCase();
   return acc&&title?("title:"+acc+"|"+title):"";
 }
+function dashboardDramaGrowthKeys(row){
+  const keys=[];
+  const id=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID","Drama ID"],""));
+  if(id)keys.push("id:"+id);
+  const acc=summaryAccountKey(row);
+  const title=String(dramaTitleOf(row)||chineseTitleOf(row)||"").trim().toLowerCase();
+  if(acc&&title)keys.push("title:"+acc+"|"+title);
+  return keys;
+}
 function dramaGrowthOf(row){
   if(!growthFilterState.baselineMap)return 0;
   const key=dramaGrowthKey(row);
@@ -1583,14 +1592,14 @@ function dashboardDramaGrowthItem(days,payloads,currentPayload){
   if(!baseline)return null;
   const baseMap=new Map();
   for(const row of dashboardPayloadDetails(baseline)){
-    const key=dramaGrowthKey(row);
-    if(key)baseMap.set(key,Math.max(baseMap.get(key)||0,dramaViewsOf(row)));
+    for(const key of dashboardDramaGrowthKeys(row)){
+      baseMap.set(key,Math.max(baseMap.get(key)||0,dramaViewsOf(row)));
+    }
   }
   let best=null;
   for(const row of dashboardPayloadDetails(currentPayload)){
-    const key=dramaGrowthKey(row);
+    const key=dashboardDramaGrowthKeys(row).find(k=>baseMap.has(k));
     if(!key)continue;
-    if(!baseMap.has(key))continue;
     const views=dramaViewsOf(row);
     const before=baseMap.get(key)||0;
     const diff=views-before;
