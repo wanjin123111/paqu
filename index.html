@@ -1543,17 +1543,17 @@ function dashboardDramaGrowthItem(days,payloads,currentPayload){
   for(const row of dashboardPayloadDetails(currentPayload)){
     const key=dramaGrowthKey(row);
     if(!key)continue;
+    if(!baseMap.has(key))continue;
     const views=dramaViewsOf(row);
-    const before=baseMap.has(key)?baseMap.get(key):0;
+    const before=baseMap.get(key)||0;
     const diff=views-before;
     if(diff<=0)continue;
     if(!best||diff>best.diff||(diff===best.diff&&views>best.views)){
-      best={row,views,diff,baseline};
+      best={row,views,before,diff,baseline};
     }
   }
   if(!best)return null;
-  const baseLabel=reportTimeLabel(best.baseline.generated_at).slice(5,10)||"历史";
-  best.sub=`+${fmtPlay(best.diff)} · 当前 ${fmtPlay(best.views)} · 基准 ${baseLabel}`;
+  best.sub=`+${fmtPlay(best.diff)} · ${fmtPlay(best.before)}→${fmtPlay(best.views)}`;
   return best;
 }
 function dashboardDramaCardHtml(label,item,opts={}){
@@ -1629,9 +1629,9 @@ function renderDashboard(){
     <div class="dashboard-head"><h2 class="dashboard-title">短剧运营数据分析可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
     <div class="dashboard-grid">
       ${dashboardDramaCardHtml("全账号最新热剧",latestHot,{icon:"↗"})}
-      ${dashboardDramaCardHtml("近7天涨幅最猛",grow7,{light:true,icon:"7"})}
-      ${dashboardDramaCardHtml("近3天涨幅最猛",grow3,{icon:"3"})}
-      ${dashboardDramaCardHtml("近1天涨幅最猛",grow1,{light:true,icon:"1"})}
+      ${dashboardDramaCardHtml("近7天涨幅",grow7,{light:true,icon:"7"})}
+      ${dashboardDramaCardHtml("近3天涨幅",grow3,{icon:"3"})}
+      ${dashboardDramaCardHtml("近1天涨幅",grow1,{light:true,icon:"1"})}
       <div class="dash-panel dash-main"><div class="dash-panel-title">近10次播放趋势 <span style="font-weight:500;font-size:12px;color:#8A91A3">按历史报表对比</span></div><div class="dash-legend"><span><i style="background:#5546FF"></i>累计播放</span><span><i style="background:#1F2733"></i>最高账号</span></div>${dashboardLineSvg(snaps.map(s=>s.totalViews),snaps.map(s=>s.topAccountViews),labels)}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
