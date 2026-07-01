@@ -1782,6 +1782,39 @@ function dashboardDramaMultiGrowthLineSvg(series,labels){
   const endLabels=labelItems.map(item=>`<text x="${item.x}" y="${item.y}" text-anchor="end" font-size="10" font-weight="700" ${textHalo} fill="${item.color}">${esc(item.text)}</text>`).join("");
   return `<svg class="dash-chart tall" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}${guides}${paths.join("")}${dots.join("")}${endLabels}${xLabels}</svg>`;
 }
+function dashboardShortTitle(text,max=7){
+  const chars=Array.from(String(text||"").trim());
+  return chars.length>max?chars.slice(0,max).join("")+"…":chars.join("");
+}
+function dashboardDramaGrowthBarSvg(items){
+  const list=(items||[]).filter(item=>item&&Number(item.diff)>0).slice(0,10);
+  if(!list.length)return '<div class="dashboard-loading">暂无近30天可对比新增数据</div>';
+  const w=760,h=170,padL=48,padR=18,padT=18,padB=44;
+  const max=Math.max(1,...list.map(item=>Number(item.diff||0)));
+  const plotW=w-padL-padR, plotH=h-padT-padB;
+  const slot=plotW/list.length;
+  const barW=Math.max(16,Math.min(46,slot*.55));
+  const grid=[0,1,2].map(i=>{
+    const y=padT+i*plotH/2;
+    const value=max-(max*i/2);
+    return `<line x1="${padL}" x2="${w-padR}" y1="${y}" y2="${y}" stroke="#E6E8EE" stroke-width="1"/><text x="${padL-7}" y="${y+3}" text-anchor="end" font-size="9" fill="#8A91A3">${esc(fmtPlay(value))}</text>`;
+  }).join("");
+  const bars=list.map((item,i)=>{
+    const title=dashboardDramaTrendTitle(item,"暂无数据");
+    const value=Number(item.diff||0);
+    const height=Math.max(3,value/max*plotH);
+    const x=padL+slot*i+(slot-barW)/2;
+    const y=padT+plotH-height;
+    const fill=i===0?"#5546FF":(i===1?"#1F2733":"#7C72FF");
+    const labelX=padL+slot*i+slot/2;
+    const labelInside=y<padT+16;
+    const labelY=labelInside?y+15:y-6;
+    const labelFill=labelInside?"#fff":fill;
+    const labelStroke=labelInside?fill:"#fff";
+    return `<g><title>${esc(title+" 新增 "+fmtPlay(value))}</title><rect x="${x}" y="${y}" width="${barW}" height="${height}" rx="3" fill="${fill}"/><text x="${labelX}" y="${labelY}" text-anchor="middle" font-size="10" font-weight="800" paint-order="stroke" stroke="${labelStroke}" stroke-width="4" stroke-linejoin="round" fill="${labelFill}">${esc(fmtPlay(value))}</text><text x="${labelX}" y="${h-24}" text-anchor="middle" font-size="8.5" fill="#687086">${i+1}</text><text x="${labelX}" y="${h-10}" text-anchor="middle" font-size="8.5" fill="#687086">${esc(dashboardShortTitle(title,6))}</text></g>`;
+  }).join("");
+  return `<svg class="dash-chart tall" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}<line x1="${padL}" x2="${w-padR}" y1="${padT+plotH}" y2="${padT+plotH}" stroke="#DDE1EA" stroke-width="1"/>${bars}</svg>`;
+}
 function dashboardAreaSvg(values,labels,color){
   const w=330,h=150,p=24;
   const max=Math.max(1,...values), min=0;
@@ -1820,17 +1853,7 @@ function renderDashboard(){
   const grow7=dashboardDramaGrowthItem(7,comparablePayloads,currentPayload);
   const grow3=dashboardDramaGrowthItem(3,comparablePayloads,currentPayload);
   const grow1=dashboardDramaGrowthItem(1,comparablePayloads,currentPayload);
-  const monthTrendPayloads=dashboardTrendPayloadsForDays(comparablePayloads,currentPayload,30,30);
-  const monthTrendLabels=monthTrendPayloads.map(dashboardReportTickLabel);
-  const monthGrowthItems=dashboardMonthlyGrowthItems(30,comparablePayloads,currentPayload,3);
-  const monthTrendColors=["#5546FF","#1F2733","#7C72FF"];
-  const monthTrendSeries=monthGrowthItems.map((item,i)=>({
-    name:dashboardDramaTrendTitle(item,"暂无数据"),
-    values:dashboardDramaPointGrowthSeries(item,monthTrendPayloads),
-    color:monthTrendColors[i%monthTrendColors.length],
-    total:item.diff
-  }));
-  const monthTrendLegend=monthTrendSeries.map((item,i)=>`<span title="${esc(item.name)}"><i style="background:${item.color}"></i>${i+1}. ${esc(item.name)} · 月增${esc(fmtPlay(item.total))}</span>`).join("")||'<span>暂无近30天可对比增长数据</span>';
+  const monthGrowthItems=dashboardMonthlyGrowthItems(30,comparablePayloads,currentPayload,10);
   const topThemes=current.topThemes||[];
   const themeBase=topThemes[0]?topThemes[0].views:1;
   const themeProgress=topThemes.slice(0,5).map((item,i)=>{
@@ -1845,7 +1868,7 @@ function renderDashboard(){
       ${dashboardDramaCardHtml("近7天涨幅",grow7,{light:true,icon:"7"})}
       ${dashboardDramaCardHtml("近3天涨幅",grow3,{icon:"3"})}
       ${dashboardDramaCardHtml("近1天涨幅",grow1,{light:true,icon:"1"})}
-      <div class="dash-panel dash-main"><div class="dash-panel-title">近30天热度涨幅榜走势 <span style="font-weight:500;font-size:12px;color:#8A91A3">全账号按月涨幅筛选</span></div><div class="dash-legend">${monthTrendLegend}</div>${dashboardDramaMultiGrowthLineSvg(monthTrendSeries,monthTrendLabels)}</div>
+      <div class="dash-panel dash-main"><div class="dash-panel-title">近30天热度新增榜 <span style="font-weight:500;font-size:12px;color:#8A91A3">对比历史新增播放</span></div>${dashboardDramaGrowthBarSvg(monthGrowthItems)}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#7C72FF")}</div>
