@@ -1,6 +1,15 @@
 {
   "reports": [
     {
+      "name": "scheduled_report_20260701-044812.json",
+      "summary_url": "scheduled_report_20260701-044812.csv",
+      "dramas_url": "scheduled_dramas_20260701-044812.csv",
+      "generated_at": "2026-07-01T04:48:12",
+      "title": "2026-07-01 12:48:12 北京时间",
+      "accounts": 9,
+      "dramas": 647
+    },
+    {
       "name": "scheduled_report_20260630-042038.json",
       "summary_url": "scheduled_report_20260630-042038.csv",
       "dramas_url": "scheduled_dramas_20260630-042038.csv",
