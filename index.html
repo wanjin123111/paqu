@@ -68,8 +68,8 @@
   body.public-mode .dashboard-page-switch{top:34px}
   body.public-mode .report-page-switch{bottom:24px}
   body.public-mode .page-switch .mini-btn{box-shadow:0 10px 24px rgba(15,23,42,.14)}
-  body.public-mode .dashboard-next-btn{background:#0d86ca;color:#fff;border-color:#0d86ca}
-  body.public-mode .dashboard-next-btn:hover{background:#086da4;color:#fff;border-color:#086da4;text-decoration:none}
+  body.public-mode .dashboard-next-btn{background:var(--accent);color:#fff;border-color:var(--accent)}
+  body.public-mode .dashboard-next-btn:hover{background:var(--accent-press);color:#fff;border-color:var(--accent-press);text-decoration:none}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
   .card-head{display:flex;align-items:center;justify-content:space-between;padding:15px 18px 12px;border-bottom:1px solid var(--line)}
   .card-head h2{margin:0;font-family:var(--display);font-size:13px;font-weight:600;letter-spacing:.05em;color:var(--ink-soft)}
@@ -185,45 +185,46 @@
   .row-err td{background:var(--err-soft)}
 
   #dashboardCard{display:none}
-  .dashboard-card{position:relative;overflow:hidden;border-color:#b8dfef;border-radius:18px;background:#fff;box-shadow:0 10px 28px rgba(13,116,183,.12)}
-  .dashboard-card::after{content:"";position:absolute;left:0;right:0;bottom:0;height:6px;background:linear-gradient(90deg,#0977bd,#1ec7d4,#0875be)}
+  .dashboard-card{position:relative;overflow:hidden;border-color:var(--line);border-radius:18px;background:var(--paper);box-shadow:var(--shadow)}
+  .dashboard-card::after{content:"";position:absolute;left:0;right:0;bottom:0;height:6px;background:linear-gradient(90deg,#1F2733,var(--accent),#7C72FF)}
   .dashboard-inner{padding:18px 22px 24px}
   .dashboard-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}
-  .dashboard-title{display:flex;align-items:center;gap:12px;margin:0;font-family:Georgia,'Times New Roman','Microsoft YaHei',serif;font-size:25px;line-height:1.1;font-weight:800;color:#0c5f92;letter-spacing:0}
-  .dashboard-title::before{content:"";width:8px;height:31px;background:#0d86ca;border-radius:2px;box-shadow:0 0 0 1px rgba(13,134,202,.12)}
-  .dashboard-stamp{font-size:12px;color:#6b879c;font-family:var(--mono);white-space:nowrap;margin-top:8px}
+  .dashboard-title{display:flex;align-items:center;gap:12px;margin:0;font-family:var(--display),'Microsoft YaHei',sans-serif;font-size:25px;line-height:1.1;font-weight:800;color:var(--ink);letter-spacing:0}
+  .dashboard-title::before{content:"";width:8px;height:31px;background:var(--accent);border-radius:2px;box-shadow:0 0 0 1px rgba(85,70,255,.14)}
+  .dashboard-stamp{font-size:12px;color:var(--ink-faint);font-family:var(--mono);white-space:nowrap;margin-top:8px}
   .dashboard-grid{display:grid;grid-template-columns:repeat(4,1fr) 1.2fr;gap:10px}
-  .dash-panel{border:1px solid #a9dce9;background:#fbfeff;min-height:96px;position:relative;overflow:hidden}
-  .dash-kpi{min-height:78px;padding:12px 15px;background:linear-gradient(135deg,#1d80d2,#18c0cf);color:#fff}
-  .dash-kpi.light{background:#fafdff;color:#0b719d}
-  .dash-kpi::after{content:"";position:absolute;right:-28px;top:-34px;width:96px;height:96px;border-radius:50%;background:rgba(255,255,255,.16)}
+  .dash-panel{border:1px solid var(--line);background:var(--card);min-height:96px;position:relative;overflow:hidden}
+  .dash-kpi{min-height:78px;padding:12px 15px;background:linear-gradient(135deg,#1F2733,#2A2E3A);color:#fff}
+  .dash-kpi.light{background:var(--card);color:var(--ink)}
+  .dash-kpi::after{content:"";position:absolute;right:-28px;top:-34px;width:96px;height:96px;border-radius:50%;background:rgba(85,70,255,.12)}
   .dash-kpi-label{font-size:13px;opacity:.9}
   .dash-kpi-value{margin-top:7px;font-family:var(--display);font-size:24px;font-weight:700;line-height:1;color:inherit}
   .dash-kpi-sub{margin-top:7px;font-size:12px;color:rgba(255,255,255,.82)}
-  .dash-kpi.light .dash-kpi-sub{color:#6a92a7}
+  .dash-kpi.light .dash-kpi-value{color:var(--accent)}
+  .dash-kpi.light .dash-kpi-sub{color:var(--ink-faint)}
   .dash-kpi-icon{position:absolute;right:16px;bottom:13px;font-size:34px;opacity:.24}
   .dash-main{grid-column:1 / span 4;min-height:160px;padding:11px}
   .dash-donut{grid-column:5;grid-row:1 / span 2;padding:14px 12px}
   .dash-area,.dash-bars{min-height:188px;padding:11px}
   .dash-bars{grid-column:3 / span 2}
   .dash-side{grid-column:5;grid-row:3;display:grid;gap:10px}
-  .dash-panel-title{font-weight:800;font-size:15px;color:#182b3a;margin:0 0 8px}
+  .dash-panel-title{font-weight:800;font-size:15px;color:var(--ink);margin:0 0 8px}
   .dash-chart{width:100%;height:116px;display:block}
   .dash-chart.tall{height:130px}
-  .dash-legend{display:flex;gap:16px;justify-content:flex-end;font-size:12px;color:#537286;margin-bottom:4px}
+  .dash-legend{display:flex;gap:16px;justify-content:flex-end;font-size:12px;color:var(--ink-soft);margin-bottom:4px}
   .dash-legend i{display:inline-block;width:20px;height:3px;border-radius:99px;margin-right:5px;vertical-align:middle}
-  .dash-donut-visual{width:154px;height:154px;margin:10px auto 8px;border-radius:50%;display:grid;place-items:center;box-shadow:inset 0 0 0 1px rgba(8,95,159,.08)}
-  .dash-donut-core{width:68px;height:68px;border-radius:50%;background:#fff;display:grid;place-items:center;text-align:center;color:#0a71ad;font-weight:800;font-size:12px;box-shadow:0 2px 10px rgba(13,116,183,.18)}
-  .dash-donut-legend{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:11px;color:#526b80}
+  .dash-donut-visual{width:154px;height:154px;margin:10px auto 8px;border-radius:50%;display:grid;place-items:center;box-shadow:inset 0 0 0 1px rgba(20,22,29,.08)}
+  .dash-donut-core{width:68px;height:68px;border-radius:50%;background:#fff;display:grid;place-items:center;text-align:center;color:var(--accent);font-weight:800;font-size:12px;box-shadow:0 2px 10px rgba(85,70,255,.16)}
+  .dash-donut-legend{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:11px;color:var(--ink-soft)}
   .dash-donut-legend span{display:flex;align-items:center;gap:5px;min-width:0}
   .dash-donut-legend i{width:9px;height:9px;border-radius:2px;flex:none}
   .dash-progress-row{display:grid;grid-template-columns:34px minmax(0,1fr) 42px;align-items:center;gap:10px;margin:12px 0}
-  .dash-progress-icon{width:32px;height:32px;border-radius:7px;background:linear-gradient(135deg,#1789d3,#22c4d3);display:grid;place-items:center;color:#fff;font-size:18px}
-  .dash-progress-label{font-size:12px;color:#46677c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px}
-  .dash-progress-track{height:8px;background:#dbe8ee;border-radius:99px;overflow:hidden}
-  .dash-progress-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#0f6fac,#23bdd2)}
-  .dash-progress-value{font-family:var(--display);font-weight:700;color:#1476ad;text-align:right}
-  .dash-stat{display:grid;grid-template-columns:42px 1fr;align-items:center;gap:10px;min-height:58px;padding:10px 14px;background:linear-gradient(135deg,#0875c7,#1aaed0);color:#fff}
+  .dash-progress-icon{width:32px;height:32px;border-radius:7px;background:linear-gradient(135deg,var(--accent),#7C72FF);display:grid;place-items:center;color:#fff;font-size:18px}
+  .dash-progress-label{font-size:12px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px}
+  .dash-progress-track{height:8px;background:var(--line);border-radius:99px;overflow:hidden}
+  .dash-progress-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),#7C72FF)}
+  .dash-progress-value{font-family:var(--display);font-weight:700;color:var(--accent);text-align:right}
+  .dash-stat{display:grid;grid-template-columns:42px 1fr;align-items:center;gap:10px;min-height:58px;padding:10px 14px;background:linear-gradient(135deg,#1F2733,#2A2E3A);color:#fff}
   .dash-stat-icon{font-size:28px;opacity:.95}
   .dash-stat-title{font-size:15px;font-weight:800}
   .dash-stat-sub{font-size:12px;color:rgba(255,255,255,.8);margin-top:2px}
@@ -1459,24 +1460,24 @@ function dashboardLineSvg(primary,secondary,labels){
   const all=[...primary,...secondary].map(Number).filter(Number.isFinite);
   const min=Math.min(0,...all), max=Math.max(1,...all);
   const a=dashboardChartPoints(primary,w,h,p,min,max), b=dashboardChartPoints(secondary,w,h,p,min,max);
-  const grid=[0,1,2,3].map(i=>`<line x1="${p}" x2="${w-p}" y1="${p+i*(h-p*2)/3}" y2="${p+i*(h-p*2)/3}" stroke="#d7eef5" stroke-width="1"/>`).join("");
-  const xLabels=labels.map((label,i)=>i===0||i===labels.length-1||i===Math.floor(labels.length/2)?`<text x="${p+(labels.length<=1?0:(w-p*2)*i/(labels.length-1))}" y="${h-5}" text-anchor="middle" font-size="10" fill="#6d8799">${esc(label)}</text>`:"").join("");
-  const dots=a.map((pt,i)=>`<circle cx="${pt[0]}" cy="${pt[1]}" r="${i===a.length-1?4:2.4}" fill="#18b9c8"/>`).join("");
-  return `<svg class="dash-chart tall" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}<path d="${dashboardPath(b)}" fill="none" stroke="#126ba7" stroke-width="2.2"/><path d="${dashboardPath(a)}" fill="none" stroke="#18b9c8" stroke-width="3"/><path d="${dashboardPath(a)} L ${w-p} ${h-p} L ${p} ${h-p} Z" fill="rgba(24,185,200,.08)"/>${dots}${xLabels}</svg>`;
+  const grid=[0,1,2,3].map(i=>`<line x1="${p}" x2="${w-p}" y1="${p+i*(h-p*2)/3}" y2="${p+i*(h-p*2)/3}" stroke="#E6E8EE" stroke-width="1"/>`).join("");
+  const xLabels=labels.map((label,i)=>i===0||i===labels.length-1||i===Math.floor(labels.length/2)?`<text x="${p+(labels.length<=1?0:(w-p*2)*i/(labels.length-1))}" y="${h-5}" text-anchor="middle" font-size="10" fill="#8A91A3">${esc(label)}</text>`:"").join("");
+  const dots=a.map((pt,i)=>`<circle cx="${pt[0]}" cy="${pt[1]}" r="${i===a.length-1?4:2.4}" fill="#5546FF"/>`).join("");
+  return `<svg class="dash-chart tall" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}<path d="${dashboardPath(b)}" fill="none" stroke="#1F2733" stroke-width="2.2"/><path d="${dashboardPath(a)}" fill="none" stroke="#5546FF" stroke-width="3"/><path d="${dashboardPath(a)} L ${w-p} ${h-p} L ${p} ${h-p} Z" fill="rgba(85,70,255,.1)"/>${dots}${xLabels}</svg>`;
 }
 function dashboardAreaSvg(values,labels,color){
   const w=330,h=150,p=24;
   const max=Math.max(1,...values), min=0;
   const pts=dashboardChartPoints(values,w,h,p,min,max);
   const path=dashboardPath(pts);
-  const xLabels=labels.map((label,i)=>i===0||i===labels.length-1?`<text x="${p+(labels.length<=1?0:(w-p*2)*i/(labels.length-1))}" y="${h-5}" text-anchor="middle" font-size="10" fill="#6d8799">${esc(label)}</text>`:"").join("");
+  const xLabels=labels.map((label,i)=>i===0||i===labels.length-1?`<text x="${p+(labels.length<=1?0:(w-p*2)*i/(labels.length-1))}" y="${h-5}" text-anchor="middle" font-size="10" fill="#8A91A3">${esc(label)}</text>`:"").join("");
   return `<svg class="dash-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="area${color.replace("#","")}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".9"/><stop offset="1" stop-color="${color}" stop-opacity=".18"/></linearGradient></defs><path d="${path} L ${w-p} ${h-p} L ${p} ${h-p} Z" fill="url(#area${color.replace("#","")})"/><path d="${path}" fill="none" stroke="${color}" stroke-width="2.4"/>${xLabels}</svg>`;
 }
 function dashboardDonutHtml(accounts,totalViews){
-  const colors=["#49a3ef","#075fa1","#8bd0f4","#0d84ca","#b5e5f8"];
+  const colors=["#5546FF","#1F2733","#7C72FF","#8A91A3","#D3D7E0"];
   const total=accounts.reduce((sum,item)=>sum+item.views,0)||totalViews||1;
   let deg=0;
-  const stops=accounts.length?accounts.map((item,i)=>{const start=deg;deg+=item.views/total*360;return `${colors[i%colors.length]} ${start}deg ${deg}deg`;}).join(","):"#d7eef5 0deg 360deg";
+  const stops=accounts.length?accounts.map((item,i)=>{const start=deg;deg+=item.views/total*360;return `${colors[i%colors.length]} ${start}deg ${deg}deg`;}).join(","):"#E6E8EE 0deg 360deg";
   const legend=accounts.slice(0,4).map((item,i)=>`<span><i style="background:${colors[i%colors.length]}"></i><b>${Math.round(item.views/total*100)}%</b> ${esc(item.name||item.account||"账号")}</span>`).join("");
   return `<div class="dash-donut-visual" style="background:conic-gradient(${stops})"><div class="dash-donut-core">播放<br>占比</div></div><div class="dash-donut-legend">${legend}</div>`;
 }
@@ -1503,10 +1504,10 @@ function renderDashboard(){
       <div class="dash-panel dash-kpi light"><div class="dash-kpi-label">播放增长率</div><div class="dash-kpi-value">${dashboardRateText(playDelta)}</div><div class="dash-kpi-sub">增长 ${fmtPlay(Math.abs(playDelta.diff||0))}</div><div class="dash-kpi-icon">⌁</div></div>
       <div class="dash-panel dash-kpi"><div class="dash-kpi-label">本期短剧数量</div><div class="dash-kpi-value">${fmt(current.dramaCount)}</div><div class="dash-kpi-sub">较上期 ${dashboardRateText(dramaDelta)}</div><div class="dash-kpi-icon">▣</div></div>
       <div class="dash-panel dash-kpi light"><div class="dash-kpi-label">单剧均观看</div><div class="dash-kpi-value">${fmtPlay(current.avgDramaViews)}</div><div class="dash-kpi-sub">较上期 ${dashboardRateText(avgDelta)}</div><div class="dash-kpi-icon">⌄</div></div>
-      <div class="dash-panel dash-main"><div class="dash-panel-title">近10次播放趋势 <span style="font-weight:500;font-size:12px;color:#66879b">按历史报表对比</span></div><div class="dash-legend"><span><i style="background:#18b9c8"></i>累计播放</span><span><i style="background:#126ba7"></i>最高账号</span></div>${dashboardLineSvg(snaps.map(s=>s.totalViews),snaps.map(s=>s.topAccountViews),labels)}</div>
+      <div class="dash-panel dash-main"><div class="dash-panel-title">近10次播放趋势 <span style="font-weight:500;font-size:12px;color:#8A91A3">按历史报表对比</span></div><div class="dash-legend"><span><i style="background:#5546FF"></i>累计播放</span><span><i style="background:#1F2733"></i>最高账号</span></div>${dashboardLineSvg(snaps.map(s=>s.totalViews),snaps.map(s=>s.topAccountViews),labels)}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期账号播放占比分析</div>${dashboardDonutHtml(topAccounts,current.totalViews)}</div>
-      <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#176fc1")}</div>
-      <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#10a9c8")}</div>
+      <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
+      <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#7C72FF")}</div>
       <div class="dash-panel dash-bars"><div class="dash-panel-title">账号播放贡献率</div>${progress||'<div class="dashboard-loading">暂无账号数据</div>'}</div>
       <div class="dash-side">
         <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">本期账号数：${fmt(current.accountCount)}</div><div class="dash-stat-sub">统计账号汇总记录</div></div></div>
