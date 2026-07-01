@@ -232,6 +232,10 @@
   .dash-progress-track{height:8px;background:var(--line);border-radius:99px;overflow:hidden}
   .dash-progress-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),#7C72FF)}
   .dash-progress-value{font-family:var(--display);font-weight:700;color:var(--accent);text-align:right}
+  .dash-theme-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:6px;margin-right:-4px}
+  .dash-theme-list::-webkit-scrollbar{width:6px}
+  .dash-theme-list::-webkit-scrollbar-thumb{background:rgba(85,70,255,.45);border-radius:99px}
+  .dash-theme-list::-webkit-scrollbar-track{background:rgba(31,39,51,.07);border-radius:99px}
   .dash-stat{display:grid;grid-template-columns:42px 1fr;align-items:center;gap:10px;min-height:58px;padding:10px 14px;background:linear-gradient(135deg,#1F2733,#2A2E3A);color:#fff}
   .dash-stat-icon{font-size:28px;opacity:.95}
   .dash-stat-title{font-size:15px;font-weight:800}
@@ -1707,7 +1711,7 @@ function renderDashboard(){
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#7C72FF")}</div>
-      <div class="dash-panel dash-bars"><div class="dash-panel-title">全账号热门题材</div>${themeProgress||'<div class="dashboard-loading">暂无题材数据</div>'}</div>
+      <div class="dash-panel dash-bars"><div class="dash-panel-title">全账号热门题材</div><div class="dash-theme-list">${themeProgress||'<div class="dashboard-loading">暂无题材数据</div>'}</div></div>
       <div class="dash-side">
         <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">本期账号数：${fmt(current.accountCount)}</div><div class="dash-stat-sub">统计账号汇总记录</div></div></div>
         <div class="dash-stat"><div class="dash-stat-icon">D</div><div><div class="dash-stat-title">本期短剧量：${fmt(current.dramaCount)}</div><div class="dash-stat-sub">历史对比 ${dashboardRateText(dramaDelta)}</div></div></div>
