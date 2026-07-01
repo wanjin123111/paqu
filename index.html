@@ -51,6 +51,13 @@
   .key-pill.set .key-dot{background:var(--ok)}
 
   .wrap{max-width:1180px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:16px}
+  .dashboard-page{display:none}
+  .report-page{display:block}
+  body.public-mode .wrap{max-width:none;padding:0;gap:0}
+  body.public-mode .dashboard-page[hidden]{display:none!important}
+  body.public-mode .dashboard-page{min-height:calc(100vh - 63px);display:flex;align-items:center;justify-content:center;padding:28px 16px 24px}
+  body.public-mode .report-page{min-height:calc(100vh - 63px);padding:18px 16px 26px}
+  body.public-mode .report-page .foot-note{width:calc(100vw - 32px);max-width:none;margin:14px auto 0}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
   .card-head{display:flex;align-items:center;justify-content:space-between;padding:15px 18px 12px;border-bottom:1px solid var(--line)}
   .card-head h2{margin:0;font-family:var(--display);font-size:13px;font-weight:600;letter-spacing:.05em;color:var(--ink-soft)}
@@ -209,11 +216,11 @@
   .dash-stat-title{font-size:15px;font-weight:800}
   .dash-stat-sub{font-size:12px;color:rgba(255,255,255,.8);margin-top:2px}
   .dashboard-loading{padding:24px;color:var(--ink-faint)}
-  body.public-mode #dashboardCard{width:min(1140px,calc(100vw - 32px));max-width:none;margin-left:50%;transform:translateX(-50%)}
+  body.public-mode #dashboardCard{width:min(1140px,calc(100vw - 32px));max-width:none;margin:0;transform:none}
   @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-side,.dash-bars{grid-column:auto;grid-row:auto}.dash-donut{grid-column:span 2}.dash-side{grid-column:span 2}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}}
   @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-side,.dash-bars{grid-column:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}}
 
-  body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin-left:50%;transform:translateX(-50%)}
+  body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin:0 auto;transform:none}
   body.public-mode #resultCard .card-body{padding:18px 22px 22px}
   body.public-mode #resultCard .table-scroll{max-height:none;overflow:visible}
   body.public-mode #resultCard.detail-view .table-scroll{overflow:visible}
@@ -483,11 +490,14 @@ shortdramatime"></textarea>
   </div>
 
   <!-- 结果 -->
-  <div class="card dashboard-card" id="dashboardCard">
-    <div class="dashboard-loading">正在加载运营看板...</div>
-  </div>
+  <section class="dashboard-page" id="dashboardPage" hidden>
+    <div class="card dashboard-card" id="dashboardCard">
+      <div class="dashboard-loading">正在加载运营看板...</div>
+    </div>
+  </section>
 
-  <div class="card" id="resultCard">
+  <section class="report-page" id="reportPage">
+    <div class="card" id="resultCard">
     <div class="card-head"><h2>报表</h2></div>
     <div class="card-body">
       <div class="result-top">
@@ -537,6 +547,7 @@ shortdramatime"></textarea>
   <p class="foot-note">
     说明:浏览器直连 TikHub 受 CORS 限制,直连失败时请在“设置”里填本地代理。抓“全部视频”很费请求(一个几千集的账号≈数百次),会消耗 TikHub 余额——建议先用 1~2 个账号、把“最多抓”设成 100 跑通再放开。云端定时报表优先按 TikHub 播放列表/合集统计短剧;取不到合集时才按标题前缀估算。
   </p>
+  </section>
 </div>
 
 <!-- KEY 弹窗 -->
@@ -958,7 +969,9 @@ function setProgress(done,total){$("pcount").textContent=done+" / "+total;$("pba
 function clearResults(){
   resetDetailPage();
   currentReportPayload=null;
+  const dashboardPage=$("dashboardPage");
   const dashboard=$("dashboardCard");
+  if(dashboardPage)dashboardPage.hidden=true;
   if(dashboard){dashboard.style.display="none";dashboard.innerHTML='<div class="dashboard-loading">正在加载运营看板...</div>';}
   $("resultCard").style.display="none";
   $("resultTable").querySelector("thead").innerHTML="";
@@ -1426,8 +1439,9 @@ function dashboardDonutHtml(accounts,totalViews){
 }
 function renderDashboard(){
   const box=$("dashboardCard");
+  const page=$("dashboardPage");
   if(!box)return;
-  if(!rows.length&&!dramaRows.length){box.style.display="none";return;}
+  if(!rows.length&&!dramaRows.length){if(page)page.hidden=true;box.style.display="none";return;}
   const snaps=dashboardSnapshots();
   const current=snaps[snaps.length-1]||dashboardSnapshotFromPayload({generated_at:currentReportGeneratedAt,summary:rows,dramas_detail:dramaRows});
   const previous=snaps.length>1?snaps[snaps.length-2]:null;
@@ -1438,6 +1452,7 @@ function renderDashboard(){
   const topAccounts=current.topAccounts||[];
   const progressBase=topAccounts[0]?topAccounts[0].views:1;
   const progress=topAccounts.slice(0,3).map((item,i)=>`<div class="dash-progress-row"><div class="dash-progress-icon">${i+1}</div><div><div class="dash-progress-label">${esc(item.name||item.account||"账号")}</div><div class="dash-progress-track"><div class="dash-progress-fill" style="width:${Math.max(3,Math.round(item.views/progressBase*100))}%"></div></div></div><div class="dash-progress-value">${Math.round(item.views/progressBase*100)}%</div></div>`).join("");
+  if(page)page.hidden=false;
   box.style.display="block";
   box.innerHTML=`<div class="dashboard-inner">
     <div class="dashboard-head"><h2 class="dashboard-title">短剧运营数据分析可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
