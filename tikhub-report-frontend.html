@@ -726,6 +726,33 @@ let dashboardHistoryPayloads=[];
 let dashboardHistoryRun=0;
 let dashboardHistoryReady=false;
 let dashboardHistoryLoading=false;
+const DASHBOARD_CACHE_MAX_AGE=7*24*60*60*1000;
+const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v2";
+const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v2";
+function dashboardCacheGet(key,maxAgeMs){
+  try{
+    const raw=store.get(key);
+    if(!raw)return null;
+    const item=JSON.parse(raw);
+    if(!item||!item.value)return null;
+    if(maxAgeMs&&Date.now()-Number(item.t||0)>maxAgeMs)return null;
+    return item.value;
+  }catch(_){return null;}
+}
+function dashboardCacheSet(key,value){
+  try{store.set(key,JSON.stringify({t:Date.now(),value:value}));}catch(_){}
+}
+function loadCachedDashboardState(){
+  if(!isPublicMode())return false;
+  const payload=dashboardCacheGet(DASHBOARD_LATEST_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE);
+  if(!payload)return false;
+  const history=dashboardCacheGet(DASHBOARD_HISTORY_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE);
+  dashboardHistoryPayloads=Array.isArray(history)?history:[];
+  dashboardHistoryLoading=true;
+  dashboardHistoryReady=true;
+  loadBackendPayload(payload,{source:"latest",quiet:true,skipCache:true});
+  return true;
+}
 let publicPageView="dashboard";
 let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7)||7,minText:store.get("thr_growth_min_text")||"100\u4e07",minValue:0,baselineMap:null,baselineItem:null,status:""};
 let detailAccountIndex=0;
@@ -2042,9 +2069,13 @@ function renderDashboard(){
   const box=$("dashboardCard");
   const page=$("dashboardPage");
   if(!box)return;
-  if(!rows.length&&!dramaRows.length){if(page)page.hidden=true;box.style.display="none";return;}
-  if(isPublicMode()&&!dashboardHistoryReady){
-    renderDashboardLoading(dashboardHistoryLoading?"正在加载历史对比数据...":"正在准备运营看板...");
+  if(!rows.length&&!dramaRows.length){
+    if(isPublicMode()&&!dashboardHistoryReady){
+      renderDashboardLoading(dashboardHistoryLoading?"正在加载历史对比数据...":"正在准备运营看板...");
+      return;
+    }
+    if(page)page.hidden=true;
+    box.style.display="none";
     return;
   }
   const currentPayload=dashboardCurrentPayload();
@@ -2128,6 +2159,7 @@ async function refreshDashboardHistory(opts){
   }))).filter(Boolean);
   if(run!==dashboardHistoryRun)return;
   if(payloads.length||!quiet)dashboardHistoryPayloads=payloads;
+  if(payloads.length)dashboardCacheSet(DASHBOARD_HISTORY_CACHE_KEY,payloads);
   dashboardHistoryLoading=false;
   dashboardHistoryReady=true;
   if(payloads.length||!quiet)renderDashboard();
@@ -2536,9 +2568,12 @@ async function backendFetchJson(path, params, opts){
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
   return data;
 }
-async function fetchJsonUrl(url){
+async function fetchJsonUrl(url,opts){
+  opts=opts||{};
+  const shouldBust=opts.noStore!==false&&!String(url).startsWith("public_reports/");
   const sep=String(url).includes("?")?"&":"?";
-  const r=await fetch(url+sep+"_="+Date.now(),{cache:"no-store"});
+  const finalUrl=shouldBust?url+sep+"_="+Date.now():url;
+  const r=await fetch(finalUrl,{cache:shouldBust?"no-store":"default"});
   const text=await r.text();
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
@@ -2639,22 +2674,24 @@ function loadBackendPayload(payload,opts){
     hydrateThemeLabels(dramaRows);
   }
   if(summary.length&&!window.__quietRefresh&&!opts.quiet)toast("已加载最新结果");
+  if(!opts.skipCache&&currentReportSource==="latest")dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,payload);
 }
 async function loadBackendLatest(opts){
   opts=opts||{};
   if(!opts.quiet)backendSetStatus("正在加载最新结果…");
-  await refreshBackendJobState();
+  const shouldCheckJob=!isPublicMode();
+  if(shouldCheckJob)await refreshBackendJobState();
   let payload=null;
   try{
     payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
-    await refreshBackendJobState();
+    if(shouldCheckJob)await refreshBackendJobState();
   }catch(firstErr){
     if(backendSecret()){
       try{
         backendSetStatus("后端暂无最新结果，正在重新抓取…");
         await backendFetchJson("/run-scheduled",{wait:"1"}, {requireSecret:true});
         payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
-        await refreshBackendJobState();
+        if(shouldCheckJob)await refreshBackendJobState();
       }catch(_){
         payload=await fetchJsonUrl("public_reports/latest_report.json");
       }
@@ -2771,10 +2808,20 @@ async function loadBackendReports(opts){
   const items=mergeReportHistoryItems(published,render);
   reportHistoryItems=items;
   updateGrowthFilterControls();
-  if(items.length)await refreshDashboardHistory({quiet});
   if(items.length){
     renderHistoryList(items,published.length&&render.length?"历史记录":(published.length?"历史存档":"Render 当前记录"));
     backendSetStatus("已加载 "+items.length+" 条历史记录", true);
+    if(isPublicMode()){
+      dashboardHistoryLoading=true;
+      dashboardHistoryReady=true;
+      refreshDashboardHistory({quiet:true}).catch(()=>{
+        dashboardHistoryLoading=false;
+        dashboardHistoryReady=true;
+        renderDashboard();
+      });
+    }else{
+      await refreshDashboardHistory({quiet});
+    }
     return items;
   }
   if(!quiet||!dashboardHistoryReady){
@@ -2787,16 +2834,18 @@ async function loadBackendReports(opts){
 }
 async function loadPublicDashboard(){
   dashboardHistoryLoading=true;
-  dashboardHistoryReady=false;
+  dashboardHistoryReady=loadCachedDashboardState();
+  if(!dashboardHistoryReady)renderDashboardLoading("正在加载最新数据...");
   const latestPromise=loadBackendLatest();
-  const reportsPromise=loadBackendReports();
+  const reportsPromise=loadBackendReports({quiet:true});
   try{await latestPromise;}catch(e){backendSetStatus("暂时没有最新结果:"+(e.message||e));}
-  try{await reportsPromise;}catch(e){
+  reportsPromise.catch(()=>{
     dashboardHistoryLoading=false;
     dashboardHistoryReady=true;
-    renderDashboard();
+    if(rows.length||dramaRows.length)renderDashboard();
+    else renderDashboardLoading("正在加载最新数据...");
     renderHistoryList([], "");
-  }
+  });
 }
 async function refreshPublicDashboardQuiet(){
   if(isAdminMode()||document.hidden)return;
