@@ -220,8 +220,7 @@
   .dash-panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:7px}
   .dash-title-stack{min-width:0}
   .dash-panel-sub{margin-top:2px;font-size:11.5px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dash-chip-row{display:flex;align-items:center;gap:6px;justify-content:flex-end;flex-wrap:wrap}
-  .dash-chip{height:22px;display:inline-flex;align-items:center;padding:0 8px;border:1px solid rgba(85,70,255,.16);border-radius:999px;background:#F3F1FF;color:var(--accent);font-size:10.5px;font-weight:700;white-space:nowrap}
+  .dash-panel-meta{font-size:11.5px;color:var(--ink-faint);white-space:nowrap;text-align:right;line-height:1.5}
   .dash-chart{width:100%;height:116px;display:block}
   .dash-chart.tall{height:130px}
   .growth-rank-chart{overflow:visible}
@@ -277,7 +276,7 @@
   body.public-mode #dashboardCard .dash-progress-track{height:6px}
   @media (max-width:620px){body.public-mode.dashboard-view{overflow:auto}body.public-mode .dashboard-page{height:auto;min-height:100vh;overflow:visible}body.public-mode #dashboardCard{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-inner{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-grid{flex:none;grid-template-rows:auto;grid-auto-rows:auto}body.public-mode #dashboardCard .dash-chart{height:180px;flex:none}body.public-mode #dashboardCard .dash-chart.tall{height:190px}}
   @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-side,.dash-bars{grid-column:auto;grid-row:auto}.dash-donut{grid-column:span 2}.dash-side{grid-column:span 2}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}}
-  @media (max-width:620px){.dash-panel-heading{flex-direction:column;gap:6px}.dash-chip-row{justify-content:flex-start}.dash-panel-sub{white-space:normal}}
+  @media (max-width:620px){.dash-panel-heading{flex-direction:column;gap:6px}.dash-panel-meta{text-align:left;white-space:normal}.dash-panel-sub{white-space:normal}}
   @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-side,.dash-bars{grid-column:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}}
 
   body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin:0 auto;transform:none}
@@ -1888,7 +1887,7 @@ function renderDashboard(){
       ${dashboardDramaCardHtml("近7天涨幅",grow7,{light:true,icon:"7"})}
       ${dashboardDramaCardHtml("近3天涨幅",grow3,{icon:"3"})}
       ${dashboardDramaCardHtml("近1天涨幅",grow1,{light:true,icon:"1"})}
-      <div class="dash-panel dash-main"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">对比历史新增播放 · 全账号按涨幅排序</div></div><div class="dash-chip-row"><span class="dash-chip">Top 10</span><span class="dash-chip">近30天</span><span class="dash-chip">新增播放</span></div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems)}</div>
+      <div class="dash-panel dash-main"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">对比历史新增播放 · 全账号按涨幅排序</div></div><div class="dash-panel-meta">口径：Top 10 · 近30天 · 新增播放</div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems)}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
       <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#7C72FF")}</div>
