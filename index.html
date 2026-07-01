@@ -242,9 +242,24 @@
   .growth-rank-row:hover .growth-rank-fill{filter:brightness(1.06)}
   .growth-rank-row.is-second .growth-rank-fill{background:#1F2733}
   .growth-rank-foot{margin-top:2px;font-size:9.8px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .theme-growth-list{display:flex;flex-direction:column;gap:6px;min-height:0;padding:1px 2px 0;overflow:hidden}
+  .theme-growth-row{display:grid;grid-template-columns:25px minmax(0,1fr);align-items:center;gap:8px;min-width:0;padding:4px 0;border-bottom:1px solid rgba(230,232,238,.72);animation:growthRowEnter .36s cubic-bezier(.16,1,.3,1) both}
+  .theme-growth-row:last-child{border-bottom:0}
+  .theme-growth-index{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;background:#F0EEFF;color:var(--accent);font-family:var(--mono);font-size:10px;font-weight:800}
+  .theme-growth-row.is-top .theme-growth-index{background:linear-gradient(135deg,var(--accent),#7C72FF);color:#fff;box-shadow:0 7px 18px rgba(85,70,255,.18)}
+  .theme-growth-row.is-second .theme-growth-index{background:#1F2733;color:#fff}
+  .theme-growth-body{min-width:0}
+  .theme-growth-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:8px;min-width:0}
+  .theme-growth-name{font-size:11.5px;font-weight:800;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .theme-growth-delta{font-family:var(--display);font-size:11.5px;font-weight:800;color:var(--accent);white-space:nowrap}
+  .theme-growth-row.is-second .theme-growth-delta{color:#1F2733}
+  .theme-growth-track{height:6px;margin-top:4px;border-radius:999px;background:#E8EAF2;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(31,39,51,.03)}
+  .theme-growth-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),#7C72FF);transform-origin:left center;animation:growthFillEnter .46s cubic-bezier(.16,1,.3,1) both}
+  .theme-growth-row.is-second .theme-growth-fill{background:#1F2733}
+  .theme-growth-meta{margin-top:2px;font-size:9.8px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   @keyframes growthRowEnter{from{opacity:.72;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
   @keyframes growthFillEnter{from{opacity:.7;transform:scaleX(.35)}to{opacity:1;transform:scaleX(1)}}
-  @media (prefers-reduced-motion:reduce){.growth-rank-row,.growth-rank-fill{animation:none!important;transition:none!important}}
+  @media (prefers-reduced-motion:reduce){.growth-rank-row,.growth-rank-fill,.theme-growth-row,.theme-growth-fill{animation:none!important;transition:none!important}}
   .dash-legend{display:flex;gap:12px;justify-content:flex-end;font-size:12px;color:var(--ink-soft);margin-bottom:4px;min-width:0;flex-wrap:wrap}
   .dash-legend span{min-width:0;max-width:48%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dash-legend i{display:inline-block;width:20px;height:3px;border-radius:99px;margin-right:5px;vertical-align:middle}
@@ -1581,6 +1596,26 @@ function dashboardCurrentPayload(){
 function dashboardPayloadDetails(payload){
   return Array.isArray(payload&&payload.dramas_detail)?payload.dramas_detail:[];
 }
+function dashboardThemeViewMap(payload){
+  const map=new Map();
+  for(const row of dashboardPayloadDetails(payload)){
+    const labels=themeDisplayList(row);
+    const views=dramaViewsOf(row);
+    if(!labels.length||!(views>0))continue;
+    const account=accountOf(row);
+    for(const label of labels){
+      const name=String(label||"").trim();
+      if(!name)continue;
+      const key=name.toLowerCase();
+      const item=map.get(key)||{name,views:0,dramas:0,accounts:new Set()};
+      item.views+=views;
+      item.dramas+=1;
+      if(account)item.accounts.add(account);
+      map.set(key,item);
+    }
+  }
+  return map;
+}
 function dashboardComparablePayloads(){
   const payloads=[...dashboardHistoryPayloads];
   const current=dashboardCurrentPayload();
@@ -1602,6 +1637,38 @@ function dashboardBaselinePayload(payloads,currentMs,days){
   if(!candidates.length)return null;
   const older=candidates.filter(payload=>(dashboardPayloadTime(payload)||0)<=target);
   return older.length?older[older.length-1]:candidates[0];
+}
+function dashboardThemeBaselinePayload(payloads,currentMs,days){
+  const target=currentMs-Math.max(1,days)*86400000;
+  const candidates=payloads.filter(payload=>{
+    const ms=dashboardPayloadTime(payload);
+    return ms&&ms<currentMs-60000&&dashboardThemeViewMap(payload).size;
+  });
+  if(!candidates.length)return null;
+  const older=candidates.filter(payload=>(dashboardPayloadTime(payload)||0)<=target);
+  return older.length?older[older.length-1]:candidates[0];
+}
+function dashboardThemeGrowthItems(days,payloads,currentPayload,limit=5){
+  const currentMs=dashboardPayloadTime(currentPayload)||currentReportMs();
+  const baseline=dashboardThemeBaselinePayload(payloads,currentMs,days);
+  const currentMap=dashboardThemeViewMap(currentPayload);
+  if(!baseline||!currentMap.size)return [];
+  const beforeMap=dashboardThemeViewMap(baseline);
+  return Array.from(currentMap.values()).map(item=>{
+    const before=beforeMap.get(String(item.name||"").toLowerCase());
+    const beforeViews=before?Number(before.views||0):0;
+    const views=Number(item.views||0);
+    return {
+      name:item.name,
+      views,
+      beforeViews,
+      diff:Math.max(0,views-beforeViews),
+      dramas:item.dramas,
+      accounts:item.accounts.size
+    };
+  }).filter(item=>item.diff>0)
+    .sort((a,b)=>b.diff-a.diff||b.views-a.views||b.dramas-a.dramas)
+    .slice(0,limit);
 }
 function dashboardDramaDisplayTitle(row){
   const cn=String(chineseTitleOf(row)||"").trim();
@@ -1891,10 +1958,24 @@ function dashboardAreaSvg(values,labels,color){
   const xLabels=labels.map((label,i)=>i===0||i===labels.length-1?`<text x="${p+(labels.length<=1?0:(w-p*2)*i/(labels.length-1))}" y="${h-5}" text-anchor="middle" font-size="10" fill="#8A91A3">${esc(label)}</text>`:"").join("");
   return `<svg class="dash-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="area${color.replace("#","")}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".9"/><stop offset="1" stop-color="${color}" stop-opacity=".18"/></linearGradient></defs><path d="${path} L ${w-p} ${h-p} L ${p} ${h-p} Z" fill="url(#area${color.replace("#","")})"/><path d="${path}" fill="none" stroke="${color}" stroke-width="2.4"/>${xLabels}</svg>`;
 }
+function dashboardThemeGrowthPanelHtml(items,label){
+  const list=(items||[]).filter(item=>item&&Number(item.diff)>0).slice(0,5);
+  if(!list.length)return `<div class="dashboard-loading">暂无${esc(label)}题材增长数据</div>`;
+  const max=Math.max(1,...list.map(item=>Number(item.diff||0)));
+  const rows=list.map((item,i)=>{
+    const value=Number(item.diff||0);
+    const pct=Math.max(5,Math.min(100,value/max*100));
+    const cls=i===0?" is-top":(i===1?" is-second":"");
+    const delay=i*34;
+    const meta=`${fmtPlay(item.beforeViews)}→${fmtPlay(item.views)} · ${fmt(item.dramas)}部短剧 · ${fmt(item.accounts)}个账号`;
+    return `<div class="theme-growth-row${cls}" role="listitem" title="${esc(item.name+" "+label+"增长 "+fmtPlay(value))}" style="animation-delay:${delay}ms"><div class="theme-growth-index">${i+1}</div><div class="theme-growth-body"><div class="theme-growth-head"><div class="theme-growth-name">${esc(item.name||"题材")}</div><div class="theme-growth-delta">+${esc(fmtPlay(value))}</div></div><div class="theme-growth-track"><div class="theme-growth-fill" style="width:${pct.toFixed(2)}%;animation-delay:${delay+70}ms"></div></div><div class="theme-growth-meta">${esc(meta)}</div></div></div>`;
+  }).join("");
+  return `<div class="theme-growth-list" role="list" aria-label="${esc(label)}题材播放增长">${rows}</div>`;
+}
 function dashboardDonutHtml(items,totalViews,coreLabel="播放<br>占比",fallbackLabel="账号"){
   const colors=["#5546FF","#1F2733","#7C72FF","#8A91A3","#D3D7E0"];
   const list=(items||[]).filter(item=>item&&Number(item.views)>0);
-  const visible=list.slice(0,4);
+  const visible=list.slice(0,5);
   const total=visible.reduce((sum,item)=>sum+Number(item.views||0),0)||totalViews||1;
   let deg=0;
   const stops=visible.length?visible.map((item,i)=>{const start=deg;deg+=Number(item.views||0)/total*360;return `${colors[i%colors.length]} ${start}deg ${deg}deg`;}).join(","):"#E6E8EE 0deg 360deg";
@@ -1913,8 +1994,6 @@ function renderDashboard(){
   const currentPayload=dashboardCurrentPayload();
   const snaps=dashboardSnapshots();
   const current=snaps[snaps.length-1]||dashboardSnapshotFromPayload({generated_at:currentReportGeneratedAt,summary:rows,dramas_detail:dramaRows});
-  const previous=snaps.length>1?snaps[snaps.length-2]:null;
-  const labels=snaps.map(s=>reportTimeLabel(s.generated_at).slice(5,10)||"本期");
   const comparablePayloads=dashboardComparablePayloads();
   const weeklyDramaGrowth=dashboardWeeklyDramaGrowth(comparablePayloads,currentPayload,7);
   const topAccountGrowth=dashboardTopAccountDramaGrowth(comparablePayloads,currentPayload,7);
@@ -1926,6 +2005,8 @@ function renderDashboard(){
   const grow3=dashboardDramaGrowthItem(3,comparablePayloads,currentPayload);
   const grow1=dashboardDramaGrowthItem(1,comparablePayloads,currentPayload);
   const monthGrowthItems=dashboardMonthlyGrowthItems(30,comparablePayloads,currentPayload,10);
+  const monthThemeGrowth=dashboardThemeGrowthItems(30,comparablePayloads,currentPayload,5);
+  const weekThemeGrowth=dashboardThemeGrowthItems(7,comparablePayloads,currentPayload,5);
   const topThemes=current.topThemes||[];
   const themeBase=topThemes[0]?topThemes[0].views:1;
   const themeProgress=topThemes.slice(0,5).map((item,i)=>{
@@ -1942,8 +2023,8 @@ function renderDashboard(){
       ${dashboardDramaCardHtml("近1天涨幅",grow1,{light:true,icon:"1"})}
       <div class="dash-panel dash-main"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">对比历史新增播放 · 全账号按涨幅排序</div></div><div class="dash-panel-meta">口径：Top 10 · 近30天 · 新增播放</div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems)}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
-      <div class="dash-panel dash-area"><div class="dash-panel-title">近10次短剧数量趋势</div>${dashboardAreaSvg(snaps.map(s=>s.dramaCount),labels,"#5546FF")}</div>
-      <div class="dash-panel dash-area"><div class="dash-panel-title">近10次单剧均观看趋势</div>${dashboardAreaSvg(snaps.map(s=>s.avgDramaViews),labels,"#7C72FF")}</div>
+      <div class="dash-panel dash-area"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本月题材播放增长</div><div class="dash-panel-sub">按题材汇总当前播放量 - 历史播放量</div></div><div class="dash-panel-meta">Top 5</div></div>${dashboardThemeGrowthPanelHtml(monthThemeGrowth,"本月")}</div>
+      <div class="dash-panel dash-area"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本周题材播放增长</div><div class="dash-panel-sub">近7天可对比历史 · 总播放增长</div></div><div class="dash-panel-meta">Top 5</div></div>${dashboardThemeGrowthPanelHtml(weekThemeGrowth,"本周")}</div>
       <div class="dash-panel dash-bars"><div class="dash-panel-title">全账号热门题材</div><div class="dash-theme-list">${themeProgress||'<div class="dashboard-loading">暂无题材数据</div>'}</div></div>
       <div class="dash-side">
         <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">监控账号：${fmt(current.accountCount)}</div><div class="dash-stat-sub">账号汇总记录</div></div></div>
