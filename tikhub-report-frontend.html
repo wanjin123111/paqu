@@ -207,6 +207,9 @@
   .dash-kpi.drama .dash-kpi-label,.dash-kpi.drama .dash-kpi-value,.dash-kpi.drama .dash-kpi-sub{position:relative;z-index:1}
   .dash-kpi.drama .dash-kpi-value{font-size:18px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dash-kpi.drama .dash-kpi-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dash-growth-line{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%}
+  .dash-growth-arrow,.dash-growth-value{color:#EF4444;font-weight:800}
+  .dash-growth-arrow{font-size:14px;line-height:1;transform:translateY(-1px)}
   .dash-main{grid-column:1 / span 4;min-height:160px;padding:11px}
   .dash-donut{grid-column:5;grid-row:1 / span 2;padding:14px 12px}
   .dash-area,.dash-bars{min-height:188px;padding:11px}
@@ -1616,8 +1619,14 @@ function dashboardDramaCardHtml(label,item,opts={}){
   const row=item&&item.row;
   const title=row?dashboardDramaDisplayTitle(row):"暂无数据";
   const sub=item&&item.sub?item.sub:"暂无可对比历史";
+  let subHtml=esc(sub);
+  if(item&&Number(item.diff)>0){
+    const prefix="+"+fmtPlay(item.diff);
+    const rest=String(sub).startsWith(prefix)?String(sub).slice(prefix.length):" · "+sub;
+    subHtml=`<span class="dash-growth-line"><span class="dash-growth-arrow">↑</span><span class="dash-growth-value">${esc(prefix)}</span><span>${esc(rest)}</span></span>`;
+  }
   const cls="dash-panel dash-kpi drama"+(opts.light?" light":"");
-  return `<div class="${cls}"><div class="dash-kpi-label">${esc(label)}</div><div class="dash-kpi-value" title="${esc(title)}">${esc(title)}</div><div class="dash-kpi-sub" title="${esc(sub)}">${esc(sub)}</div><div class="dash-kpi-icon">${esc(opts.icon||"")}</div></div>`;
+  return `<div class="${cls}"><div class="dash-kpi-label">${esc(label)}</div><div class="dash-kpi-value" title="${esc(title)}">${esc(title)}</div><div class="dash-kpi-sub" title="${esc(sub)}">${subHtml}</div><div class="dash-kpi-icon">${esc(opts.icon||"")}</div></div>`;
 }
 function dashboardChartPoints(values,w,h,pad,min,max){
   const span=Math.max(1,max-min);
