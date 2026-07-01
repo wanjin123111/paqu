@@ -1595,10 +1595,11 @@ function dashboardAreaSvg(values,labels,color){
 function dashboardDonutHtml(items,totalViews,coreLabel="播放<br>占比",fallbackLabel="账号"){
   const colors=["#5546FF","#1F2733","#7C72FF","#8A91A3","#D3D7E0"];
   const list=(items||[]).filter(item=>item&&Number(item.views)>0);
-  const total=list.reduce((sum,item)=>sum+Number(item.views||0),0)||totalViews||1;
+  const visible=list.slice(0,4);
+  const total=visible.reduce((sum,item)=>sum+Number(item.views||0),0)||totalViews||1;
   let deg=0;
-  const stops=list.length?list.map((item,i)=>{const start=deg;deg+=Number(item.views||0)/total*360;return `${colors[i%colors.length]} ${start}deg ${deg}deg`;}).join(","):"#E6E8EE 0deg 360deg";
-  const legend=list.slice(0,4).map((item,i)=>`<span><i style="background:${colors[i%colors.length]}"></i><b>${Math.round(Number(item.views||0)/total*100)}%</b> ${esc(item.name||item.account||fallbackLabel)}</span>`).join("");
+  const stops=visible.length?visible.map((item,i)=>{const start=deg;deg+=Number(item.views||0)/total*360;return `${colors[i%colors.length]} ${start}deg ${deg}deg`;}).join(","):"#E6E8EE 0deg 360deg";
+  const legend=visible.map((item,i)=>`<span><i style="background:${colors[i%colors.length]}"></i><b>${Math.round(Number(item.views||0)/total*100)}%</b> ${esc(item.name||item.account||fallbackLabel)}</span>`).join("");
   return `<div class="dash-donut-visual" style="background:conic-gradient(${stops})"><div class="dash-donut-core">${coreLabel}</div></div><div class="dash-donut-legend">${legend||"<span>暂无数据</span>"}</div>`;
 }
 function renderDashboard(){
