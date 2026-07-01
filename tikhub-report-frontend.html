@@ -1722,8 +1722,23 @@ function dashboardDramaGrowthLineSvg(primary,secondary,labels){
   const dotsA=a.map((pt,i)=>`<circle cx="${pt[0]}" cy="${pt[1]}" r="${i===a.length-1?4:2.4}" fill="#5546FF"/>`).join("");
   const dotsB=b.map((pt,i)=>`<circle cx="${pt[0]}" cy="${pt[1]}" r="${i===b.length-1?4:2.4}" fill="#1F2733"/>`).join("");
   const lastA=a[a.length-1]||[w-p,h-p], lastB=b[b.length-1]||[w-p,h-p];
-  const labelA=primary.length?`<text x="${w-p-4}" y="${Math.max(p+10,lastA[1]-7)}" text-anchor="end" font-size="10" font-weight="700" fill="#5546FF">${esc(fmtPlay(primary[primary.length-1]||0))}</text>`:"";
-  const labelB=secondary.length?`<text x="${w-p-4}" y="${Math.min(h-p-6,lastB[1]+13)}" text-anchor="end" font-size="10" font-weight="700" fill="#1F2733">${esc(fmtPlay(secondary[secondary.length-1]||0))}</text>`:"";
+  const clamp=(value,minValue,maxValue)=>Math.max(minValue,Math.min(maxValue,value));
+  const yMin=p+10,yMax=h-p-8,labelGap=18,labelX=w-8;
+  let yA=clamp(lastA[1]-10,yMin,yMax), yB=clamp(lastB[1]+14,yMin,yMax);
+  if(Math.abs(yA-yB)<labelGap){
+    if(lastA[1]<=lastB[1]){
+      yA=clamp(Math.min(yA,yB)-labelGap/2,yMin,yMax);
+      yB=clamp(yA+labelGap,yMin,yMax);
+      if(yB-yA<labelGap)yA=clamp(yB-labelGap,yMin,yMax);
+    }else{
+      yB=clamp(Math.min(yA,yB)-labelGap/2,yMin,yMax);
+      yA=clamp(yB+labelGap,yMin,yMax);
+      if(yA-yB<labelGap)yB=clamp(yA-labelGap,yMin,yMax);
+    }
+  }
+  const textHalo='paint-order="stroke" stroke="#fff" stroke-width="4" stroke-linejoin="round"';
+  const labelA=primary.length?`<text x="${labelX}" y="${yA}" text-anchor="end" font-size="10" font-weight="700" ${textHalo} fill="#5546FF">${esc(fmtPlay(primary[primary.length-1]||0))}</text>`:"";
+  const labelB=secondary.length?`<text x="${labelX}" y="${yB}" text-anchor="end" font-size="10" font-weight="700" ${textHalo} fill="#1F2733">${esc(fmtPlay(secondary[secondary.length-1]||0))}</text>`:"";
   return `<svg class="dash-chart tall" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}${guides}<path d="${pathA}" fill="none" stroke="#5546FF" stroke-width="3"/><path d="${pathB}" fill="none" stroke="#1F2733" stroke-width="2.4"/>${dotsA}${dotsB}${labelA}${labelB}${xLabels}</svg>`;
 }
 function dashboardAreaSvg(values,labels,color){
