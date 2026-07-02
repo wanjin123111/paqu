@@ -188,6 +188,8 @@
   .description-text::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:999px}
   .theme-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start}
   .theme-tag{display:inline-flex;align-items:center;max-width:100%;padding:3px 7px;border:1px solid #dbe4f0;border-radius:999px;background:#f8fafc;color:#334155;font-size:11.5px;line-height:1.2;white-space:normal;word-break:break-word}
+  .daily-growth{display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;color:#EF4444;font-family:var(--display);font-weight:800;white-space:nowrap}
+  .daily-growth-arrow{font-size:14px;line-height:1;transform:translateY(-1px)}
   td.detail-id{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);word-break:break-all}
   td.cell-muted{color:var(--ink-faint)}
   .loading-inline{display:inline-flex;align-items:center;gap:6px;color:var(--ink-faint)}
@@ -386,16 +388,17 @@
   body.public-mode #resultCard.detail-view th,
   body.public-mode #resultCard.detail-view td{overflow-wrap:anywhere}
   body.public-mode #resultCard.detail-view td.num{white-space:normal}
-  body.public-mode #resultCard.detail-view th:nth-child(1),body.public-mode #resultCard.detail-view td:nth-child(1){width:10%}
-  body.public-mode #resultCard.detail-view th:nth-child(2),body.public-mode #resultCard.detail-view td:nth-child(2){width:12.5%}
-  body.public-mode #resultCard.detail-view th:nth-child(3),body.public-mode #resultCard.detail-view td:nth-child(3){width:12.5%}
-  body.public-mode #resultCard.detail-view th:nth-child(4),body.public-mode #resultCard.detail-view td:nth-child(4){width:8.5%}
-  body.public-mode #resultCard.detail-view th:nth-child(5),body.public-mode #resultCard.detail-view td:nth-child(5){width:3.8%}
-  body.public-mode #resultCard.detail-view th:nth-child(6),body.public-mode #resultCard.detail-view td:nth-child(6){width:5.7%}
-  body.public-mode #resultCard.detail-view th:nth-child(7),body.public-mode #resultCard.detail-view td:nth-child(7){width:7.5%}
-  body.public-mode #resultCard.detail-view th:nth-child(8),body.public-mode #resultCard.detail-view td:nth-child(8){width:10.5%}
-  body.public-mode #resultCard.detail-view th:nth-child(9),body.public-mode #resultCard.detail-view td:nth-child(9){width:22%}
-  body.public-mode #resultCard.detail-view th:nth-child(10),body.public-mode #resultCard.detail-view td:nth-child(10){width:7%}
+  body.public-mode #resultCard.detail-view th:nth-child(1),body.public-mode #resultCard.detail-view td:nth-child(1){width:9.5%}
+  body.public-mode #resultCard.detail-view th:nth-child(2),body.public-mode #resultCard.detail-view td:nth-child(2){width:12%}
+  body.public-mode #resultCard.detail-view th:nth-child(3),body.public-mode #resultCard.detail-view td:nth-child(3){width:12%}
+  body.public-mode #resultCard.detail-view th:nth-child(4),body.public-mode #resultCard.detail-view td:nth-child(4){width:8%}
+  body.public-mode #resultCard.detail-view th:nth-child(5),body.public-mode #resultCard.detail-view td:nth-child(5){width:3.6%}
+  body.public-mode #resultCard.detail-view th:nth-child(6),body.public-mode #resultCard.detail-view td:nth-child(6){width:5.4%}
+  body.public-mode #resultCard.detail-view th:nth-child(7),body.public-mode #resultCard.detail-view td:nth-child(7){width:6.2%}
+  body.public-mode #resultCard.detail-view th:nth-child(8),body.public-mode #resultCard.detail-view td:nth-child(8){width:7%}
+  body.public-mode #resultCard.detail-view th:nth-child(9),body.public-mode #resultCard.detail-view td:nth-child(9){width:9.5%}
+  body.public-mode #resultCard.detail-view th:nth-child(10),body.public-mode #resultCard.detail-view td:nth-child(10){width:20.5%}
+  body.public-mode #resultCard.detail-view th:nth-child(11),body.public-mode #resultCard.detail-view td:nth-child(11){width:6.3%}
 
   .foot-note{font-size:12px;color:var(--ink-faint);line-height:1.6;padding:0 4px}
 
@@ -768,7 +771,7 @@ const DRAMA_LINK_FIELDS=["短剧链接","Drama Link / 短剧链接","Drama URL /
 
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
-const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","时长","题材","简介","短剧链接"];
+const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","日增播放","时长","题材","简介","短剧链接"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
 
@@ -1546,6 +1549,29 @@ function dramaGrowthOf(row){
   const before=growthFilterState.baselineMap.has(key)?growthFilterState.baselineMap.get(key):0;
   return dramaViewsOf(row)-before;
 }
+function detailDailyGrowthOf(row){
+  const currentPayload=dashboardCurrentPayload();
+  const payloads=dashboardComparablePayloads();
+  const currentMs=dashboardPayloadTime(currentPayload)||currentReportMs();
+  const baseline=dashboardBaselinePayload(payloads,currentMs,1);
+  if(!baseline)return null;
+  const keys=dashboardDramaGrowthKeys(row);
+  if(!keys.length)return null;
+  const baseMap=new Map();
+  for(const baseRow of dashboardPayloadDetails(baseline)){
+    for(const key of dashboardDramaGrowthKeys(baseRow)){
+      baseMap.set(key,Math.max(baseMap.get(key)||0,dramaViewsOf(baseRow)));
+    }
+  }
+  let before=0;
+  for(const key of keys){
+    if(baseMap.has(key)){
+      before=baseMap.get(key)||0;
+      break;
+    }
+  }
+  return Math.max(0,dramaViewsOf(row)-before);
+}
 function filteredDetailRows(list){
   if(!growthFilterState.enabled||!growthFilterState.baselineMap)return list;
   return list.filter(row=>dramaGrowthOf(row)>=growthFilterState.minValue);
@@ -2270,6 +2296,7 @@ async function refreshDashboardHistory(opts){
       dashboardHistoryLoading=false;
       dashboardHistoryReady=true;
       renderDashboard();
+      renderResultTable();
     }
     return [];
   }
@@ -2286,7 +2313,10 @@ async function refreshDashboardHistory(opts){
   if(payloads.length)dashboardCacheSet(DASHBOARD_HISTORY_CACHE_KEY,payloads);
   dashboardHistoryLoading=false;
   dashboardHistoryReady=true;
-  if(payloads.length||!quiet||opts.initial)renderDashboard();
+  if(payloads.length||!quiet||opts.initial){
+    renderDashboard();
+    renderResultTable();
+  }
   return payloads;
 }
 function updateSortControls(){
@@ -2373,6 +2403,28 @@ function appendDetailCell(tr,c,row,index){
   else if(c==="发布时间"){td.className="num";setOptionalCell(td,dramaPublishTimeOf(row));}
   else if(c==="集数"){td.className="num";td.textContent=fmt(dramaEpisodesOf(row));}
   else if(c==="观看"){td.className="num";td.textContent=fmtPlay(dramaViewsOf(row));}
+  else if(c==="日增播放"){
+    td.className="num";
+    const growth=detailDailyGrowthOf(row);
+    if(growth==null){
+      if(dashboardHistoryLoading)setLoadingCell(td,"同步中…");
+      else setMutedCell(td,"—");
+    }else if(growth>0){
+      const wrap=document.createElement("span");
+      wrap.className="daily-growth";
+      wrap.title="对比上一条历史报表的播放增量";
+      const arrow=document.createElement("span");
+      arrow.className="daily-growth-arrow";
+      arrow.textContent="↑";
+      const value=document.createElement("span");
+      value.textContent="+"+fmtPlay(growth);
+      wrap.appendChild(arrow);
+      wrap.appendChild(value);
+      td.appendChild(wrap);
+    }else{
+      setMutedCell(td,"0");
+    }
+  }
   else if(c==="时长"){
     const seconds=toInt(valueOf(row,["Duration Seconds / 总时长(秒)"],0));
     const minutes=valueOf(row,["Duration Minutes / 总时长(分钟)"],"");
