@@ -51,25 +51,36 @@
   .key-pill.set .key-dot{background:var(--ok)}
 
   .wrap{max-width:1180px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:16px}
-  .dashboard-page,.report-page{display:block}
+  .dashboard-page,.monitor-page,.report-page{display:block}
   .page-switch{display:none}
   body.public-mode .wrap{max-width:none;padding:0;gap:0}
-  body.public-mode.dashboard-view{overflow:hidden}
+  body.public-mode.dashboard-view,
+  body.public-mode.monitor-view{overflow:hidden}
   body.public-mode.report-view{overflow:auto}
-  body.public-mode.dashboard-view .topbar{display:none}
+  body.public-mode.dashboard-view .topbar,
+  body.public-mode.monitor-view .topbar{display:none}
   body.public-mode .dashboard-page[hidden],
+  body.public-mode .monitor-page[hidden],
   body.public-mode .report-page[hidden]{display:none!important}
+  body.public-mode.dashboard-view .monitor-page,
   body.public-mode.dashboard-view .report-page,
-  body.public-mode.report-view .dashboard-page{display:none!important}
-  body.public-mode .dashboard-page{width:100vw;height:100vh;min-height:100vh;display:flex;align-items:stretch;justify-content:stretch;padding:0;overflow:hidden}
+  body.public-mode.monitor-view .dashboard-page,
+  body.public-mode.monitor-view .report-page,
+  body.public-mode.report-view .dashboard-page,
+  body.public-mode.report-view .monitor-page{display:none!important}
+  body.public-mode .dashboard-page,
+  body.public-mode .monitor-page{width:100vw;height:100vh;min-height:100vh;display:flex;align-items:stretch;justify-content:stretch;padding:0;overflow:hidden}
   body.public-mode .report-page{min-height:100vh;padding:18px 16px 26px}
   body.public-mode .report-page .foot-note{width:calc(100vw - 32px);max-width:none;margin:14px auto 0}
   body.public-mode .page-switch{display:flex;position:fixed;right:28px;z-index:60;gap:10px}
-  body.public-mode .dashboard-page-switch{top:34px}
+  body.public-mode .dashboard-page-switch,
+  body.public-mode .monitor-page-switch{top:34px}
   body.public-mode .report-page-switch{bottom:24px}
   body.public-mode .page-switch .mini-btn{box-shadow:0 10px 24px rgba(15,23,42,.14)}
-  body.public-mode .dashboard-next-btn{background:var(--accent);color:#fff;border-color:var(--accent)}
-  body.public-mode .dashboard-next-btn:hover{background:var(--accent-press);color:#fff;border-color:var(--accent-press);text-decoration:none}
+  body.public-mode .dashboard-next-btn,
+  body.public-mode .monitor-next-btn{background:var(--accent);color:#fff;border-color:var(--accent)}
+  body.public-mode .dashboard-next-btn:hover,
+  body.public-mode .monitor-next-btn:hover{background:var(--accent-press);color:#fff;border-color:var(--accent-press);text-decoration:none}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
   .card-head{display:flex;align-items:center;justify-content:space-between;padding:15px 18px 12px;border-bottom:1px solid var(--line)}
   .card-head h2{margin:0;font-family:var(--display);font-size:13px;font-weight:600;letter-spacing:.05em;color:var(--ink-soft)}
@@ -294,33 +305,45 @@
   .dash-stat-icon{font-size:28px;opacity:.95}
   .dash-stat-title{font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dash-stat-sub{font-size:12px;color:rgba(255,255,255,.8);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dash-monitor{grid-column:5;grid-row:3;display:flex;flex-direction:column;min-height:0;padding:12px;background:linear-gradient(180deg,#fff 0%,#F8F9FF 100%)}
-  .dash-monitor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}
-  .dash-monitor-title{font-weight:800;font-size:15px;color:var(--ink)}
-  .dash-monitor-sub{font-size:11.5px;color:var(--ink-faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dash-monitor-count{font-family:var(--mono);font-size:11px;font-weight:800;color:var(--accent);background:var(--accent-soft);border:1px solid #d9d5ff;border-radius:6px;padding:2px 7px;white-space:nowrap}
-  .dash-monitor-summary{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
-  .dash-monitor-metric{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 8px;min-width:0}
-  .dash-monitor-metric span{display:block;font-size:10.5px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dash-monitor-metric b{display:block;margin-top:2px;font-family:var(--display);font-size:14px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dash-monitor-list{flex:1;min-height:0;display:grid;align-content:start;gap:7px;overflow-y:auto;overscroll-behavior:contain;padding-right:4px;margin-right:-4px}
-  .dash-monitor-list::-webkit-scrollbar{width:5px}
-  .dash-monitor-list::-webkit-scrollbar-thumb{background:rgba(85,70,255,.35);border-radius:99px}
-  .dash-monitor-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:8px;border:1px solid #E6E8F0;background:#fff;border-radius:8px;padding:6px}
-  .dash-monitor-avatar{position:relative;width:34px;height:34px;border-radius:50%;background:#F0EEFF;color:var(--accent);display:grid;place-items:center;overflow:hidden;font:800 10.5px var(--mono);border:1px solid #E0DEFA}
-  .dash-monitor-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#fff}
-  .dash-monitor-main{min-width:0}
-  .dash-monitor-name{font-size:11.8px;font-weight:800;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dash-monitor-id{margin-top:1px;font-family:var(--mono);font-size:10.5px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .dash-monitor-fans{text-align:right;min-width:54px}
-  .dash-monitor-fans span{display:block;font-size:10px;color:var(--ink-faint)}
-  .dash-monitor-fans b{display:block;font-family:var(--mono);font-size:11.5px;color:var(--ink);line-height:1.1}
-  .dash-monitor-bar{grid-column:2 / 4;height:4px;background:#EEF0F5;border-radius:99px;overflow:hidden}
-  .dash-monitor-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),#7C72FF)}
-  .dash-monitor-home{grid-column:1 / 2;grid-row:2 / 3;justify-self:center;font-family:var(--mono);font-size:10px;color:var(--accent)}
+  #monitorDashboardCard{display:none}
+  .monitor-dashboard-card{position:relative;overflow:hidden;border-color:var(--line);border-radius:18px;background:var(--paper);box-shadow:var(--shadow)}
+  .monitor-dashboard-card::after{content:"";position:absolute;left:0;right:0;bottom:0;height:6px;background:linear-gradient(90deg,#1F2733,var(--accent),#7C72FF)}
+  .monitor-dashboard-inner{height:100%;display:flex;flex-direction:column;padding:34px 40px 36px}
+  .monitor-dashboard-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;padding-right:260px}
+  .monitor-dashboard-title{display:flex;align-items:center;gap:12px;margin:0;font-family:var(--display),'Microsoft YaHei',sans-serif;font-size:25px;line-height:1.1;font-weight:800;color:var(--ink);letter-spacing:0}
+  .monitor-dashboard-title::before{content:"";width:8px;height:31px;background:var(--accent);border-radius:2px;box-shadow:0 0 0 1px rgba(85,70,255,.14)}
+  .monitor-dashboard-stamp{font-size:12px;color:var(--ink-faint);font-family:var(--mono);white-space:nowrap;margin-top:8px}
+  .monitor-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+  .monitor-summary-box{min-width:0;border:1px solid var(--line);background:#fff;padding:12px 14px;min-height:74px}
+  .monitor-summary-box.is-dark{background:linear-gradient(135deg,#1F2733,#2A2E3A);border-color:#1F2733;color:#fff}
+  .monitor-summary-label{font-size:12px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .monitor-summary-box.is-dark .monitor-summary-label{color:rgba(255,255,255,.72)}
+  .monitor-summary-value{margin-top:7px;font-family:var(--display);font-size:22px;font-weight:800;line-height:1;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .monitor-summary-box.is-dark .monitor-summary-value{color:#fff}
+  .monitor-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:minmax(116px,1fr);gap:10px;overflow-y:auto;overscroll-behavior:contain;padding-right:8px;margin-right:-8px}
+  .monitor-grid::-webkit-scrollbar{width:6px}
+  .monitor-grid::-webkit-scrollbar-thumb{background:rgba(85,70,255,.35);border-radius:99px}
+  .monitor-grid::-webkit-scrollbar-track{background:rgba(31,39,51,.07);border-radius:99px}
+  .monitor-account-row{min-width:0;display:grid;grid-template-columns:54px minmax(0,1fr) auto;grid-template-rows:auto auto;align-items:center;gap:10px 12px;border:1px solid #E0E4EE;background:#fff;padding:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.78)}
+  .monitor-account-avatar{position:relative;width:54px;height:54px;border-radius:50%;background:#F0EEFF;color:var(--accent);display:grid;place-items:center;overflow:hidden;font:800 13px var(--mono);border:1px solid #DCD9FA}
+  .monitor-account-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#fff}
+  .monitor-account-main{min-width:0}
+  .monitor-account-name{font-size:14px;font-weight:800;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .monitor-account-id{margin-top:2px;font-family:var(--mono);font-size:11.5px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .monitor-account-drama{grid-column:2 / 4;font-size:11.5px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .monitor-account-fans{text-align:right;min-width:74px}
+  .monitor-account-fans span{display:block;font-size:11px;color:var(--ink-faint)}
+  .monitor-account-fans b{display:block;margin-top:2px;font-family:var(--display);font-size:16px;color:var(--ink);line-height:1}
+  .monitor-account-home{display:inline-flex;align-items:center;justify-content:center;height:28px;margin-top:7px;padding:0 10px;border:1px solid var(--line-strong);border-radius:7px;background:#fff;color:var(--accent);font-size:12px}
+  .monitor-account-home:hover{border-color:var(--accent);background:var(--accent-soft);text-decoration:none}
+  .monitor-account-bar{grid-column:1 / 4;height:6px;background:#EEF0F5;border-radius:99px;overflow:hidden}
+  .monitor-account-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),#7C72FF)}
+  .monitor-empty{padding:32px;color:var(--ink-faint);border:1px dashed var(--line-strong);background:#fff}
   .dashboard-loading{padding:24px;color:var(--ink-faint)}
   body.public-mode #dashboardCard{width:100vw;height:100vh;max-width:none;margin:0;transform:none;border:0;border-radius:0;box-shadow:none}
+  body.public-mode #monitorDashboardCard{width:100vw;height:100vh;max-width:none;margin:0;transform:none;border:0;border-radius:0;box-shadow:none}
   body.public-mode #dashboardCard::after{height:8px}
+  body.public-mode #monitorDashboardCard::after{height:8px}
   body.public-mode #dashboardCard .dashboard-inner{height:100%;display:flex;flex-direction:column;padding:34px 40px 36px}
   body.public-mode #dashboardCard .dashboard-head{padding-right:145px}
   body.public-mode #dashboardCard .dashboard-grid{flex:1;min-height:0;grid-template-rows:minmax(118px,.72fr) minmax(230px,1.55fr) minmax(230px,1.55fr)}
@@ -334,10 +357,10 @@
   body.public-mode #dashboardCard .dash-progress-label{font-size:11.5px;margin-bottom:2px}
   body.public-mode #dashboardCard .dash-progress-meta{font-size:10.5px}
   body.public-mode #dashboardCard .dash-progress-track{height:6px}
-  @media (max-width:620px){body.public-mode.dashboard-view{overflow:auto}body.public-mode .dashboard-page{height:auto;min-height:100vh;overflow:visible}body.public-mode #dashboardCard{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-inner{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-grid{flex:none;grid-template-rows:auto;grid-auto-rows:auto}body.public-mode #dashboardCard .dash-chart{height:180px;flex:none}body.public-mode #dashboardCard .dash-chart.tall{height:190px}}
-  @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-monitor{grid-column:auto;grid-row:auto}.theme-growth-panel{grid-column:span 2}.dash-donut{grid-column:span 2}.dash-monitor{grid-column:span 2;min-height:330px}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}}
+  @media (max-width:620px){body.public-mode.dashboard-view,body.public-mode.monitor-view{overflow:auto}body.public-mode .dashboard-page,body.public-mode .monitor-page{height:auto;min-height:100vh;overflow:visible}body.public-mode #dashboardCard,body.public-mode #monitorDashboardCard{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-inner,body.public-mode #monitorDashboardCard .monitor-dashboard-inner{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-grid{flex:none;grid-template-rows:auto;grid-auto-rows:auto}body.public-mode #dashboardCard .dash-chart{height:180px;flex:none}body.public-mode #dashboardCard .dash-chart.tall{height:190px}}
+  @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-side{grid-column:auto;grid-row:auto}.theme-growth-panel{grid-column:span 2}.dash-donut{grid-column:span 2}.dash-side{grid-column:span 2}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}.monitor-dashboard-head{padding-right:0}.monitor-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.monitor-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(120px,auto)}}
   @media (max-width:620px){.dash-panel-heading{flex-direction:column;gap:6px}.dash-panel-meta{text-align:left;white-space:normal}.dash-panel-sub{white-space:normal}}
-  @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-monitor,.theme-growth-panel{grid-column:auto}.theme-growth-list{grid-template-columns:1fr}.theme-growth-card.is-top{grid-row:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}.dash-monitor{min-height:auto}.dash-monitor-list{max-height:none;overflow:visible}}
+  @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head,.monitor-dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-side,.theme-growth-panel{grid-column:auto}.theme-growth-list{grid-template-columns:1fr}.theme-growth-card.is-top{grid-row:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}.monitor-dashboard-inner{padding:18px 14px 24px}.monitor-dashboard-title{font-size:22px}.monitor-dashboard-stamp{white-space:normal}.monitor-summary-grid,.monitor-grid{grid-template-columns:1fr}.monitor-grid{overflow:visible;padding-right:0;margin-right:0}.monitor-account-row{grid-template-columns:50px minmax(0,1fr) auto}}
 
   body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin:0 auto;transform:none}
   body.public-mode #resultCard .card-body{padding:18px 22px 22px}
@@ -615,16 +638,26 @@ shortdramatime"></textarea>
       <div class="dashboard-loading">正在加载运营看板...</div>
     </div>
     <div class="page-switch dashboard-page-switch">
-      <button class="mini-btn dashboard-next-btn" id="dashboardNextBtn" type="button">下一页：报表</button>
+      <button class="mini-btn dashboard-next-btn" id="dashboardNextBtn" type="button">下一页：监控账号</button>
+    </div>
+  </section>
+
+  <section class="monitor-page" id="monitorPage" hidden>
+    <div class="card monitor-dashboard-card" id="monitorDashboardCard">
+      <div class="dashboard-loading">正在加载监控账号看板...</div>
+    </div>
+    <div class="page-switch monitor-page-switch">
+      <button class="mini-btn" id="monitorBackBtn" type="button">上一页：运营看板</button>
+      <button class="mini-btn monitor-next-btn" id="monitorNextBtn" type="button">下一页：报表</button>
     </div>
   </section>
 
   <section class="report-page" id="reportPage" hidden>
     <div class="page-switch report-page-switch">
-      <button class="mini-btn" id="dashboardBackBtn" type="button">上一页：监控看板</button>
+      <button class="mini-btn" id="dashboardBackBtn" type="button">上一页：监控账号</button>
     </div>
     <div class="card" id="resultCard">
-    <div class="card-head"><h2>报表</h2><div class="report-head-actions"><button class="mini-btn" id="reportBackTopBtn" type="button">返回监控看板</button></div></div>
+    <div class="card-head"><h2>报表</h2><div class="report-head-actions"><button class="mini-btn" id="reportBackTopBtn" type="button">返回监控账号</button></div></div>
     <div class="card-body">
       <div class="result-top">
         <div class="result-sum" id="resultSum"></div>
@@ -1166,11 +1199,15 @@ function clearResults(){
   resetDetailPage();
   currentReportPayload=null;
   const dashboardPage=$("dashboardPage");
+  const monitorPage=$("monitorPage");
   const reportPage=$("reportPage");
   const dashboard=$("dashboardCard");
+  const monitor=$("monitorDashboardCard");
   if(dashboardPage)dashboardPage.hidden=true;
+  if(monitorPage)monitorPage.hidden=true;
   if(reportPage)reportPage.hidden=true;
   if(dashboard){dashboard.style.display="none";dashboard.innerHTML='<div class="dashboard-loading">正在加载运营看板...</div>';}
+  if(monitor){monitor.style.display="none";monitor.innerHTML='<div class="dashboard-loading">正在加载监控账号看板...</div>';}
   $("resultCard").style.display="none";
   $("resultTable").querySelector("thead").innerHTML="";
   $("resultTable").querySelector("tbody").innerHTML="";
@@ -1181,13 +1218,16 @@ function clearResults(){
 }
 function setPublicPageView(view){
   if(!isPublicMode())return;
-  publicPageView=view==="report"?"report":"dashboard";
+  publicPageView=view==="report"?"report":(view==="monitor"?"monitor":"dashboard");
   const dashboardPage=$("dashboardPage");
+  const monitorPage=$("monitorPage");
   const reportPage=$("reportPage");
   const hasDashboard=!!(rows.length||dramaRows.length);
   document.body.classList.toggle("dashboard-view",publicPageView==="dashboard");
+  document.body.classList.toggle("monitor-view",publicPageView==="monitor");
   document.body.classList.toggle("report-view",publicPageView==="report");
   if(dashboardPage)dashboardPage.hidden=publicPageView!=="dashboard"||!hasDashboard;
+  if(monitorPage)monitorPage.hidden=publicPageView!=="monitor"||!hasDashboard;
   if(reportPage)reportPage.hidden=publicPageView!=="report";
   window.scrollTo({top:0,left:0,behavior:"auto"});
 }
@@ -2125,8 +2165,8 @@ function dashboardDonutHtml(items,totalViews,coreLabel="播放<br>占比",fallba
   const legend=visible.map((item,i)=>`<span><i style="background:${colors[i%colors.length]}"></i><b>${Math.round(Number(item.views||0)/total*100)}%</b> ${esc(item.name||item.account||fallbackLabel)}</span>`).join("");
   return `<div class="dash-donut-visual" style="background:conic-gradient(${stops})"><div class="dash-donut-core">${coreLabel}</div></div><div class="dash-donut-legend">${legend||"<span>暂无数据</span>"}</div>`;
 }
-function dashboardAccountMonitorHtml(current){
-  const items=monitoredAccountRows().map(row=>({
+function monitorAccountItems(){
+  return monitoredAccountRows().map(row=>({
     row,
     account:String(accountOf(row)||"").trim(),
     nick:nickOf(row)||accountOf(row),
@@ -2136,26 +2176,48 @@ function dashboardAccountMonitorHtml(current){
     href:linkOf(row),
     avatar:avatarOf(row),
   })).filter(item=>item.account).sort((a,b)=>b.followers-a.followers);
+}
+function renderMonitorDashboard(current){
+  const box=$("monitorDashboardCard");
+  const page=$("monitorPage");
+  if(!box)return;
+  if(!rows.length&&!dramaRows.length){
+    if(page)page.hidden=true;
+    box.style.display="none";
+    return;
+  }
+  if(!current){
+    const snaps=dashboardSnapshots();
+    current=snaps[snaps.length-1]||dashboardSnapshotFromPayload({generated_at:currentReportGeneratedAt,summary:rows,dramas_detail:dramaRows});
+  }
+  const items=monitorAccountItems();
   const totalFans=items.reduce((sum,item)=>sum+Number(item.followers||0),0);
   const totalViews=items.reduce((sum,item)=>sum+Number(item.views||0),0);
   const maxFans=Math.max(1,...items.map(item=>Number(item.followers||0)));
   const rowsHtml=items.map(item=>{
     const pct=Math.max(3,Math.min(100,Number(item.followers||0)/maxFans*100));
     const img=item.avatar?'<img src="'+esc(item.avatar)+'" alt="" loading="lazy" onerror="this.remove()">':"";
-    const title=item.topDrama?("最高短剧："+item.topDrama):"暂无最高短剧";
-    return `<div class="dash-monitor-row" title="${esc(item.nick+" · "+title)}">`+
-      `<div class="dash-monitor-avatar">${img}<span>${accountMonitorInitial(item.row)}</span></div>`+
-      `<a class="dash-monitor-home" href="${esc(item.href||("https://www.tiktok.com/@"+item.account))}" target="_blank" rel="noopener">主页</a>`+
-      `<div class="dash-monitor-main"><div class="dash-monitor-name">${esc(item.nick)}</div><div class="dash-monitor-id">@${esc(item.account)}</div></div>`+
-      `<div class="dash-monitor-fans"><span>粉丝</span><b>${accountMonitorFollowers(item.row)}</b></div>`+
-      `<div class="dash-monitor-bar" aria-hidden="true"><i style="width:${pct.toFixed(2)}%"></i></div>`+
+    const title=item.topDrama?("最高观看："+item.topDrama):"最高观看：暂无最高短剧";
+    return `<div class="monitor-account-row" title="${esc(item.nick+" · "+title)}">`+
+      `<div class="monitor-account-avatar">${img}<span>${accountMonitorInitial(item.row)}</span></div>`+
+      `<div class="monitor-account-main"><div class="monitor-account-name">${esc(item.nick)}</div><div class="monitor-account-id">@${esc(item.account)}</div><a class="monitor-account-home" href="${esc(item.href||("https://www.tiktok.com/@"+item.account))}" target="_blank" rel="noopener">主页</a></div>`+
+      `<div class="monitor-account-fans"><span>粉丝</span><b>${accountMonitorFollowers(item.row)}</b></div>`+
+      `<div class="monitor-account-drama">${esc(title)}</div>`+
+      `<div class="monitor-account-bar" aria-hidden="true"><i style="width:${pct.toFixed(2)}%"></i></div>`+
     `</div>`;
   }).join("");
-  return `<div class="dash-panel dash-monitor">`+
-    `<div class="dash-monitor-head"><div><div class="dash-monitor-title">当前监控账号</div><div class="dash-monitor-sub">账号池最新状态 · 按粉丝量排序</div></div><div class="dash-monitor-count">${fmt(items.length||current.accountCount||0)}个</div></div>`+
-    `<div class="dash-monitor-summary"><div class="dash-monitor-metric"><span>总粉丝</span><b>${fmtPlay(totalFans)}</b></div><div class="dash-monitor-metric"><span>累计观看</span><b>${fmtPlay(totalViews)}</b></div></div>`+
-    `<div class="dash-monitor-list">${rowsHtml||'<div class="dashboard-loading">暂无监控账号数据</div>'}</div>`+
-  `</div>`;
+  box.style.display="block";
+  box.innerHTML=`<div class="monitor-dashboard-inner">
+    <div class="monitor-dashboard-head"><h2 class="monitor-dashboard-title">当前监控账号看板</h2><div class="monitor-dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
+    <div class="monitor-summary-grid">
+      <div class="monitor-summary-box is-dark"><div class="monitor-summary-label">监控账号</div><div class="monitor-summary-value">${fmt(items.length||current.accountCount||0)}个</div></div>
+      <div class="monitor-summary-box"><div class="monitor-summary-label">总粉丝</div><div class="monitor-summary-value">${fmtPlay(totalFans)}</div></div>
+      <div class="monitor-summary-box"><div class="monitor-summary-label">累计观看</div><div class="monitor-summary-value">${fmtPlay(totalViews)}</div></div>
+      <div class="monitor-summary-box"><div class="monitor-summary-label">排序口径</div><div class="monitor-summary-value">粉丝量</div></div>
+    </div>
+    <div class="monitor-grid">${rowsHtml||'<div class="monitor-empty">暂无监控账号数据</div>'}</div>
+  </div>`;
+  if(!isPublicMode()&&page)page.hidden=false;
 }
 function renderDashboard(){
   const box=$("dashboardCard");
@@ -2172,6 +2234,7 @@ function renderDashboard(){
     }
     if(page)page.hidden=true;
     box.style.display="none";
+    renderMonitorDashboard();
     return;
   }
   const currentPayload=dashboardCurrentPayload();
@@ -2191,10 +2254,9 @@ function renderDashboard(){
   const monthThemeGrowth=dashboardThemeGrowthItems(30,comparablePayloads,currentPayload,12);
   const weekThemeGrowth=dashboardThemeGrowthItems(7,comparablePayloads,currentPayload,12);
   const topThemes=current.topThemes||[];
-  const accountMonitorHtml=dashboardAccountMonitorHtml(current);
   box.style.display="block";
   box.innerHTML=`<div class="dashboard-inner">
-    <div class="dashboard-head"><h2 class="dashboard-title">当前监控账号可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
+    <div class="dashboard-head"><h2 class="dashboard-title">短剧运营数据分析可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
     <div class="dashboard-grid">
       ${dashboardDramaCardHtml("全账号最新热剧",latestHot,{icon:"↗"})}
       ${dashboardDramaCardHtml("近7天涨幅",grow7,{light:true,icon:"7"})}
@@ -2204,25 +2266,41 @@ function renderDashboard(){
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area theme-growth-panel"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本月题材播放增长</div><div class="dash-panel-sub">按题材汇总当前播放量 - 历史播放量</div></div><div class="dash-panel-meta">按增长排序</div></div>${dashboardThemeGrowthPanelHtml(monthThemeGrowth,"本月")}</div>
       <div class="dash-panel dash-area theme-growth-panel"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本周题材播放增长</div><div class="dash-panel-sub">近7天可对比历史 · 总播放增长</div></div><div class="dash-panel-meta">滚动查看</div></div>${dashboardThemeGrowthPanelHtml(weekThemeGrowth,"本周")}</div>
-      ${accountMonitorHtml}
+      <div class="dash-side">
+        <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">监控账号：${fmt(current.accountCount)}</div><div class="dash-stat-sub">账号汇总记录</div></div></div>
+        <div class="dash-stat"><div class="dash-stat-icon">N</div><div><div class="dash-stat-title">本周新增短剧：${fmt(weeklyDramaGrowth.diff)}部</div><div class="dash-stat-sub">${esc(weeklyDramaSub)}</div></div></div>
+        <div class="dash-stat"><div class="dash-stat-icon">G</div><div><div class="dash-stat-title">${esc(accountGrowthTitle)}</div><div class="dash-stat-sub">${esc(accountGrowthSub)}</div></div></div>
+      </div>
     </div>
   </div>`;
+  renderMonitorDashboard(current);
   if(isPublicMode())setPublicPageView(publicPageView);
   else if(page)page.hidden=false;
 }
 function renderDashboardLoading(message){
   const box=$("dashboardCard");
   const page=$("dashboardPage");
+  const monitorBox=$("monitorDashboardCard");
+  const monitorPage=$("monitorPage");
   if(!box)return;
   box.style.display="block";
   box.innerHTML='<div class="dashboard-loading">'+esc(message||"正在加载运营看板...")+'</div>';
+  if(monitorBox){
+    monitorBox.style.display="block";
+    monitorBox.innerHTML='<div class="dashboard-loading">'+esc(message||"正在加载监控账号看板...")+'</div>';
+  }
   if(isPublicMode()){
     const reportPage=$("reportPage");
     document.body.classList.toggle("dashboard-view",publicPageView==="dashboard");
+    document.body.classList.toggle("monitor-view",publicPageView==="monitor");
     document.body.classList.toggle("report-view",publicPageView==="report");
     if(page)page.hidden=publicPageView!=="dashboard";
+    if(monitorPage)monitorPage.hidden=publicPageView!=="monitor";
     if(reportPage)reportPage.hidden=publicPageView!=="report";
-  }else if(page)page.hidden=false;
+  }else{
+    if(page)page.hidden=false;
+    if(monitorPage)monitorPage.hidden=false;
+  }
 }
 async function refreshDashboardHistory(opts){
   opts=opts||{};
@@ -3275,10 +3353,12 @@ function init(){
     document.addEventListener("click",closeHistoryMenu);
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeHistoryMenu();});
   }
-  const dashboardNext=$("dashboardNextBtn"), dashboardBack=$("dashboardBackBtn"), reportBackTop=$("reportBackTopBtn");
-  if(dashboardNext)dashboardNext.addEventListener("click",()=>setPublicPageView("report"));
-  if(dashboardBack)dashboardBack.addEventListener("click",()=>setPublicPageView("dashboard"));
-  if(reportBackTop)reportBackTop.addEventListener("click",()=>setPublicPageView("dashboard"));
+  const dashboardNext=$("dashboardNextBtn"), monitorBack=$("monitorBackBtn"), monitorNext=$("monitorNextBtn"), dashboardBack=$("dashboardBackBtn"), reportBackTop=$("reportBackTopBtn");
+  if(dashboardNext)dashboardNext.addEventListener("click",()=>setPublicPageView("monitor"));
+  if(monitorBack)monitorBack.addEventListener("click",()=>setPublicPageView("dashboard"));
+  if(monitorNext)monitorNext.addEventListener("click",()=>setPublicPageView("report"));
+  if(dashboardBack)dashboardBack.addEventListener("click",()=>setPublicPageView("monitor"));
+  if(reportBackTop)reportBackTop.addEventListener("click",()=>setPublicPageView("monitor"));
   setPublicPageView("dashboard");
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
