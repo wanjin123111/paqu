@@ -33,6 +33,7 @@ DEFAULT_PAGE = "tikhub-report-frontend.html"
 REPORTS_DIR = os.path.join(ROOT, "reports")   # 定时监控存盘目录
 PUBLIC_REPORTS_DIR = os.path.join(ROOT, "public_reports")
 DRAMA_DETAIL_CACHE_FILE = os.path.join(REPORTS_DIR, "drama_detail_cache.json")
+DRAMA_EPISODE_HISTORY_FILE = os.path.join(REPORTS_DIR, "drama_episode_history.json")
 SCHEDULE_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "schedule_accounts.json")
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
@@ -94,6 +95,9 @@ AUTO_REFRESH_COOLDOWN_SECONDS = _env_int("AUTO_REFRESH_COOLDOWN_SECONDS", 300, 3
 VIDEO_PLAY_URL_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_URL_CACHE_TTL_SECONDS", 600, 0, 86400)
 DRAMA_LINK_PAGE_SIZE = _env_int("DRAMA_LINK_PAGE_SIZE", 50, 1, 50)
 DRAMA_LINK_MAX_EPISODES = _env_int("DRAMA_LINK_MAX_EPISODES", 500, 1, 5000)
+DRAMA_EPISODE_HISTORY_MAX_POINTS = _env_int("DRAMA_EPISODE_HISTORY_MAX_POINTS", 160, 20, 1000)
+DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS = _env_int("DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS", 75, 35, 365)
+DRAMA_EPISODE_HISTORY_DEDUP_SECONDS = _env_int("DRAMA_EPISODE_HISTORY_DEDUP_SECONDS", 1800, 60, 86400)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
 
@@ -181,6 +185,7 @@ LAST_JOB = {"running": False, "started_at": None, "finished_at": None, "result":
 LAST_AUTO_REFRESH_AT = 0.0
 DRAMA_DETAIL_CACHE = None
 DRAMA_DETAIL_CACHE_LOCK = threading.Lock()
+DRAMA_EPISODE_HISTORY_LOCK = threading.Lock()
 TITLE_TRANSLATION_CACHE = {}
 VIDEO_PLAY_URL_CACHE = {}
 VIDEO_PLAY_URL_CACHE_LOCK = threading.Lock()
@@ -1719,6 +1724,161 @@ def _format_chinese_count(value):
     return sign + str(number)
 
 
+def _episode_history_key(uid, drama_id, video_id):
+    account = str(uid or "").strip().lstrip("@").lower()
+    clean_drama = _clean_drama_id(drama_id)
+    clean_video = _clean_drama_id(video_id)
+    if not account or not clean_drama or not clean_video:
+        return ""
+    return "%s|%s|%s" % (account, clean_drama, clean_video)
+
+
+def _episode_point_ms(point):
+    if not isinstance(point, dict):
+        return 0
+    value = _to_int(point.get("ms") or point.get("ts_ms") or point.get("timestamp_ms"))
+    if value:
+        return value
+    raw = point.get("ts") or point.get("timestamp")
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = datetime.datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=BEIJING_TZ)
+            return int(parsed.timestamp() * 1000)
+        except Exception:
+            return 0
+    return 0
+
+
+def _read_drama_episode_history():
+    try:
+        with open(DRAMA_EPISODE_HISTORY_FILE, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception:
+        data = {}
+    items = data.get("items") if isinstance(data, dict) else {}
+    if not isinstance(items, dict):
+        items = {}
+    return {"version": 1, "items": items}
+
+
+def _write_drama_episode_history(history):
+    items = history.get("items") if isinstance(history, dict) else {}
+    if not isinstance(items, dict) or not items:
+        return
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    tmp = DRAMA_EPISODE_HISTORY_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump({"version": 1, "items": items}, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp, DRAMA_EPISODE_HISTORY_FILE)
+
+
+def _episode_growth_from_points(points, current_views, now_ms, days):
+    if not isinstance(points, list):
+        return None
+    current = _to_int(current_views)
+    target_ms = now_ms - days * 86400000
+    recent_cutoff_ms = now_ms - 60000
+    usable = []
+    for point in points:
+        ms = _episode_point_ms(point)
+        if ms <= 0 or ms > recent_cutoff_ms:
+            continue
+        usable.append((ms, _to_int(point.get("views")), point))
+    if not usable:
+        return None
+    older = [item for item in usable if item[0] <= target_ms]
+    baseline = max(older, key=lambda item: item[0]) if older else min(usable, key=lambda item: item[0])
+    growth = max(0, current - baseline[1])
+    return {
+        "value": growth,
+        "days": days,
+        "baseline_views": baseline[1],
+        "baseline_ts": baseline[2].get("ts") or "",
+        "current_views": current,
+    }
+
+
+def _trim_episode_history_points(points, now_ms):
+    cutoff_ms = now_ms - DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS * 86400000
+    kept = []
+    for point in points:
+        ms = _episode_point_ms(point)
+        if ms <= 0:
+            continue
+        if ms >= cutoff_ms:
+            kept.append(point)
+    kept.sort(key=_episode_point_ms)
+    return kept[-DRAMA_EPISODE_HISTORY_MAX_POINTS:]
+
+
+def _collect_episode_growth_and_record(uid, drama_id, episodes):
+    metrics = {}
+    if not episodes:
+        return metrics
+    now_ms = int(time.time() * 1000)
+    now_text = datetime.datetime.fromtimestamp(now_ms / 1000.0, BEIJING_TZ).isoformat(timespec="seconds")
+    changed = False
+    with DRAMA_EPISODE_HISTORY_LOCK:
+        history = _read_drama_episode_history()
+        items = history.setdefault("items", {})
+        for episode in episodes:
+            video_id = _clean_drama_id(episode.get("video_id"))
+            key = _episode_history_key(uid, drama_id, video_id)
+            if not key:
+                continue
+            entry = items.get(key)
+            if not isinstance(entry, dict):
+                entry = {}
+                items[key] = entry
+            points = entry.get("points")
+            if not isinstance(points, list):
+                points = []
+            metrics[video_id] = {
+                "week": _episode_growth_from_points(points, episode.get("views"), now_ms, 7),
+                "month": _episode_growth_from_points(points, episode.get("views"), now_ms, 30),
+            }
+            entry.update({
+                "uid": str(uid or "").strip().lstrip("@"),
+                "drama_id": _clean_drama_id(drama_id),
+                "video_id": video_id,
+                "episode_label": episode.get("episode_label") or "",
+                "title": episode.get("title") or "",
+            })
+            points = _trim_episode_history_points(points, now_ms)
+            snapshot = {"ms": now_ms, "ts": now_text, "views": _to_int(episode.get("views"))}
+            if points and now_ms - _episode_point_ms(points[-1]) <= DRAMA_EPISODE_HISTORY_DEDUP_SECONDS * 1000:
+                points[-1] = snapshot
+            else:
+                points.append(snapshot)
+            entry["points"] = _trim_episode_history_points(points, now_ms)
+            changed = True
+        if changed:
+            try:
+                _write_drama_episode_history(history)
+            except Exception:
+                pass
+    return metrics
+
+
+def _episode_growth_html(metric):
+    if not metric:
+        return '<span class="growth-empty">&#8212;</span>'
+    value = _to_int(metric.get("value"))
+    title = "\u5bf9\u6bd4\u5386\u53f2\u5feb\u7167 %s\uff1a\u57fa\u51c6 %s\uff0c\u5f53\u524d %s" % (
+        metric.get("baseline_ts") or "",
+        _format_chinese_count(metric.get("baseline_views")),
+        _format_chinese_count(metric.get("current_views")),
+    )
+    if value > 0:
+        return '<span class="growth-up" title="%s"><span class="trend-arrow">&#8593;</span>+%s</span>' % (
+            _html_text(title),
+            _html_text(_format_chinese_count(value)),
+        )
+    return '<span class="growth-flat" title="%s">+0</span>' % _html_text(title)
+
+
 def _get_drama_episode_number(item, fallback):
     containers = []
     if isinstance(item, dict):
@@ -1767,15 +1927,22 @@ def _drama_episode_summary(item, uid, index):
 
 def _render_drama_episode_list_page(uid, drama_id, episodes):
     account = (uid or "").strip().lstrip("@")
+    try:
+        growth_metrics = _collect_episode_growth_and_record(account, drama_id, episodes)
+    except Exception:
+        growth_metrics = {}
     rows = []
     for episode in episodes:
+        metrics = growth_metrics.get(_clean_drama_id(episode.get("video_id"))) or {}
         page_link = '<a class="link ghost" href="%s" target="_blank" rel="noopener">&#20316;&#21697;&#39029;</a>' % _html_text(episode["video_url"]) if episode.get("video_url") else '<span class="muted">&#26080;</span>'
         play_link = '<a class="link primary" href="%s" target="_blank" rel="noopener">&#25773;&#25918;&#28304;</a>' % _html_text(episode["play_url"]) if episode.get("play_url") else '<span class="muted">&#26080;</span>'
         rows.append("""<tr>
   <td class="idx">%s</td>
   <td><div class="name">%s</div><div class="meta">%s</div></td>
-  <td>%s</td>
-  <td>%s</td>
+  <td class="hide-sm">%s</td>
+  <td class="hide-sm">%s</td>
+  <td class="hide-sm growth-cell">%s</td>
+  <td class="hide-sm growth-cell">%s</td>
   <td class="actions">%s%s</td>
 </tr>""" % (
             _html_text(episode.get("episode_label") or episode.get("index")),
@@ -1783,11 +1950,13 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
             "ID " + _html_text(episode.get("video_id")) if episode.get("video_id") else "",
             _html_text(episode.get("publish_time") or "N/A"),
             _html_text(episode.get("views_text") or _format_chinese_count(episode.get("views"))),
+            _episode_growth_html(metrics.get("week")),
+            _episode_growth_html(metrics.get("month")),
             play_link,
             page_link,
         ))
     if not rows:
-        rows.append('<tr><td colspan="5" class="empty">No videos found.</td></tr>')
+        rows.append('<tr><td colspan="7" class="empty">No videos found.</td></tr>')
     source_url = "/drama-link?" + urllib.parse.urlencode({
         "uid": account,
         "drama_id": _clean_drama_id(drama_id),
@@ -1802,7 +1971,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
 <title>&#30701;&#21095;&#35270;&#39057;&#21015;&#34920;</title>
 <style>
 :root{color-scheme:light;--ink:#172033;--muted:#667085;--line:#e6eaf1;--head:#1d2633;--bg:#f5f7fb;--blue:#405cff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Arial,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:24px auto;padding:0 18px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(31,41,55,.08);overflow:hidden}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px}.tools{display:flex;gap:8px;flex-wrap:wrap}.btn,.link{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:6px;text-decoration:none;border:1px solid var(--line);white-space:nowrap}.btn{color:var(--ink);background:#fff}.link.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.ghost{color:var(--blue);background:#fff;margin-left:8px}table{width:100%%;border-collapse:collapse;table-layout:fixed}thead th{background:var(--head);color:#fff;text-align:left;font-weight:700;padding:12px 14px}tbody td{border-top:1px solid var(--line);padding:12px 14px;vertical-align:top}tbody tr:nth-child(even){background:#fafbfe}.idx{width:64px;color:var(--muted)}.name{font-weight:700;word-break:break-word}.meta{margin-top:3px;color:var(--muted);font-size:12px;word-break:break-all}.actions{white-space:nowrap}.empty{text-align:center;color:var(--muted);padding:34px}.note{color:var(--muted);font-size:12px;margin-top:12px}@media(max-width:760px){.top{display:block}.tools{margin-top:12px}table{table-layout:auto}.hide-sm{display:none}.actions{white-space:normal}.link.ghost{margin-left:0;margin-top:6px}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Arial,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:24px auto;padding:0 18px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(31,41,55,.08);overflow:hidden}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px}.tools{display:flex;gap:8px;flex-wrap:wrap}.btn,.link{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:6px;text-decoration:none;border:1px solid var(--line);white-space:nowrap}.btn{color:var(--ink);background:#fff}.link.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.ghost{color:var(--blue);background:#fff;margin-left:8px}table{width:100%%;border-collapse:collapse;table-layout:fixed}thead th{background:var(--head);color:#fff;text-align:left;font-weight:700;padding:12px 14px}tbody td{border-top:1px solid var(--line);padding:12px 14px;vertical-align:top}tbody tr:nth-child(even){background:#fafbfe}.idx{width:64px;color:var(--muted)}.time-col{width:154px}.view-col{width:96px}.growth-col{width:118px}.action-col{width:178px}.name{font-weight:700;word-break:break-word}.meta{margin-top:3px;color:var(--muted);font-size:12px;word-break:break-all}.growth-cell{font-weight:800;white-space:nowrap}.growth-up{display:inline-flex;align-items:center;gap:4px;color:#e11d48}.growth-flat,.growth-empty{color:#98a2b3;font-weight:700}.trend-arrow{font-size:16px;line-height:1}.actions{white-space:nowrap}.empty{text-align:center;color:var(--muted);padding:34px}.note{color:var(--muted);font-size:12px;margin-top:12px}@media(max-width:760px){.top{display:block}.tools{margin-top:12px}table{table-layout:auto}.hide-sm{display:none}.actions{white-space:normal}.link.ghost{margin-left:0;margin-top:6px}}
 </style>
 </head>
 <body>
@@ -1819,7 +1988,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
       </div>
     </div>
     <table>
-      <thead><tr><th class="idx">&#38598;&#25968;</th><th>&#35270;&#39057;</th><th class="hide-sm">&#21457;&#24067;&#26102;&#38388;</th><th class="hide-sm">&#35266;&#30475;</th><th>&#38142;&#25509;</th></tr></thead>
+      <thead><tr><th class="idx">&#38598;&#25968;</th><th>&#35270;&#39057;</th><th class="hide-sm time-col">&#21457;&#24067;&#26102;&#38388;</th><th class="hide-sm view-col">&#35266;&#30475;</th><th class="hide-sm growth-col">&#21608;&#19978;&#28072;&#28909;&#24230;</th><th class="hide-sm growth-col">&#26376;&#19978;&#28072;&#28909;&#24230;</th><th class="action-col">&#38142;&#25509;</th></tr></thead>
       <tbody>%s</tbody>
     </table>
   </section>
