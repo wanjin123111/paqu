@@ -2166,7 +2166,7 @@ function renderMonitorDashboard(current){
       <div class="monitor-summary-box is-dark"><div class="monitor-summary-label">监控账号</div><div class="monitor-summary-value">${fmt(items.length||current.accountCount||0)}个</div></div>
       <div class="monitor-summary-box"><div class="monitor-summary-label">总粉丝</div><div class="monitor-summary-value">${fmtPlay(totalFans)}</div></div>
       <div class="monitor-summary-box"><div class="monitor-summary-label">累计观看</div><div class="monitor-summary-value">${fmtPlay(totalViews)}</div></div>
-      <div class="monitor-summary-box"><div class="monitor-summary-label">排序口径</div><div class="monitor-summary-value">粉丝量</div></div>
+      <div class="monitor-summary-box"><div class="monitor-summary-label">排序</div><div class="monitor-summary-value">粉丝量</div></div>
     </div>
     <div class="monitor-grid">${rowsHtml||'<div class="monitor-empty">暂无监控账号数据</div>'}</div>
   </div>`;
@@ -2215,7 +2215,7 @@ function renderDashboard(){
       ${dashboardDramaCardHtml("近7天涨幅",grow7,{light:true,icon:"7"})}
       ${dashboardDramaCardHtml("近3天涨幅",grow3,{icon:"3"})}
       ${dashboardDramaCardHtml("近1天涨幅",grow1,{light:true,icon:"1"})}
-      <div class="dash-panel dash-main"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">对比历史新增播放 · 全账号按涨幅排序</div></div><div class="dash-panel-meta">口径：Top 10 · 近30天 · 新增播放</div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems)}</div>
+      <div class="dash-panel dash-main"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">对比历史新增播放 · 全账号按涨幅排序</div></div><div class="dash-panel-meta">Top 10 · 近30天 · 新增播放</div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems)}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area theme-growth-panel"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本月题材播放增长</div><div class="dash-panel-sub">按题材汇总当前播放量 - 历史播放量</div></div><div class="dash-panel-meta">按增长排序</div></div>${dashboardThemeGrowthPanelHtml(monthThemeGrowth,"本月")}</div>
       <div class="dash-panel dash-area theme-growth-panel"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本周题材播放增长</div><div class="dash-panel-sub">近7天可对比历史 · 总播放增长</div></div><div class="dash-panel-meta">滚动查看</div></div>${dashboardThemeGrowthPanelHtml(weekThemeGrowth,"本周")}</div>
