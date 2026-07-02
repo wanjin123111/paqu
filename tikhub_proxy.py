@@ -1789,7 +1789,9 @@ def _episode_growth_from_points(points, current_views, now_ms, days):
     if not usable:
         return None
     older = [item for item in usable if item[0] <= target_ms]
-    baseline = max(older, key=lambda item: item[0]) if older else min(usable, key=lambda item: item[0])
+    if not older:
+        return None
+    baseline = max(older, key=lambda item: item[0])
     growth = max(0, current - baseline[1])
     return {
         "value": growth,

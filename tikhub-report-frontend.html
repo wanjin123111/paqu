@@ -1591,10 +1591,14 @@ function dashboardDramaGrowthKeys(row){
   return keys;
 }
 function dramaGrowthOf(row){
-  if(!growthFilterState.baselineMap)return 0;
-  const key=dramaGrowthKey(row);
-  const before=growthFilterState.baselineMap.has(key)?growthFilterState.baselineMap.get(key):0;
-  return dramaViewsOf(row)-before;
+  if(!growthFilterState.baselineMap)return null;
+  for(const key of dashboardDramaGrowthKeys(row)){
+    if(growthFilterState.baselineMap.has(key)){
+      const before=growthFilterState.baselineMap.get(key)||0;
+      return Math.max(0,dramaViewsOf(row)-before);
+    }
+  }
+  return null;
 }
 function detailDailyGrowthOf(row){
   const currentPayload=dashboardCurrentPayload();
@@ -1610,18 +1614,23 @@ function detailDailyGrowthOf(row){
       baseMap.set(key,Math.max(baseMap.get(key)||0,dramaViewsOf(baseRow)));
     }
   }
-  let before=0;
+  let before=0, matched=false;
   for(const key of keys){
     if(baseMap.has(key)){
       before=baseMap.get(key)||0;
+      matched=true;
       break;
     }
   }
+  if(!matched)return null;
   return Math.max(0,dramaViewsOf(row)-before);
 }
 function filteredDetailRows(list){
   if(!growthFilterState.enabled||!growthFilterState.baselineMap)return list;
-  return list.filter(row=>dramaGrowthOf(row)>=growthFilterState.minValue);
+  return list.filter(row=>{
+    const growth=dramaGrowthOf(row);
+    return growth!=null&&growth>=growthFilterState.minValue;
+  });
 }
 function growthFilterLabel(){
   if(!growthFilterState.enabled||!growthFilterState.baselineItem)return growthFilterState.status||"";
