@@ -152,6 +152,13 @@
   .tab-btn{border:0;background:transparent;border-radius:7px;padding:7px 12px;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer}
   .tab-btn.active{background:var(--card);color:var(--accent);box-shadow:0 1px 2px rgba(20,22,29,.07)}
   .result-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+  .report-search{display:flex;align-items:center;gap:8px;flex:1 1 280px;min-height:38px;min-width:240px}
+  .report-search[hidden]{display:none!important}
+  .search-field{display:inline-flex;align-items:center;gap:7px;height:34px;min-width:240px;max-width:420px;padding:0 10px;border:1px solid var(--line);background:#fff;border-radius:8px;color:var(--ink-soft);font-size:12px}
+  .search-field span{font-weight:600;white-space:nowrap}
+  .search-field input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:var(--ink);font-family:var(--mono);font-size:12px;padding:0}
+  .search-field input::placeholder{color:#8B93A5}
+  .search-status{font-size:12px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sort-btn{min-width:52px}
   .growth-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:38px;flex:1 1 320px}
   .growth-filter[hidden]{display:none!important}
@@ -344,6 +351,9 @@
   .monitor-account-bar{grid-column:1 / 4;height:6px;background:#EEF0F5;border-radius:99px;overflow:hidden}
   .monitor-account-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),#7C72FF)}
   .monitor-empty{padding:32px;color:var(--ink-faint);border:1px dashed var(--line-strong);background:#fff}
+  .monitor-searchbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px}
+  .monitor-searchbar .search-field{min-width:280px;max-width:460px}
+  .monitor-account-row[hidden]{display:none}
   .dashboard-loading{padding:24px;color:var(--ink-faint)}
   body.public-mode #dashboardCard{width:100vw;height:100vh;max-width:none;margin:0;transform:none;border:0;border-radius:0;box-shadow:none}
   body.public-mode #monitorDashboardCard{width:100vw;height:100vh;max-width:none;margin:0;transform:none;border:0;border-radius:0;box-shadow:none}
@@ -365,7 +375,7 @@
   @media (max-width:620px){body.public-mode.dashboard-view,body.public-mode.monitor-view{overflow:auto}body.public-mode .dashboard-page,body.public-mode .monitor-page{height:auto;min-height:100vh;overflow:visible}body.public-mode #dashboardCard,body.public-mode #monitorDashboardCard{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-inner,body.public-mode #monitorDashboardCard .monitor-dashboard-inner{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-grid{flex:none;grid-template-rows:auto;grid-auto-rows:auto}body.public-mode #dashboardCard .dash-chart{height:180px;flex:none}body.public-mode #dashboardCard .dash-chart.tall{height:190px}}
   @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-side,.dash-growth-wide{grid-column:auto;grid-row:auto}.theme-growth-panel,.dash-growth-wide{grid-column:span 2}.dash-donut{grid-column:span 2}.dash-side{grid-column:span 2}.growth-rank-list.expanded{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}.monitor-dashboard-head{padding-right:0}.monitor-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.monitor-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(120px,auto)}}
   @media (max-width:620px){.dash-panel-heading{flex-direction:column;gap:6px}.dash-panel-meta{text-align:left;white-space:normal}.dash-panel-sub{white-space:normal}}
-  @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head,.monitor-dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-side,.theme-growth-panel,.dash-growth-wide{grid-column:auto;grid-row:auto}.growth-rank-list.expanded,.theme-growth-list{grid-template-columns:1fr}.theme-growth-card.is-top{grid-row:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}.monitor-dashboard-inner{padding:18px 14px 24px}.monitor-dashboard-title{font-size:22px}.monitor-dashboard-stamp{white-space:normal}.monitor-summary-grid,.monitor-grid{grid-template-columns:1fr}.monitor-grid{overflow:visible;padding-right:0;margin-right:0}.monitor-account-row{grid-template-columns:50px minmax(0,1fr) auto}}
+  @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head,.monitor-dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-side,.theme-growth-panel,.dash-growth-wide{grid-column:auto;grid-row:auto}.growth-rank-list.expanded,.theme-growth-list{grid-template-columns:1fr}.theme-growth-card.is-top{grid-row:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}.monitor-dashboard-inner{padding:18px 14px 24px}.monitor-dashboard-title{font-size:22px}.monitor-dashboard-stamp{white-space:normal}.monitor-summary-grid,.monitor-grid{grid-template-columns:1fr}.monitor-grid{overflow:visible;padding-right:0;margin-right:0}.monitor-account-row{grid-template-columns:50px minmax(0,1fr) auto}.report-search,.search-field,.monitor-searchbar .search-field{width:100%;min-width:0;max-width:none}}
 
   body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin:0 auto;transform:none}
   body.public-mode #resultCard .card-body{padding:18px 22px 22px}
@@ -678,6 +688,14 @@ shortdramatime"></textarea>
           <button class="tab-btn active" id="summaryTabBtn" type="button" data-view="summary">账号汇总</button>
           <button class="tab-btn" id="detailTabBtn" type="button" data-view="detail">账号明细</button>
         </div>
+        <div class="report-search" id="summarySearchBox">
+          <label class="search-field"><span>搜索账号</span><input id="summarySearchInput" type="search" placeholder="昵称 / @账号 / 最高观看短剧" autocomplete="off" aria-label="搜索账号"></label>
+          <span class="search-status" id="summarySearchStatus"></span>
+        </div>
+        <div class="report-search" id="detailSearchBox" hidden>
+          <label class="search-field"><span>搜索短剧</span><input id="detailSearchInput" type="search" placeholder="英文剧名 / 中文译名 / 账号 / 题材" autocomplete="off" aria-label="搜索短剧"></label>
+          <span class="search-status" id="detailSearchStatus"></span>
+        </div>
         <div class="growth-filter" id="growthFilter">
           <label><span>&#36817;</span><input id="growthDaysInput" type="number" min="1" step="1" value="7" aria-label="growth days"><span>&#22825;</span></label>
           <label><span>&#22686;&#38271;&#8805;</span><input class="growth-min-input" id="growthMinInput" type="text" value="100&#19975;" placeholder="100&#19975;" aria-label="growth plays"></label>
@@ -820,6 +838,9 @@ function loadCachedDashboardState(){
 }
 let publicPageView="dashboard";
 let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7)||7,minText:store.get("thr_growth_min_text")||"100\u4e07",minValue:0,baselineMap:null,baselineItem:null,status:""};
+let monitorSearchText=store.get("thr_monitor_search")||"";
+let summarySearchText=store.get("thr_summary_search")||"";
+let detailSearchText=store.get("thr_detail_search")||"";
 let detailAccountIndex=0;
 let detailAccountKey=store.get("thr_detail_account")||"";
 const DETAIL_PAGE_SIZE=7;
@@ -1581,6 +1602,39 @@ function detailDailyGrowthOf(row){
   if(!matched)return null;
   return Math.max(0,dramaViewsOf(row)-before);
 }
+function normalizeSearch(value){
+  return String(value||"").normalize("NFKC").toLowerCase().replace(/[@\s_\-./:：，,。·|()[\]【】"'’‘“”]+/g,"");
+}
+function hasSearch(value){return !!normalizeSearch(value);}
+function searchMatches(value,parts){
+  const needle=normalizeSearch(value);
+  if(!needle)return true;
+  return (parts||[]).some(part=>normalizeSearch(part).includes(needle));
+}
+function summarySearchParts(row){
+  return [accountOf(row),nickOf(row),topDramaTitleOf(row),topDramaChineseTitleOf(row),linkOf(row)];
+}
+function detailSearchParts(row){
+  return [
+    accountOf(row),
+    nickOf(row),
+    dramaTitleOf(row),
+    chineseTitleOf(row),
+    valueOf(row,["Drama ID / 短剧ID","短剧ID","Drama ID"],""),
+    dramaLinkOf(row),
+    themeDisplayList(row).join(" "),
+    dramaDescriptionTextOf(row)
+  ];
+}
+function monitorSearchParts(item){
+  return [item&&item.account,item&&item.nick,item&&item.topDrama,item&&topDramaChineseTitleOf(item.row),item&&item.href];
+}
+function filterSummarySearch(list){
+  return hasSearch(summarySearchText)?list.filter(row=>searchMatches(summarySearchText,summarySearchParts(row))):list;
+}
+function filterDetailSearch(list){
+  return hasSearch(detailSearchText)?list.filter(row=>searchMatches(detailSearchText,detailSearchParts(row))):list;
+}
 function filteredDetailRows(list){
   if(!growthFilterState.enabled||!growthFilterState.baselineMap)return list;
   return list.filter(row=>{
@@ -1603,6 +1657,23 @@ function updateGrowthFilterControls(matchCount,totalCount){
     let text=growthFilterLabel();
     if(growthFilterState.enabled&&growthFilterState.baselineMap&&typeof matchCount==="number")text+=" \u00b7 \u547d\u4e2d "+matchCount+"/"+(typeof totalCount==="number"?totalCount:dramaRows.length);
     status.textContent=text;
+  }
+}
+function updateReportSearchControls(count,total){
+  const summaryBox=$("summarySearchBox"), detailBox=$("detailSearchBox");
+  const summaryInput=$("summarySearchInput"), detailInput=$("detailSearchInput");
+  const summaryStatus=$("summarySearchStatus"), detailStatus=$("detailSearchStatus");
+  if(summaryBox)summaryBox.hidden=resultView!=="summary";
+  if(detailBox)detailBox.hidden=resultView!=="detail";
+  if(summaryInput&&document.activeElement!==summaryInput)summaryInput.value=summarySearchText;
+  if(detailInput&&document.activeElement!==detailInput)detailInput.value=detailSearchText;
+  if(resultView==="summary"&&summaryStatus){
+    const active=hasSearch(summarySearchText);
+    summaryStatus.textContent=active?("命中 "+fmt(count||0)+"/"+fmt(total||0)+" 个账号"):("共 "+fmt(total||0)+" 个账号");
+  }
+  if(resultView==="detail"&&detailStatus){
+    const active=hasSearch(detailSearchText);
+    detailStatus.textContent=active?("命中 "+fmt(count||0)+"/"+fmt(total||0)+" 部短剧"):("共 "+fmt(total||0)+" 部短剧");
   }
 }
 async function applyGrowthFilter(){
@@ -1633,12 +1704,12 @@ function clearGrowthFilter(){
   resetDetailPage();renderResultTable();
 }
 function sortedSummaryRows(){
-  const list=[...rows];
+  const list=filterSummarySearch([...rows]);
   if(resultSort==="hot")list.sort((a,b)=>summaryHotOf(b)-summaryHotOf(a));
   return list;
 }
 function sortedDetailRows(details){
-  const list=filteredDetailRows([...details]);
+  const list=filterDetailSearch(filteredDetailRows([...details]));
   if(resultSort==="hot"){
     return list.sort((a,b)=>dramaViewsOf(b)-dramaViewsOf(a)||dramaRankOf(a,9999)-dramaRankOf(b,9999));
   }
@@ -2180,6 +2251,33 @@ function monitorAccountItems(){
     avatar:avatarOf(row),
   })).filter(item=>item.account).sort((a,b)=>b.followers-a.followers);
 }
+function applyMonitorSearchDom(){
+  const input=$("monitorSearchInput");
+  const status=$("monitorSearchStatus");
+  const empty=$("monitorSearchEmpty");
+  const query=input?input.value:monitorSearchText;
+  const needle=normalizeSearch(query);
+  const accountRows=Array.from(document.querySelectorAll("#monitorDashboardCard .monitor-account-row"));
+  let visible=0;
+  accountRows.forEach(row=>{
+    const matched=!needle||String(row.dataset.search||"").includes(needle);
+    row.hidden=!matched;
+    if(matched)visible+=1;
+  });
+  if(status)status.textContent=needle?("命中 "+fmt(visible)+"/"+fmt(accountRows.length)+" 个账号"):("共 "+fmt(accountRows.length)+" 个账号");
+  if(empty)empty.hidden=!!visible||!needle;
+}
+function bindMonitorSearchControls(){
+  const input=$("monitorSearchInput");
+  if(!input)return;
+  if(document.activeElement!==input)input.value=monitorSearchText;
+  input.addEventListener("input",()=>{
+    monitorSearchText=input.value;
+    store.set("thr_monitor_search",monitorSearchText);
+    applyMonitorSearchDom();
+  });
+  applyMonitorSearchDom();
+}
 function renderMonitorDashboard(current){
   const box=$("monitorDashboardCard");
   const page=$("monitorPage");
@@ -2201,7 +2299,8 @@ function renderMonitorDashboard(current){
     const pct=Math.max(3,Math.min(100,Number(item.followers||0)/maxFans*100));
     const img=item.avatar?'<img src="'+esc(item.avatar)+'" alt="" loading="lazy" onerror="this.remove()">':"";
     const title=item.topDrama?("最高观看："+item.topDrama):"最高观看：暂无最高短剧";
-    return `<div class="monitor-account-row" title="${esc(item.nick+" · "+title)}">`+
+    const searchIndex=normalizeSearch(monitorSearchParts(item).join(" "));
+    return `<div class="monitor-account-row" data-search="${esc(searchIndex)}" title="${esc(item.nick+" · "+title)}">`+
       `<div class="monitor-account-avatar">${img}<span>${accountMonitorInitial(item.row)}</span></div>`+
       `<div class="monitor-account-main"><div class="monitor-account-name">${esc(item.nick)}</div><div class="monitor-account-id">@${esc(item.account)}</div><a class="monitor-account-home" href="${esc(item.href||("https://www.tiktok.com/@"+item.account))}" target="_blank" rel="noopener">主页</a></div>`+
       `<div class="monitor-account-fans"><span>粉丝</span><b>${accountMonitorFollowers(item.row)}</b></div>`+
@@ -2218,8 +2317,10 @@ function renderMonitorDashboard(current){
       <div class="monitor-summary-box"><div class="monitor-summary-label">累计观看</div><div class="monitor-summary-value">${fmtPlay(totalViews)}</div></div>
       <div class="monitor-summary-box"><div class="monitor-summary-label">排序</div><div class="monitor-summary-value">粉丝量</div></div>
     </div>
-    <div class="monitor-grid">${rowsHtml||'<div class="monitor-empty">暂无监控账号数据</div>'}</div>
+    <div class="monitor-searchbar"><label class="search-field"><span>搜索账号</span><input id="monitorSearchInput" type="search" value="${esc(monitorSearchText)}" placeholder="昵称 / @账号 / 最高观看短剧" autocomplete="off" aria-label="搜索监控账号"></label><span class="search-status" id="monitorSearchStatus"></span></div>
+    <div class="monitor-grid">${rowsHtml||'<div class="monitor-empty">暂无监控账号数据</div>'}<div class="monitor-empty" id="monitorSearchEmpty" hidden>没有匹配的账号。</div></div>
   </div>`;
+  bindMonitorSearchControls();
   if(!isPublicMode()&&page)page.hidden=false;
 }
 function renderDashboard(){
@@ -2570,7 +2671,7 @@ function updateDetailControls(list){
   const current=syncDetailAccountSelection(list);
   sel.value=String(detailAccountIndex);
   const total=current?dramaRows.filter(row=>accountOf(row)===current.account).length:0;
-  count.textContent=current?("第 "+(detailAccountIndex+1)+"/"+list.length+" 个账号 · "+total+" 部短剧"):"暂无账号明细";
+  count.textContent=hasSearch(detailSearchText)?("全账号搜索 · "+fmt(filterDetailSearch(dramaRows).length)+" 部短剧"):(current?("第 "+(detailAccountIndex+1)+"/"+list.length+" 个账号 · "+total+" 部短剧"):"暂无账号明细");
   updateDetailPager(total);
   return list;
 }
@@ -2584,21 +2685,23 @@ function renderResultTable(){
   $("detailTabBtn").classList.toggle("active",resultView==="detail");
   updateSortControls();
   updateGrowthFilterControls();
+  updateReportSearchControls(0,resultView==="summary"?rows.length:dramaRows.length);
   tb.innerHTML="";
   const list=updateDetailControls(detailAccounts());
   if(resultView==="detail"){
     setHeader(DRAMA_DETAIL_COLUMNS);
     const current=list[detailAccountIndex];
-    let details=current?dramaRows.filter(row=>accountOf(row)===current.account):dramaRows;
+    let details=hasSearch(detailSearchText)?dramaRows:(current?dramaRows.filter(row=>accountOf(row)===current.account):dramaRows);
     const detailTotal=details.length;
     details=sortedDetailRows(details);
     updateGrowthFilterControls(details.length,detailTotal);
+    updateReportSearchControls(details.length,detailTotal);
     if(!details.length){
       const tr=document.createElement("tr");
       const td=document.createElement("td");
       td.colSpan=DRAMA_DETAIL_COLUMNS.length;
       td.className="detail-text";
-      td.textContent=growthFilterState.enabled&&growthFilterState.baselineMap?"\u6ca1\u6709\u7b26\u5408\u589e\u957f\u7b5b\u9009\u7684\u77ed\u5267\u3002":"这个账号暂时没有短剧明细。";
+      td.textContent=hasSearch(detailSearchText)?"没有匹配的短剧。":(growthFilterState.enabled&&growthFilterState.baselineMap?"\u6ca1\u6709\u7b26\u5408\u589e\u957f\u7b5b\u9009\u7684\u77ed\u5267\u3002":"这个账号暂时没有短剧明细。");
       tr.appendChild(td);
       tb.appendChild(tr);
       return;
@@ -2616,12 +2719,13 @@ function renderResultTable(){
   }
   setHeader(DISPLAY_COLUMNS);
   const summaryList=sortedSummaryRows();
+  updateReportSearchControls(summaryList.length,rows.length);
   if(!summaryList.length){
     const tr=document.createElement("tr");
     const td=document.createElement("td");
     td.colSpan=DISPLAY_COLUMNS.length;
     td.className="detail-text";
-    td.textContent="\u6682\u65e0\u8d26\u53f7\u6c47\u603b\u3002";
+    td.textContent=hasSearch(summarySearchText)?"没有匹配的账号。":"\u6682\u65e0\u8d26\u53f7\u6c47\u603b\u3002";
     tr.appendChild(td);
     tb.appendChild(tr);
     return;
@@ -3323,6 +3427,24 @@ function init(){
   if(growthApply)growthApply.addEventListener("click",()=>applyGrowthFilter());
   if(growthClear)growthClear.addEventListener("click",()=>clearGrowthFilter());
   [growthDays,growthMin].forEach(el=>{if(el)el.addEventListener("keydown",e=>{if(e.key==="Enter")applyGrowthFilter();});});
+  const summarySearch=$("summarySearchInput"), detailSearch=$("detailSearchInput");
+  if(summarySearch){
+    summarySearch.value=summarySearchText;
+    summarySearch.addEventListener("input",()=>{
+      summarySearchText=summarySearch.value;
+      store.set("thr_summary_search",summarySearchText);
+      renderResultTable();
+    });
+  }
+  if(detailSearch){
+    detailSearch.value=detailSearchText;
+    detailSearch.addEventListener("input",()=>{
+      detailSearchText=detailSearch.value;
+      store.set("thr_detail_search",detailSearchText);
+      resetDetailPage();
+      renderResultTable();
+    });
+  }
   updateSortControls();
   $("detailAccountSelect").addEventListener("change",()=>{
     setDetailAccountSelection(detailAccounts(),Number($("detailAccountSelect").value)||0);
