@@ -2550,7 +2550,7 @@ function appendDetailCell(tr,c,row,index){
     const seconds=toInt(valueOf(row,["Duration Seconds / 总时长(秒)"],0));
     const minutes=valueOf(row,["Duration Minutes / 总时长(分钟)"],"");
     td.className="num";
-    const text=(seconds?fmt(seconds)+"秒":"")+(seconds&&minutes?" / ":"")+(minutes?minutes+"分钟":"");
+    const text=minutes?minutes+"分钟":(seconds?fmt(seconds)+"秒":"");
     setOptionalCell(td,text);
   }else if(c==="限免")td.textContent=valueOf(row,["Limited Free / 是否限免"],"");
   else if(c==="题材"){

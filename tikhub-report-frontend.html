@@ -1525,7 +1525,7 @@ function dramaPublishMsOf(row){
 function dramaDurationTextOf(row){
   const seconds=toInt(valueOf(row,["Duration Seconds / 总时长(秒)"],0));
   const minutes=valueOf(row,["Duration Minutes / 总时长(分钟)"],"");
-  return (seconds?fmt(seconds)+"秒":"")+(seconds&&minutes?" / ":"")+(minutes?minutes+"分钟":"");
+  return minutes?minutes+"分钟":(seconds?fmt(seconds)+"秒":"");
 }
 function dramaDescriptionTextOf(row){
   return valueOf(row,["Chinese Description / 中文简介","English Description Preview / 英文简介预览"],"");
