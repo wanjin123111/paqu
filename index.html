@@ -1557,7 +1557,7 @@ function detailDailyGrowthOf(row){
   const currentPayload=dashboardCurrentPayload();
   const payloads=dashboardComparablePayloads();
   const currentMs=dashboardPayloadTime(currentPayload)||currentReportMs();
-  const baseline=dashboardBaselinePayload(payloads,currentMs,1);
+  const baseline=dashboardPreviousPayload(payloads,currentMs);
   if(!baseline)return null;
   const keys=dashboardDramaGrowthKeys(row);
   if(!keys.length)return null;
@@ -1808,6 +1808,13 @@ function dashboardBaselinePayload(payloads,currentMs,days){
   if(!candidates.length)return null;
   const older=candidates.filter(payload=>(dashboardPayloadTime(payload)||0)<=target);
   return older.length?older[older.length-1]:candidates[0];
+}
+function dashboardPreviousPayload(payloads,currentMs){
+  const candidates=payloads.filter(payload=>{
+    const ms=dashboardPayloadTime(payload);
+    return ms&&ms<currentMs-60000;
+  }).sort((a,b)=>(dashboardPayloadTime(a)||0)-(dashboardPayloadTime(b)||0));
+  return candidates.length?candidates[candidates.length-1]:null;
 }
 function dashboardThemeBaselinePayload(payloads,currentMs,days){
   const target=currentMs-Math.max(1,days)*86400000;
