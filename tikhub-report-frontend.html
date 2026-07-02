@@ -294,6 +294,30 @@
   .dash-stat-icon{font-size:28px;opacity:.95}
   .dash-stat-title{font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dash-stat-sub{font-size:12px;color:rgba(255,255,255,.8);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dash-monitor{grid-column:5;grid-row:3;display:flex;flex-direction:column;min-height:0;padding:12px;background:linear-gradient(180deg,#fff 0%,#F8F9FF 100%)}
+  .dash-monitor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .dash-monitor-title{font-weight:800;font-size:15px;color:var(--ink)}
+  .dash-monitor-sub{font-size:11.5px;color:var(--ink-faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dash-monitor-count{font-family:var(--mono);font-size:11px;font-weight:800;color:var(--accent);background:var(--accent-soft);border:1px solid #d9d5ff;border-radius:6px;padding:2px 7px;white-space:nowrap}
+  .dash-monitor-summary{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+  .dash-monitor-metric{border:1px solid var(--line);background:#fff;border-radius:8px;padding:7px 8px;min-width:0}
+  .dash-monitor-metric span{display:block;font-size:10.5px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dash-monitor-metric b{display:block;margin-top:2px;font-family:var(--display);font-size:14px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dash-monitor-list{flex:1;min-height:0;display:grid;align-content:start;gap:7px;overflow-y:auto;overscroll-behavior:contain;padding-right:4px;margin-right:-4px}
+  .dash-monitor-list::-webkit-scrollbar{width:5px}
+  .dash-monitor-list::-webkit-scrollbar-thumb{background:rgba(85,70,255,.35);border-radius:99px}
+  .dash-monitor-row{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:8px;border:1px solid #E6E8F0;background:#fff;border-radius:8px;padding:6px}
+  .dash-monitor-avatar{position:relative;width:34px;height:34px;border-radius:50%;background:#F0EEFF;color:var(--accent);display:grid;place-items:center;overflow:hidden;font:800 10.5px var(--mono);border:1px solid #E0DEFA}
+  .dash-monitor-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#fff}
+  .dash-monitor-main{min-width:0}
+  .dash-monitor-name{font-size:11.8px;font-weight:800;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dash-monitor-id{margin-top:1px;font-family:var(--mono);font-size:10.5px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dash-monitor-fans{text-align:right;min-width:54px}
+  .dash-monitor-fans span{display:block;font-size:10px;color:var(--ink-faint)}
+  .dash-monitor-fans b{display:block;font-family:var(--mono);font-size:11.5px;color:var(--ink);line-height:1.1}
+  .dash-monitor-bar{grid-column:2 / 4;height:4px;background:#EEF0F5;border-radius:99px;overflow:hidden}
+  .dash-monitor-bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),#7C72FF)}
+  .dash-monitor-home{grid-column:1 / 2;grid-row:2 / 3;justify-self:center;font-family:var(--mono);font-size:10px;color:var(--accent)}
   .dashboard-loading{padding:24px;color:var(--ink-faint)}
   body.public-mode #dashboardCard{width:100vw;height:100vh;max-width:none;margin:0;transform:none;border:0;border-radius:0;box-shadow:none}
   body.public-mode #dashboardCard::after{height:8px}
@@ -311,9 +335,9 @@
   body.public-mode #dashboardCard .dash-progress-meta{font-size:10.5px}
   body.public-mode #dashboardCard .dash-progress-track{height:6px}
   @media (max-width:620px){body.public-mode.dashboard-view{overflow:auto}body.public-mode .dashboard-page{height:auto;min-height:100vh;overflow:visible}body.public-mode #dashboardCard{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-inner{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-grid{flex:none;grid-template-rows:auto;grid-auto-rows:auto}body.public-mode #dashboardCard .dash-chart{height:180px;flex:none}body.public-mode #dashboardCard .dash-chart.tall{height:190px}}
-  @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-side{grid-column:auto;grid-row:auto}.theme-growth-panel{grid-column:span 2}.dash-donut{grid-column:span 2}.dash-side{grid-column:span 2}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}}
+  @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-monitor{grid-column:auto;grid-row:auto}.theme-growth-panel{grid-column:span 2}.dash-donut{grid-column:span 2}.dash-monitor{grid-column:span 2;min-height:330px}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}}
   @media (max-width:620px){.dash-panel-heading{flex-direction:column;gap:6px}.dash-panel-meta{text-align:left;white-space:normal}.dash-panel-sub{white-space:normal}}
-  @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-side,.theme-growth-panel{grid-column:auto}.theme-growth-list{grid-template-columns:1fr}.theme-growth-card.is-top{grid-row:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}}
+  @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-monitor,.theme-growth-panel{grid-column:auto}.theme-growth-list{grid-template-columns:1fr}.theme-growth-card.is-top{grid-row:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}.dash-monitor{min-height:auto}.dash-monitor-list{max-height:none;overflow:visible}}
 
   body.public-mode #resultCard{width:calc(100vw - 32px);max-width:none;margin:0 auto;transform:none}
   body.public-mode #resultCard .card-body{padding:18px 22px 22px}
@@ -362,22 +386,6 @@
   .backend-admin .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
   .backend-admin .tf:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .report-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .account-monitor-card{margin-bottom:14px}
-  .account-monitor-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .account-monitor-meta{font:600 11px var(--mono);color:var(--accent);background:var(--accent-soft);border:1px solid #d9d5ff;border-radius:6px;padding:1px 7px}
-  .account-monitor-list{border-top:1px solid var(--line)}
-  .account-monitor-empty{padding:16px 0;color:var(--ink-faint);font-size:13px}
-  .account-monitor-row{display:grid;grid-template-columns:46px minmax(0,1fr) minmax(90px,auto) auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
-  .account-monitor-row:last-child{border-bottom:0}
-  .account-monitor-avatar{position:relative;width:46px;height:46px;border-radius:50%;border:1px solid var(--line);background:#f3f5fb;color:var(--accent);display:grid;place-items:center;overflow:hidden;font:700 13px var(--mono)}
-  .account-monitor-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#fff}
-  .account-monitor-main{min-width:0}
-  .account-monitor-name{font-weight:700;color:var(--ink);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .account-monitor-id{font-family:var(--mono);font-size:12px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}
-  .account-monitor-stat{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
-  .account-monitor-stat span{font-size:11.5px;color:var(--ink-faint)}
-  .account-monitor-stat b{font-family:var(--mono);font-size:13px;color:var(--ink)}
-  .account-monitor-link{justify-self:end}
   .history-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
   .history-list{margin-top:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
   .history-empty{padding:14px 16px;color:var(--ink-faint);font-size:13px}
@@ -425,7 +433,6 @@
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:500;opacity:0;pointer-events:none;transition:.22s;z-index:99}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
-  @media (max-width:860px){.account-monitor-row{grid-template-columns:42px minmax(0,1fr) auto}.account-monitor-avatar{width:42px;height:42px}.account-monitor-stat{grid-column:2/3;align-items:flex-start}.account-monitor-link{grid-column:3/4;grid-row:1/3}}
   @media (max-width:680px){ .wrap{padding:14px}.topbar{padding:12px 14px}.tagline{display:none}.history-popover{right:-2px;width:calc(100vw - 24px)}.history-item{align-items:flex-start;flex-direction:column}.history-links{justify-content:flex-start} }
   @media (prefers-reduced-motion:reduce){ *{animation-duration:.001ms!important;transition-duration:.001ms!important} }
 </style>
@@ -614,23 +621,10 @@ shortdramatime"></textarea>
 
   <section class="report-page" id="reportPage" hidden>
     <div class="page-switch report-page-switch">
-      <button class="mini-btn" id="dashboardBackBtn" type="button">上一页：看板</button>
-    </div>
-    <div class="card account-monitor-card" id="accountMonitorCard">
-      <div class="card-head">
-        <div class="account-monitor-head">
-          <h2>当前监控账号</h2>
-          <span class="account-monitor-meta" id="accountMonitorMeta">等待最新报表</span>
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="account-monitor-list" id="accountMonitorList" aria-live="polite">
-          <div class="account-monitor-empty">最新报表加载后会显示监控账号。</div>
-        </div>
-      </div>
+      <button class="mini-btn" id="dashboardBackBtn" type="button">上一页：监控看板</button>
     </div>
     <div class="card" id="resultCard">
-    <div class="card-head"><h2>报表</h2><div class="report-head-actions"><button class="mini-btn" id="reportBackTopBtn" type="button">返回看板</button></div></div>
+    <div class="card-head"><h2>报表</h2><div class="report-head-actions"><button class="mini-btn" id="reportBackTopBtn" type="button">返回监控看板</button></div></div>
     <div class="card-body">
       <div class="result-top">
         <div class="result-sum" id="resultSum"></div>
@@ -2131,6 +2125,38 @@ function dashboardDonutHtml(items,totalViews,coreLabel="播放<br>占比",fallba
   const legend=visible.map((item,i)=>`<span><i style="background:${colors[i%colors.length]}"></i><b>${Math.round(Number(item.views||0)/total*100)}%</b> ${esc(item.name||item.account||fallbackLabel)}</span>`).join("");
   return `<div class="dash-donut-visual" style="background:conic-gradient(${stops})"><div class="dash-donut-core">${coreLabel}</div></div><div class="dash-donut-legend">${legend||"<span>暂无数据</span>"}</div>`;
 }
+function dashboardAccountMonitorHtml(current){
+  const items=monitoredAccountRows().map(row=>({
+    row,
+    account:String(accountOf(row)||"").trim(),
+    nick:nickOf(row)||accountOf(row),
+    followers:accountFollowerNumber(row),
+    views:summaryHotOf(row),
+    topDrama:topDramaTitleOf(row),
+    href:linkOf(row),
+    avatar:avatarOf(row),
+  })).filter(item=>item.account).sort((a,b)=>b.followers-a.followers);
+  const totalFans=items.reduce((sum,item)=>sum+Number(item.followers||0),0);
+  const totalViews=items.reduce((sum,item)=>sum+Number(item.views||0),0);
+  const maxFans=Math.max(1,...items.map(item=>Number(item.followers||0)));
+  const rowsHtml=items.map(item=>{
+    const pct=Math.max(3,Math.min(100,Number(item.followers||0)/maxFans*100));
+    const img=item.avatar?'<img src="'+esc(item.avatar)+'" alt="" loading="lazy" onerror="this.remove()">':"";
+    const title=item.topDrama?("最高短剧："+item.topDrama):"暂无最高短剧";
+    return `<div class="dash-monitor-row" title="${esc(item.nick+" · "+title)}">`+
+      `<div class="dash-monitor-avatar">${img}<span>${accountMonitorInitial(item.row)}</span></div>`+
+      `<a class="dash-monitor-home" href="${esc(item.href||("https://www.tiktok.com/@"+item.account))}" target="_blank" rel="noopener">主页</a>`+
+      `<div class="dash-monitor-main"><div class="dash-monitor-name">${esc(item.nick)}</div><div class="dash-monitor-id">@${esc(item.account)}</div></div>`+
+      `<div class="dash-monitor-fans"><span>粉丝</span><b>${accountMonitorFollowers(item.row)}</b></div>`+
+      `<div class="dash-monitor-bar" aria-hidden="true"><i style="width:${pct.toFixed(2)}%"></i></div>`+
+    `</div>`;
+  }).join("");
+  return `<div class="dash-panel dash-monitor">`+
+    `<div class="dash-monitor-head"><div><div class="dash-monitor-title">当前监控账号</div><div class="dash-monitor-sub">账号池最新状态 · 按粉丝量排序</div></div><div class="dash-monitor-count">${fmt(items.length||current.accountCount||0)}个</div></div>`+
+    `<div class="dash-monitor-summary"><div class="dash-monitor-metric"><span>总粉丝</span><b>${fmtPlay(totalFans)}</b></div><div class="dash-monitor-metric"><span>累计观看</span><b>${fmtPlay(totalViews)}</b></div></div>`+
+    `<div class="dash-monitor-list">${rowsHtml||'<div class="dashboard-loading">暂无监控账号数据</div>'}</div>`+
+  `</div>`;
+}
 function renderDashboard(){
   const box=$("dashboardCard");
   const page=$("dashboardPage");
@@ -2165,9 +2191,10 @@ function renderDashboard(){
   const monthThemeGrowth=dashboardThemeGrowthItems(30,comparablePayloads,currentPayload,12);
   const weekThemeGrowth=dashboardThemeGrowthItems(7,comparablePayloads,currentPayload,12);
   const topThemes=current.topThemes||[];
+  const accountMonitorHtml=dashboardAccountMonitorHtml(current);
   box.style.display="block";
   box.innerHTML=`<div class="dashboard-inner">
-    <div class="dashboard-head"><h2 class="dashboard-title">短剧运营数据分析可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
+    <div class="dashboard-head"><h2 class="dashboard-title">当前监控账号可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
     <div class="dashboard-grid">
       ${dashboardDramaCardHtml("全账号最新热剧",latestHot,{icon:"↗"})}
       ${dashboardDramaCardHtml("近7天涨幅",grow7,{light:true,icon:"7"})}
@@ -2177,11 +2204,7 @@ function renderDashboard(){
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area theme-growth-panel"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本月题材播放增长</div><div class="dash-panel-sub">按题材汇总当前播放量 - 历史播放量</div></div><div class="dash-panel-meta">按增长排序</div></div>${dashboardThemeGrowthPanelHtml(monthThemeGrowth,"本月")}</div>
       <div class="dash-panel dash-area theme-growth-panel"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本周题材播放增长</div><div class="dash-panel-sub">近7天可对比历史 · 总播放增长</div></div><div class="dash-panel-meta">滚动查看</div></div>${dashboardThemeGrowthPanelHtml(weekThemeGrowth,"本周")}</div>
-      <div class="dash-side">
-        <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">监控账号：${fmt(current.accountCount)}</div><div class="dash-stat-sub">账号汇总记录</div></div></div>
-        <div class="dash-stat"><div class="dash-stat-icon">N</div><div><div class="dash-stat-title">本周新增短剧：${fmt(weeklyDramaGrowth.diff)}部</div><div class="dash-stat-sub">${esc(weeklyDramaSub)}</div></div></div>
-        <div class="dash-stat"><div class="dash-stat-icon">G</div><div><div class="dash-stat-title">${esc(accountGrowthTitle)}</div><div class="dash-stat-sub">${esc(accountGrowthSub)}</div></div></div>
-      </div>
+      ${accountMonitorHtml}
     </div>
   </div>`;
   if(isPublicMode())setPublicPageView(publicPageView);
@@ -2690,34 +2713,20 @@ function accountMonitorInitial(row){
   const raw=String(nickOf(row)||accountOf(row)||"?").replace(/^@/,"").trim();
   return esc((raw.slice(0,2)||"?").toUpperCase());
 }
+function accountMetricNumber(row,keys){
+  const raw=valueOf(row,keys,0);
+  const text=String(raw==null?"":raw).trim();
+  if(/[万亿]/.test(text))return parseGrowthNumber(text);
+  return toInt(raw);
+}
+function accountFollowerNumber(row){
+  return accountMetricNumber(row,["粉丝","Followers / 粉丝"]);
+}
 function accountMonitorFollowers(row){
   const raw=valueOf(row,["粉丝","Followers / 粉丝"],0);
   const text=String(raw==null?"":raw).trim();
-  if(/[万亿]/.test(text))return esc(text);
-  return esc(fmtSummaryNumber("粉丝",raw));
-}
-function updateAccountPoolReport(){
-  const items=monitoredAccountRows();
-  const meta=$("accountMonitorMeta"), list=$("accountMonitorList");
-  if(meta)meta.textContent=items.length?("监控 "+items.length+" 个"):"等待最新报表";
-  if(!list)return;
-  if(!items.length){
-    list.innerHTML='<div class="account-monitor-empty">最新报表加载后会显示监控账号。</div>';
-    return;
-  }
-  list.innerHTML=items.map(row=>{
-    const acc=String(accountOf(row)||"").trim();
-    const nick=nickOf(row)||acc;
-    const href=linkOf(row)||("https://www.tiktok.com/@"+acc);
-    const avatar=avatarOf(row);
-    const img=avatar?'<img src="'+esc(avatar)+'" alt="" loading="lazy" onerror="this.remove()">':"";
-    return '<div class="account-monitor-row">'+
-      '<div class="account-monitor-avatar">'+img+'<span>'+accountMonitorInitial(row)+'</span></div>'+
-      '<div class="account-monitor-main"><div class="account-monitor-name">'+esc(nick)+'</div><div class="account-monitor-id">@'+esc(acc)+'</div></div>'+
-      '<div class="account-monitor-stat"><span>粉丝</span><b>'+accountMonitorFollowers(row)+'</b></div>'+
-      '<a class="mini-btn account-monitor-link" href="'+esc(href)+'" target="_blank" rel="noopener">主页</a>'+
-    '</div>';
-  }).join("");
+  const value=accountFollowerNumber(row);
+  return esc(value?fmtPlay(value):(text||"0"));
 }
 function parseReportDate(value){
   const s=String(value||"").trim();
@@ -2795,7 +2804,6 @@ function loadBackendPayload(payload,opts){
   const dramas=Array.isArray(payload.dramas_detail)?payload.dramas_detail:[];
   rows=[...summary];
   dramaRows=[...dramas];
-  updateAccountPoolReport();
   if(growthFilterState.enabled){
     growthFilterState.baselineMap=null;
     growthFilterState.baselineItem=null;
@@ -3241,7 +3249,6 @@ function init(){
   if(state.apiKey)$("rememberKey").checked=true;
   refreshKeyPill();
   updateAcctCount();
-  updateAccountPoolReport();
   syncBackendSecretInputs(store.get("thr_backend_secret")||"");
 
   $("accountsInput").addEventListener("input",updateAcctCount);
