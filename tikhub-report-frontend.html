@@ -362,22 +362,22 @@
   .backend-admin .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
   .backend-admin .tf:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .report-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .account-pool-card{margin-bottom:14px}
-  .account-pool-badge{font:600 11px var(--mono);color:var(--accent);background:var(--accent-soft);border:1px solid #d9d5ff;border-radius:6px;padding:1px 7px;margin-left:6px}
-  .account-pool-grid{display:grid;grid-template-columns:minmax(240px,1fr) minmax(280px,1.2fr);gap:14px;align-items:start}
-  .account-pool-panel{border:1px solid var(--line);border-radius:10px;background:#fff;padding:12px}
-  .account-pool-panel h3{margin:0 0 8px;font-family:var(--display);font-size:13px;color:var(--ink)}
-  .account-pool-meta{font-size:12px;color:var(--ink-faint);margin-bottom:10px;line-height:1.5}
-  .account-pool-chips{display:flex;flex-wrap:wrap;gap:7px;max-height:138px;overflow:auto}
-  .account-chip{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft);border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:4px 8px;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .account-pool-text{min-height:132px}
-  .account-pool-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}
-  .account-pool-secret{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:8px;align-items:end;margin-top:10px}
-  .account-pool-secret .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
-  .account-pool-status{font-size:12px;color:var(--ink-faint);min-height:18px;margin-top:8px}
-  .account-pool-status.ok{color:var(--ok)}
-  .account-pool-status.err{color:var(--err)}
-  .account-pool-note{font-size:12px;color:var(--ink-faint);line-height:1.55;margin-top:8px}
+  .account-monitor-card{margin-bottom:14px}
+  .account-monitor-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .account-monitor-meta{font:600 11px var(--mono);color:var(--accent);background:var(--accent-soft);border:1px solid #d9d5ff;border-radius:6px;padding:1px 7px}
+  .account-monitor-list{border-top:1px solid var(--line)}
+  .account-monitor-empty{padding:16px 0;color:var(--ink-faint);font-size:13px}
+  .account-monitor-row{display:grid;grid-template-columns:46px minmax(0,1fr) minmax(90px,auto) auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+  .account-monitor-row:last-child{border-bottom:0}
+  .account-monitor-avatar{position:relative;width:46px;height:46px;border-radius:50%;border:1px solid var(--line);background:#f3f5fb;color:var(--accent);display:grid;place-items:center;overflow:hidden;font:700 13px var(--mono)}
+  .account-monitor-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#fff}
+  .account-monitor-main{min-width:0}
+  .account-monitor-name{font-weight:700;color:var(--ink);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .account-monitor-id{font-family:var(--mono);font-size:12px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px}
+  .account-monitor-stat{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+  .account-monitor-stat span{font-size:11.5px;color:var(--ink-faint)}
+  .account-monitor-stat b{font-family:var(--mono);font-size:13px;color:var(--ink)}
+  .account-monitor-link{justify-self:end}
   .history-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
   .history-list{margin-top:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
   .history-empty{padding:14px 16px;color:var(--ink-faint);font-size:13px}
@@ -425,7 +425,7 @@
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:500;opacity:0;pointer-events:none;transition:.22s;z-index:99}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
-  @media (max-width:860px){.account-pool-grid{grid-template-columns:1fr}.account-pool-secret{grid-template-columns:1fr}}
+  @media (max-width:860px){.account-monitor-row{grid-template-columns:42px minmax(0,1fr) auto}.account-monitor-avatar{width:42px;height:42px}.account-monitor-stat{grid-column:2/3;align-items:flex-start}.account-monitor-link{grid-column:3/4;grid-row:1/3}}
   @media (max-width:680px){ .wrap{padding:14px}.topbar{padding:12px 14px}.tagline{display:none}.history-popover{right:-2px;width:calc(100vw - 24px)}.history-item{align-items:flex-start;flex-direction:column}.history-links{justify-content:flex-start} }
   @media (prefers-reduced-motion:reduce){ *{animation-duration:.001ms!important;transition-duration:.001ms!important} }
 </style>
@@ -616,42 +616,18 @@ shortdramatime"></textarea>
     <div class="page-switch report-page-switch">
       <button class="mini-btn" id="dashboardBackBtn" type="button">上一页：看板</button>
     </div>
-    <div class="card account-pool-card" id="accountPoolCard">
-      <details class="settings" id="accountPoolDetails">
-        <summary>账号池 <span class="account-pool-badge" id="accountPoolBadge">当前报表 0 个</span></summary>
-        <div class="settings-body">
-          <div class="account-pool-grid">
-            <div class="account-pool-panel">
-              <h3>当前报表账号</h3>
-              <div class="account-pool-meta" id="accountPoolReportMeta">最新报表加载后会显示账号。</div>
-              <div class="account-pool-chips" id="accountPoolReportList"></div>
-              <div class="account-pool-actions">
-                <button class="mini-btn" id="accountPoolUseReportBtn" type="button">用当前报表填入</button>
-                <button class="mini-btn" id="accountPoolCopyManualBtn" type="button">同步到本页输入框</button>
-              </div>
-            </div>
-            <div class="account-pool-panel">
-              <h3>后端账号池</h3>
-              <div class="account-pool-meta">这里保存的是后端每天定时抓取使用的账号，一行一个，保存时会自动去重。</div>
-              <textarea class="accounts account-pool-text" id="accountPoolInput" spellcheck="false" placeholder="masturzo.clemen&#10;aidramalabs_pulse0&#10;shortdramatime"></textarea>
-              <div class="account-pool-secret">
-                <div>
-                  <label class="fl" for="accountPoolSecret">任务密码 <span class="hint">— SCHEDULE_SECRET</span></label>
-                  <input class="tf" id="accountPoolSecret" type="password" autocomplete="off" spellcheck="false" placeholder="输入后才能读取/保存后端账号池" />
-                </div>
-                <button class="mini-btn" id="accountPoolLoadBtn" type="button">读取后端</button>
-              </div>
-              <div class="account-pool-actions">
-                <button class="mini-btn" id="accountPoolSaveBtn" type="button">保存到后端</button>
-                <button class="mini-btn" id="accountPoolRunBtn" type="button">保存并立即抓取</button>
-                <span class="acct-count">池内 <b id="accountPoolCount">0</b> 个账号</span>
-              </div>
-              <div class="account-pool-status" id="accountPoolStatus"></div>
-              <div class="account-pool-note">Render 免费实例重新部署后，运行时文件可能丢失；长期稳定请仍保留 Render 环境变量 SCHEDULE_ACCOUNTS 作为兜底。</div>
-            </div>
-          </div>
+    <div class="card account-monitor-card" id="accountMonitorCard">
+      <div class="card-head">
+        <div class="account-monitor-head">
+          <h2>当前监控账号</h2>
+          <span class="account-monitor-meta" id="accountMonitorMeta">等待最新报表</span>
         </div>
-      </details>
+      </div>
+      <div class="card-body">
+        <div class="account-monitor-list" id="accountMonitorList" aria-live="polite">
+          <div class="account-monitor-empty">最新报表加载后会显示监控账号。</div>
+        </div>
+      </div>
     </div>
     <div class="card" id="resultCard">
     <div class="card-head"><h2>报表</h2><div class="report-head-actions"><button class="mini-btn" id="reportBackTopBtn" type="button">返回看板</button></div></div>
@@ -758,6 +734,7 @@ const ID_KEYS=["aweme_id","awemeId","id","item_id","itemId"];
 const FOLLOWER_KEYS=["followerCount","follower_count","fans_count","total_follower","followers"];
 const HEART_KEYS=["heartCount","heart_count","total_favorited","favoriting_count","likes"];
 const NICK_KEYS=["nickname","nick_name","nick"];
+const AVATAR_KEYS=["头像","Avatar URL / 头像","avatarLarger","avatar_larger","avatarMedium","avatar_medium","avatarThumb","avatar_thumb","avatarUrl","avatar_url","avatar","cover","profile_pic_url","profilePicUrl"];
 const VCOUNT_KEYS=["videoCount","aweme_count","video_count"];
 const SECUID_KEYS=["secUid","sec_uid","sec_user_id","secUserId"];
 const DRAMA_LINK_FIELDS=["短剧链接","Drama Link / 短剧链接","Drama URL / 短剧链接","Share URL / 分享链接"];
@@ -870,6 +847,27 @@ function deepFind(obj,keys,d=0){
   }
   return null;
 }
+function deepFindAny(obj,keys,d=0){
+  if(d>9||obj==null)return null;
+  if(Array.isArray(obj)){for(const v of obj){const r=deepFindAny(v,keys,d+1);if(r!=null)return r;}return null;}
+  if(typeof obj==="object"){
+    for(const k of keys){if(k in obj)return obj[k];}
+    for(const k in obj){const r=deepFindAny(obj[k],keys,d+1);if(r!=null)return r;}
+  }
+  return null;
+}
+function avatarUrlFromValue(value){
+  if(!value)return "";
+  if(typeof value==="string")return /^https?:\/\//i.test(value)?value:"";
+  if(Array.isArray(value)){
+    for(const item of value){const url=avatarUrlFromValue(item);if(url)return url;}
+  }else if(typeof value==="object"){
+    const urls=value.url_list||value.urlList||value.urls;
+    if(Array.isArray(urls)){for(const url of urls){if(typeof url==="string"&&/^https?:\/\//i.test(url))return url;}}
+    for(const k of["url","uri","src"]){if(typeof value[k]==="string"&&/^https?:\/\//i.test(value[k]))return value[k];}
+  }
+  return "";
+}
 function looksLikeVideo(d){
   if(!d||typeof d!=="object")return false;
   const hasId=ID_KEYS.some(k=>k in d);
@@ -939,6 +937,7 @@ async function getProfile(uid,secUid){
     followers:toInt(deepFind(data,FOLLOWER_KEYS)),
     hearts:toInt(deepFind(data,HEART_KEYS)),
     videoCount:toInt(deepFind(data,VCOUNT_KEYS)),
+    avatar:avatarUrlFromValue(deepFindAny(data,AVATAR_KEYS)),
   };
 }
 async function resolveSecuid(uid,fallback){
@@ -972,7 +971,7 @@ async function getAllVideos(secUid,uid,onPage){
     let data;
     if(lockedEp){data=await apiGet(lockedEp,params,"用户视频列表接口");}
     else{const r=await fetchPostsPage(epList,params,ep=>{lockedEp=ep;if(ep!==cfg.epPosts)log("视频接口改用 "+ep,"c-dim");});data=r.data;}
-    if(!stats){stats={nickname:(deepFind(data,NICK_KEYS)||"")+"",followers:toInt(deepFind(data,FOLLOWER_KEYS)),hearts:toInt(deepFind(data,HEART_KEYS)),videoCount:toInt(deepFind(data,VCOUNT_KEYS))};}
+    if(!stats){stats={nickname:(deepFind(data,NICK_KEYS)||"")+"",followers:toInt(deepFind(data,FOLLOWER_KEYS)),hearts:toInt(deepFind(data,HEART_KEYS)),videoCount:toInt(deepFind(data,VCOUNT_KEYS)),avatar:avatarUrlFromValue(deepFindAny(data,AVATAR_KEYS))};}
     const batch=findVideoList(data);let added=0;
     for(const v of batch){const id=getAwemeId(v);if(id&&!seen.has(id)){seen.add(id);videos.push({id,desc:getDesc(v)||"",views:getPlayCount(v),url:"https://www.tiktok.com/@"+encodeURIComponent(uid)+"/video/"+encodeURIComponent(id),play_url:videoPlayUrlOf(v)});added++;}}
     onPage(page,added,videos.length);
@@ -1050,7 +1049,7 @@ function buildRow(uid,prof,videos,dramas){
   const avg=dn?Math.round(totalViews/dn):0;
   let topName="",topViews=0;
   if(dramas.length){const t=dramas.reduce((a,b)=>b.views>a.views?b:a);topName=t.name;topViews=t.views;}
-  return{"截图名称":prof.nickname,"账号":uid,"昵称":prof.nickname,"粉丝":prof.followers,"点赞":prof.hearts,
+  return{"截图名称":prof.nickname,"账号":uid,"昵称":prof.nickname,"头像":prof.avatar||"","粉丝":prof.followers,"点赞":prof.hearts,
     "短剧数":dn,"总集数":totalEps,"累计观看":totalViews,"单剧均观看":avg,
     "最高观看短剧":topName,"最高观看":topViews,"主页链接":"https://www.tiktok.com/@"+uid};
 }
@@ -1139,7 +1138,7 @@ async function scrapeAccount(acc,log){
   log("secUid ✓","c-dim");
   let prof;
   try{prof=await getProfile(acc,sec);log("资料 ✓ 粉丝 "+fmt(prof.followers)+" 点赞 "+fmt(prof.hearts),"c-ok");}
-  catch(e){if(e instanceof ApiError&&e.corsLike)throw e;prof={nickname:acc,followers:0,hearts:0,videoCount:0};log("资料接口没返回,改从视频作者信息补全","c-dim");}
+  catch(e){if(e instanceof ApiError&&e.corsLike)throw e;prof={nickname:acc,followers:0,hearts:0,videoCount:0,avatar:""};log("资料接口没返回,改从视频作者信息补全","c-dim");}
   const videos=await getAllVideos(sec,acc,(p,a,t)=>log("第"+p+"页 +"+a+" (累计 "+t+")","c-dim"));
   const st=videos._stats||{};
   const realTotal=prof.videoCount||st.videoCount||0;
@@ -1147,6 +1146,7 @@ async function scrapeAccount(acc,log){
   prof.followers=prof.followers||st.followers||0;
   prof.hearts=prof.hearts||st.hearts||0;
   prof.videoCount=prof.videoCount||st.videoCount||0;
+  prof.avatar=prof.avatar||st.avatar||"";
   if((!prof.nickname||prof.nickname===acc)&&st.nickname)prof.nickname=st.nickname;
   let dramas;
   if(cfg.groupBy==="playlist"){
@@ -1212,6 +1212,7 @@ function valueOf(row,keys,fallback){
 function accountOf(row){return valueOf(row,["账号","Account / 账号"],"");}
 function nickOf(row){return valueOf(row,["昵称","Nickname / 昵称"],accountOf(row));}
 function linkOf(row){const acc=accountOf(row);return valueOf(row,["主页链接","Source Profile URL / 来源主页"],acc?("https://www.tiktok.com/@"+acc):"");}
+function avatarOf(row){return avatarUrlFromValue(valueOf(row,AVATAR_KEYS,""));}
 function dramaTitleOf(row){return valueOf(row,["English Title / 英文剧名","短剧名"],"");}
 function cleanDramaId(value){return String(value||"").trim().replace(/^ID\s+/i,"").replace(/[^0-9A-Za-z_-]/g,"");}
 function addrUrlOf(value){if(!value)return "";if(Array.isArray(value)){for(const item of value){if(typeof item==="string"&&/^https?:\/\//i.test(item))return item;}}else if(typeof value==="object"){const urls=value.url_list||value.urlList||value.urls;if(Array.isArray(urls)){for(const url of urls){if(typeof url==="string"&&/^https?:\/\//i.test(url))return url;}}for(const k of["url","uri"]){if(typeof value[k]==="string"&&/^https?:\/\//i.test(value[k]))return value[k];}}return "";}
@@ -2608,14 +2609,12 @@ function backendBase(){
 }
 function backendSecret(){
   const el=$("backendSecret");
-  const pool=$("accountPoolSecret");
-  return (el&&el.value?el.value.trim():"") || (pool&&pool.value?pool.value.trim():"") || store.get("thr_backend_secret") || "";
+  return (el&&el.value?el.value.trim():"") || store.get("thr_backend_secret") || "";
 }
 function syncBackendSecretInputs(value){
   value=String(value||"").trim();
-  const backend=$("backendSecret"), pool=$("accountPoolSecret");
+  const backend=$("backendSecret");
   if(backend&&backend.value!==value)backend.value=value;
-  if(pool&&pool.value!==value)pool.value=value;
   if(value)store.set("thr_backend_secret",value);
   else store.del("thr_backend_secret");
 }
@@ -2676,92 +2675,49 @@ async function fetchJsonUrl(url,opts){
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
   return data;
 }
-function accountPoolAccountsFromReport(){
-  return parseAccountsText(rows.map(row=>accountOf(row)).join("\n"));
+function monitoredAccountRows(){
+  const seen=new Set(), out=[];
+  for(const row of rows){
+    const acc=String(accountOf(row)||"").trim();
+    const key=acc.toLowerCase();
+    if(!acc||seen.has(key))continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+function accountMonitorInitial(row){
+  const raw=String(nickOf(row)||accountOf(row)||"?").replace(/^@/,"").trim();
+  return esc((raw.slice(0,2)||"?").toUpperCase());
+}
+function accountMonitorFollowers(row){
+  const raw=valueOf(row,["粉丝","Followers / 粉丝"],0);
+  const text=String(raw==null?"":raw).trim();
+  if(/[万亿]/.test(text))return esc(text);
+  return esc(fmtSummaryNumber("粉丝",raw));
 }
 function updateAccountPoolReport(){
-  const accounts=accountPoolAccountsFromReport();
-  const badge=$("accountPoolBadge"), meta=$("accountPoolReportMeta"), list=$("accountPoolReportList");
-  if(badge)badge.textContent="当前报表 "+accounts.length+" 个";
-  if(meta)meta.textContent=accounts.length?("最新报表里有 "+accounts.length+" 个账号，可以一键填入后端账号池。"):"最新报表加载后会显示账号。";
-  if(list){
-    const shown=accounts.slice(0,80).map(uid=>'<span class="account-chip">@'+esc(uid)+'</span>').join("");
-    list.innerHTML=shown+(accounts.length>80?'<span class="account-chip">+'+esc(accounts.length-80)+' more</span>':"");
+  const items=monitoredAccountRows();
+  const meta=$("accountMonitorMeta"), list=$("accountMonitorList");
+  if(meta)meta.textContent=items.length?("监控 "+items.length+" 个"):"等待最新报表";
+  if(!list)return;
+  if(!items.length){
+    list.innerHTML='<div class="account-monitor-empty">最新报表加载后会显示监控账号。</div>';
+    return;
   }
-}
-function accountPoolInputAccounts(){
-  const el=$("accountPoolInput");
-  return parseAccountsText(el?el.value:"");
-}
-function updateAccountPoolInputCount(){
-  const count=$("accountPoolCount");
-  if(count)count.textContent=accountPoolInputAccounts().length;
-}
-function setAccountPoolStatus(text, type){
-  const el=$("accountPoolStatus");
-  if(!el)return;
-  el.textContent=text||"";
-  el.className="account-pool-status"+(type?(" "+type):"");
-}
-function requireAccountPoolSecret(){
-  if(backendSecret())return true;
-  setAccountPoolStatus("请先输入任务密码 SCHEDULE_SECRET。","err");
-  const el=$("accountPoolSecret");
-  if(el)el.focus();
-  return false;
-}
-function useReportAccountsForPool(){
-  const accounts=accountPoolAccountsFromReport();
-  if(!accounts.length){setAccountPoolStatus("当前报表还没有账号可填入。","err");return;}
-  $("accountPoolInput").value=formatAccountList(accounts);
-  updateAccountPoolInputCount();
-  setAccountPoolStatus("已用当前报表账号填入，保存后才会写入后端。","ok");
-}
-function copyPoolToManualInput(){
-  const accounts=accountPoolInputAccounts();
-  if(!accounts.length){setAccountPoolStatus("账号池为空，无法同步。","err");return;}
-  $("accountsInput").value=formatAccountList(accounts);
-  store.set("thr_accounts",$("accountsInput").value);
-  updateAcctCount();
-  setAccountPoolStatus("已同步到本页账号输入框。","ok");
-}
-async function loadAccountPool(){
-  if(!requireAccountPoolSecret())return;
-  setAccountPoolStatus("正在读取后端账号池...");
-  try{
-    const data=await backendFetchJson("/schedule-accounts",{}, {requireSecret:true});
-    $("accountPoolInput").value=formatAccountList(data.accounts||[]);
-    updateAccountPoolInputCount();
-    const source=data.source==="backend_pool"?"后端账号池":(data.source||"空");
-    setAccountPoolStatus("已读取 "+(data.count||0)+" 个账号 · 来源: "+source, "ok");
-  }catch(e){
-    setAccountPoolStatus("读取失败:"+(e.message||e),"err");
-    toast("账号池读取失败");
-  }
-}
-async function saveAccountPool(opts){
-  opts=opts||{};
-  if(!requireAccountPoolSecret())throw new Error("missing SCHEDULE_SECRET");
-  const accounts=accountPoolInputAccounts();
-  if(!accounts.length){
-    setAccountPoolStatus("账号池为空，未保存。","err");
-    throw new Error("account pool is empty");
-  }
-  setAccountPoolStatus("正在保存到后端...");
-  const data=await backendPostJson("/schedule-accounts",{accounts}, {}, {requireSecret:true});
-  $("accountPoolInput").value=formatAccountList(data.accounts||[]);
-  updateAccountPoolInputCount();
-  setAccountPoolStatus("已保存 "+(data.count||0)+" 个账号到后端账号池。","ok");
-  if(!opts.quiet)toast("账号池已保存");
-  return data;
-}
-async function saveAndRunAccountPool(){
-  try{
-    await saveAccountPool({quiet:true});
-    await runBackendJob(true);
-  }catch(e){
-    if((e.message||e)!=="account pool is empty")toast("账号池操作失败");
-  }
+  list.innerHTML=items.map(row=>{
+    const acc=String(accountOf(row)||"").trim();
+    const nick=nickOf(row)||acc;
+    const href=linkOf(row)||("https://www.tiktok.com/@"+acc);
+    const avatar=avatarOf(row);
+    const img=avatar?'<img src="'+esc(avatar)+'" alt="" loading="lazy" onerror="this.remove()">':"";
+    return '<div class="account-monitor-row">'+
+      '<div class="account-monitor-avatar">'+img+'<span>'+accountMonitorInitial(row)+'</span></div>'+
+      '<div class="account-monitor-main"><div class="account-monitor-name">'+esc(nick)+'</div><div class="account-monitor-id">@'+esc(acc)+'</div></div>'+
+      '<div class="account-monitor-stat"><span>粉丝</span><b>'+accountMonitorFollowers(row)+'</b></div>'+
+      '<a class="mini-btn account-monitor-link" href="'+esc(href)+'" target="_blank" rel="noopener">主页</a>'+
+    '</div>';
+  }).join("");
 }
 function parseReportDate(value){
   const s=String(value||"").trim();
@@ -3091,7 +3047,7 @@ async function runBackendJob(manual){
       if(!/already running/i.test(e.message||""))throw e;
       log("后端已有任务在跑,开始等待结果","c-dim");
     }
-    if(started)log("后端已开始抓取,账号名单来自后端账号池或 Render 环境变量兜底","c-ok");
+    if(started)log("后端已开始抓取,账号名单来自后端监控账号配置或 Render 环境变量兜底","c-ok");
     await pollBackendJob();
     store.set("thr_sched_last",dayStr());
     log("后端结果已加载到前端表格,可以导出 CSV/Excel/Word","c-ok");
@@ -3286,25 +3242,18 @@ function init(){
   refreshKeyPill();
   updateAcctCount();
   updateAccountPoolReport();
-  updateAccountPoolInputCount();
   syncBackendSecretInputs(store.get("thr_backend_secret")||"");
 
   $("accountsInput").addEventListener("input",updateAcctCount);
   $("accountsInput").addEventListener("input",()=>store.set("thr_accounts",$("accountsInput").value));
   if(store.get("thr_accounts")){$("accountsInput").value=store.get("thr_accounts");updateAcctCount();}
-  ["backendSecret","accountPoolSecret"].forEach(id=>{
+  ["backendSecret"].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener("input",()=>syncBackendSecretInputs(el.value));
   });
   $("backendRunBtn").addEventListener("click",()=>runBackendJob(true));
   $("backendLoadBtn").addEventListener("click",()=>loadBackendLatest().catch(e=>{backendSetStatus("出错:"+(e.message||e));toast("出错:"+(e.message||e));}));
   $("backendReportsBtn").addEventListener("click",openBackendReports);
-  $("accountPoolInput").addEventListener("input",updateAccountPoolInputCount);
-  $("accountPoolUseReportBtn").addEventListener("click",useReportAccountsForPool);
-  $("accountPoolCopyManualBtn").addEventListener("click",copyPoolToManualInput);
-  $("accountPoolLoadBtn").addEventListener("click",loadAccountPool);
-  $("accountPoolSaveBtn").addEventListener("click",()=>saveAccountPool().catch(e=>{if((e.message||e)!=="account pool is empty")setAccountPoolStatus("保存失败:"+(e.message||e),"err");}));
-  $("accountPoolRunBtn").addEventListener("click",saveAndRunAccountPool);
   const historyMenu=$("historyMenu");
   const historyMenuBtn=$("historyMenuBtn");
   if(historyMenu&&historyMenuBtn){

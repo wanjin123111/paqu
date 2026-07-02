@@ -154,6 +154,10 @@ DRAMA_PUBLISH_TIME_KEYS = (
 FOLLOWER_KEYS = ("followerCount", "follower_count", "fans_count", "total_follower", "followers")
 HEART_KEYS = ("heartCount", "heart_count", "total_favorited", "favoriting_count", "likes")
 NICK_KEYS = ("nickname", "nick_name", "nick")
+AVATAR_KEYS = (
+    "avatarLarger", "avatar_larger", "avatarMedium", "avatar_medium", "avatarThumb", "avatar_thumb",
+    "avatarUrl", "avatar_url", "avatar", "cover", "profile_pic_url", "profilePicUrl",
+)
 VCOUNT_KEYS = ("videoCount", "aweme_count", "video_count")
 SECUID_KEYS = ("secUid", "sec_uid", "sec_user_id", "secUserId")
 SUMMARY_COLUMNS = ["截图名称", "账号", "昵称", "粉丝", "点赞", "短剧数", "总集数", "累计观看",
@@ -796,6 +800,15 @@ def _deep_find_any(obj, keys, depth=0):
     return None
 
 
+def _first_profile_image(data):
+    value = _deep_find_any(data, AVATAR_KEYS)
+    url = _first_addr_url(value)
+    if url:
+        return url
+    text = _to_text(value)
+    return text if text.startswith("http") else ""
+
+
 def _looks_like_video(item):
     if not isinstance(item, dict):
         return False
@@ -1016,7 +1029,7 @@ def _resolve_secuid(uid):
 
 
 def _get_profile(uid, secuid):
-    profile = {"nickname": uid, "followers": 0, "hearts": 0, "videoCount": 0}
+    profile = {"nickname": uid, "followers": 0, "hearts": 0, "videoCount": 0, "avatar": ""}
     try:
         data = _send_tikhub_get(DEFAULT_ENDPOINTS["profile"], {
             "sec_user_id": secuid,
@@ -1031,6 +1044,7 @@ def _get_profile(uid, secuid):
     profile["followers"] = _to_int(_deep_find(data, FOLLOWER_KEYS))
     profile["hearts"] = _to_int(_deep_find(data, HEART_KEYS))
     profile["videoCount"] = _to_int(_deep_find(data, VCOUNT_KEYS))
+    profile["avatar"] = _first_profile_image(data)
     return profile
 
 
@@ -1516,6 +1530,7 @@ def _build_summary_row(uid, profile, videos, dramas):
         "截图名称": profile["nickname"],
         "账号": uid,
         "昵称": profile["nickname"],
+        "头像": profile.get("avatar", ""),
         "粉丝": profile["followers"],
         "点赞": profile["hearts"],
         "短剧数": drama_count,
