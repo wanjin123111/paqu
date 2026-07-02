@@ -2253,7 +2253,7 @@ function renderDashboard(){
   const grow7=dashboardDramaGrowthItem(7,comparablePayloads,currentPayload);
   const grow3=dashboardDramaGrowthItem(3,comparablePayloads,currentPayload);
   const grow1=dashboardDramaGrowthItem(1,comparablePayloads,currentPayload);
-  const monthGrowthItems=dashboardMonthlyGrowthItems(30,comparablePayloads,currentPayload,0);
+  const monthGrowthItems=dashboardMonthlyGrowthItems(30,comparablePayloads,currentPayload,30);
   const topThemes=current.topThemes||[];
   box.style.display="block";
   box.innerHTML=`<div class="dashboard-inner">
@@ -2263,7 +2263,7 @@ function renderDashboard(){
       ${dashboardDramaCardHtml("近7天涨幅",grow7,{light:true,icon:"7"})}
       ${dashboardDramaCardHtml("近3天涨幅",grow3,{icon:"3"})}
       ${dashboardDramaCardHtml("近1天涨幅",grow1,{light:true,icon:"1"})}
-      <div class="dash-panel dash-growth-wide"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">对比历史新增播放 · 全账号按涨幅排序</div></div><div class="dash-panel-meta">全部上涨短剧 · ${fmt(monthGrowthItems.length)}部</div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems,{limit:0,expanded:true,label:"近30天热度新增榜完整列表"})}</div>
+      <div class="dash-panel dash-growth-wide"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">近30天增长最高的30部 · 按增长排序</div></div><div class="dash-panel-meta">Top ${fmt(monthGrowthItems.length)} · 实时按增长排序</div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems,{limit:30,expanded:true,label:"近30天热度新增榜 Top 30"})}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-side">
         <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">监控账号：${fmt(current.accountCount)}</div><div class="dash-stat-sub">账号汇总记录</div></div></div>
