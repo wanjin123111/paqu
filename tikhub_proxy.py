@@ -95,6 +95,10 @@ AUTO_REFRESH_COOLDOWN_SECONDS = _env_int("AUTO_REFRESH_COOLDOWN_SECONDS", 300, 3
 VIDEO_PLAY_URL_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_URL_CACHE_TTL_SECONDS", 600, 0, 86400)
 DRAMA_LINK_PAGE_SIZE = _env_int("DRAMA_LINK_PAGE_SIZE", 50, 1, 50)
 DRAMA_LINK_MAX_EPISODES = _env_int("DRAMA_LINK_MAX_EPISODES", 500, 1, 5000)
+SCHEDULE_SAVE_EPISODE_HISTORY = _env_bool("SCHEDULE_SAVE_EPISODE_HISTORY", True)
+SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS", 0, 0, 20000)
+SCHEDULE_EPISODE_HISTORY_MAX_EPISODES = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_EPISODES", DRAMA_LINK_MAX_EPISODES, 0, 5000)
+SCHEDULE_EPISODE_HISTORY_DELAY_MS = _env_int("SCHEDULE_EPISODE_HISTORY_DELAY_MS", SCHEDULE_DELAY_MS, 0, 60000)
 DRAMA_EPISODE_HISTORY_MAX_POINTS = _env_int("DRAMA_EPISODE_HISTORY_MAX_POINTS", 160, 20, 1000)
 DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS = _env_int("DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS", 75, 35, 365)
 DRAMA_EPISODE_HISTORY_DEDUP_SECONDS = _env_int("DRAMA_EPISODE_HISTORY_DEDUP_SECONDS", 1800, 60, 86400)
@@ -1679,6 +1683,15 @@ def _run_scheduled_job(accounts):
     except Exception:
         pass
     files = _write_report_bundle(rows, drama_rows, errors)
+    try:
+        episode_history = _save_scheduled_episode_history(drama_rows)
+    except Exception as exc:
+        episode_history = {
+            "enabled": bool(SCHEDULE_SAVE_EPISODE_HISTORY),
+            "ok": False,
+            "error": str(exc),
+            "file": "reports/drama_episode_history.json",
+        }
     return {
         "ok": True,
         "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -1687,6 +1700,7 @@ def _run_scheduled_job(accounts):
         "accounts_failed": len(errors),
         "dramas": len(drama_rows),
         "files": files,
+        "episode_history": episode_history,
         "errors": errors,
     }
 
@@ -1752,11 +1766,14 @@ def _episode_point_ms(point):
 
 
 def _read_drama_episode_history():
-    try:
-        with open(DRAMA_EPISODE_HISTORY_FILE, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    except Exception:
-        data = {}
+    data = {}
+    for path in (DRAMA_EPISODE_HISTORY_FILE, os.path.join(PUBLIC_REPORTS_DIR, "drama_episode_history.json")):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            break
+        except Exception:
+            data = {}
     items = data.get("items") if isinstance(data, dict) else {}
     if not isinstance(items, dict):
         items = {}
@@ -1815,6 +1832,50 @@ def _trim_episode_history_points(points, now_ms):
     return kept[-DRAMA_EPISODE_HISTORY_MAX_POINTS:]
 
 
+def _record_episode_history_entries(history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=True):
+    metrics, changed, recorded = {}, False, 0
+    if not isinstance(history, dict):
+        history = {}
+    items = history.get("items") if isinstance(history, dict) else {}
+    if not isinstance(items, dict):
+        items = {}
+    history["items"] = items
+    for episode in episodes:
+        video_id = _clean_drama_id(episode.get("video_id"))
+        key = _episode_history_key(uid, drama_id, video_id)
+        if not key:
+            continue
+        entry = items.get(key)
+        if not isinstance(entry, dict):
+            entry = {}
+            items[key] = entry
+        points = entry.get("points")
+        if not isinstance(points, list):
+            points = []
+        if collect_metrics:
+            metrics[video_id] = {
+                "week": _episode_growth_from_points(points, episode.get("views"), now_ms, 7),
+                "month": _episode_growth_from_points(points, episode.get("views"), now_ms, 30),
+            }
+        entry.update({
+            "uid": str(uid or "").strip().lstrip("@"),
+            "drama_id": _clean_drama_id(drama_id),
+            "video_id": video_id,
+            "episode_label": episode.get("episode_label") or "",
+            "title": episode.get("title") or "",
+        })
+        points = _trim_episode_history_points(points, now_ms)
+        snapshot = {"ms": now_ms, "ts": now_text, "views": _to_int(episode.get("views"))}
+        if points and now_ms - _episode_point_ms(points[-1]) <= DRAMA_EPISODE_HISTORY_DEDUP_SECONDS * 1000:
+            points[-1] = snapshot
+        else:
+            points.append(snapshot)
+        entry["points"] = _trim_episode_history_points(points, now_ms)
+        changed = True
+        recorded += 1
+    return metrics, changed, recorded
+
+
 def _collect_episode_growth_and_record(uid, drama_id, episodes):
     metrics = {}
     if not episodes:
@@ -1824,38 +1885,7 @@ def _collect_episode_growth_and_record(uid, drama_id, episodes):
     changed = False
     with DRAMA_EPISODE_HISTORY_LOCK:
         history = _read_drama_episode_history()
-        items = history.setdefault("items", {})
-        for episode in episodes:
-            video_id = _clean_drama_id(episode.get("video_id"))
-            key = _episode_history_key(uid, drama_id, video_id)
-            if not key:
-                continue
-            entry = items.get(key)
-            if not isinstance(entry, dict):
-                entry = {}
-                items[key] = entry
-            points = entry.get("points")
-            if not isinstance(points, list):
-                points = []
-            metrics[video_id] = {
-                "week": _episode_growth_from_points(points, episode.get("views"), now_ms, 7),
-                "month": _episode_growth_from_points(points, episode.get("views"), now_ms, 30),
-            }
-            entry.update({
-                "uid": str(uid or "").strip().lstrip("@"),
-                "drama_id": _clean_drama_id(drama_id),
-                "video_id": video_id,
-                "episode_label": episode.get("episode_label") or "",
-                "title": episode.get("title") or "",
-            })
-            points = _trim_episode_history_points(points, now_ms)
-            snapshot = {"ms": now_ms, "ts": now_text, "views": _to_int(episode.get("views"))}
-            if points and now_ms - _episode_point_ms(points[-1]) <= DRAMA_EPISODE_HISTORY_DEDUP_SECONDS * 1000:
-                points[-1] = snapshot
-            else:
-                points.append(snapshot)
-            entry["points"] = _trim_episode_history_points(points, now_ms)
-            changed = True
+        metrics, changed, _recorded = _record_episode_history_entries(history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=True)
         if changed:
             try:
                 _write_drama_episode_history(history)
@@ -1925,6 +1955,96 @@ def _drama_episode_summary(item, uid, index):
         "video_url": page_url,
         "play_url": play_url,
     }
+
+
+def _drama_row_value(row, keys):
+    if not isinstance(row, dict):
+        return ""
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def _scheduled_episode_history_targets(drama_rows):
+    targets, seen = [], set()
+    for row in drama_rows:
+        uid = str(_drama_row_value(row, ("Account / \u8d26\u53f7", "\u8d26\u53f7", "Account")) or "").strip().lstrip("@")
+        drama_id = _clean_drama_id(_drama_row_value(row, ("Drama ID / \u77ed\u5267ID", "\u77ed\u5267ID", "Drama ID")))
+        if not uid or not drama_id:
+            continue
+        key = (uid.lower(), drama_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append({
+            "uid": uid,
+            "drama_id": drama_id,
+            "title": _to_text(_drama_row_value(row, ("English Title / \u82f1\u6587\u5267\u540d", "\u77ed\u5267\u540d", "English Title")), 120),
+        })
+    if SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS:
+        return targets[:SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS]
+    return targets
+
+
+def _save_scheduled_episode_history(drama_rows):
+    result = {
+        "enabled": bool(SCHEDULE_SAVE_EPISODE_HISTORY),
+        "ok": True,
+        "targets_total": 0,
+        "attempted": 0,
+        "dramas_ok": 0,
+        "dramas_empty": 0,
+        "episodes_saved": 0,
+        "errors": [],
+        "runtime_limited": False,
+        "file": "reports/drama_episode_history.json",
+    }
+    if not SCHEDULE_SAVE_EPISODE_HISTORY:
+        return result
+    targets = _scheduled_episode_history_targets(drama_rows)
+    result["targets_total"] = len(targets)
+    if not targets:
+        return result
+    started = time.time()
+    max_episodes = SCHEDULE_EPISODE_HISTORY_MAX_EPISODES or DRAMA_LINK_MAX_EPISODES
+    fetched = []
+    for target in targets:
+        if _runtime_exceeded(started):
+            result["runtime_limited"] = True
+            break
+        uid, drama_id = target["uid"], target["drama_id"]
+        result["attempted"] += 1
+        try:
+            items = _get_drama_episode_items(drama_id, uid, started=started, limit=max_episodes)
+            episodes = [_drama_episode_summary(item, uid, idx + 1) for idx, item in enumerate(items)]
+            if episodes:
+                fetched.append((uid, drama_id, episodes))
+                result["dramas_ok"] += 1
+                result["episodes_saved"] += len(episodes)
+            else:
+                result["dramas_empty"] += 1
+        except Exception as exc:
+            if len(result["errors"]) < 20:
+                result["errors"].append({"uid": uid, "drama_id": drama_id, "error": str(exc)})
+        if SCHEDULE_EPISODE_HISTORY_DELAY_MS:
+            time.sleep(SCHEDULE_EPISODE_HISTORY_DELAY_MS / 1000.0)
+    if not fetched:
+        return result
+    now_ms = int(time.time() * 1000)
+    now_text = datetime.datetime.fromtimestamp(now_ms / 1000.0, BEIJING_TZ).isoformat(timespec="seconds")
+    with DRAMA_EPISODE_HISTORY_LOCK:
+        history = _read_drama_episode_history()
+        changed = False
+        for uid, drama_id, episodes in fetched:
+            _metrics, item_changed, _recorded = _record_episode_history_entries(
+                history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=False
+            )
+            changed = changed or item_changed
+        if changed:
+            _write_drama_episode_history(history)
+    return result
 
 
 def _render_drama_episode_list_page(uid, drama_id, episodes):

@@ -38,6 +38,10 @@ jobs:
             -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
             "https://paqu-tikhub-proxy.onrender.com/reports/latest_dramas.csv" \
             -o tmp_reports/latest_dramas.csv
+          curl --fail --show-error --silent --max-time 120 \
+            -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
+            "https://paqu-tikhub-proxy.onrender.com/reports/drama_episode_history.json" \
+            -o tmp_reports/drama_episode_history.json || true
 
       - name: Publish report history
         run: |
@@ -69,6 +73,9 @@ jobs:
           shutil.copyfile(tmp / "latest_report.json", out / "latest_report.json")
           shutil.copyfile(tmp / "latest_report.csv", out / "latest_report.csv")
           shutil.copyfile(tmp / "latest_dramas.csv", out / "latest_dramas.csv")
+          episode_history = tmp / "drama_episode_history.json"
+          if episode_history.exists() and episode_history.stat().st_size:
+              shutil.copyfile(episode_history, out / "drama_episode_history.json")
 
           manifest_path = out / "manifest.json"
           if manifest_path.exists():
