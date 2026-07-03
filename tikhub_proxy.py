@@ -2157,7 +2157,7 @@ function Receive-FinishedJobs {
     if ($job.State -eq "Running") {
       $running += $job
     } else {
-      Receive-Job -Job $job | Out-Host
+      Receive-Job -Job $job -ErrorAction Continue 2>&1 | Out-Host
       Remove-Job -Job $job
     }
   }
@@ -2177,7 +2177,7 @@ foreach ($item in $items) {
       return
     }
     Write-Host "Downloading: $file"
-    & curl.exe -L --fail --retry 3 --retry-delay 2 --connect-timeout 20 -A $ua -e $referer -o $out $url
+    & curl.exe -sS -L --fail --retry 3 --retry-delay 2 --connect-timeout 20 -A $ua -e $referer -o $out $url
     if ($LASTEXITCODE -ne 0) {
       throw "curl failed: $file"
     }
