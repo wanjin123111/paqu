@@ -230,7 +230,7 @@
   .dash-growth-line{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%}
   .dash-growth-arrow,.dash-growth-value{color:#EF4444;font-weight:800}
   .dash-growth-arrow{font-size:14px;line-height:1;transform:translateY(-1px)}
-  .dash-main{grid-column:1 / span 4;grid-row:2;min-height:160px;padding:12px 14px 10px;background:linear-gradient(180deg,#fff 0%,#FBFBFF 100%)}
+  .dash-main{grid-column:1 / span 4;grid-row:2;min-height:240px;padding:12px 14px 10px;background:linear-gradient(180deg,#fff 0%,#FBFBFF 100%)}
   .dash-donut{grid-column:5;grid-row:1 / span 2;padding:14px 12px}
   .dash-area{min-height:188px;padding:11px}
   .dash-growth-wide{grid-column:1 / span 4;grid-row:2 / span 2;min-height:350px;padding:12px 14px 10px;display:flex;flex-direction:column;background:linear-gradient(180deg,#fff 0%,#F5F4FF 100%);border-color:#D8D6EA}
@@ -247,7 +247,7 @@
   .dash-chart{width:100%;height:116px;display:block}
   .dash-chart.tall{height:130px}
   .growth-rank-list{flex:1;min-height:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 18px;padding:1px 6px 0 2px;overflow-y:auto;overscroll-behavior:contain}
-  .growth-rank-list.expanded{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 18px;padding-right:7px;scrollbar-gutter:stable}
+  .growth-rank-list.expanded{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 18px;padding-right:7px;overflow:visible;scrollbar-gutter:stable}
   .growth-rank-list::-webkit-scrollbar{width:5px}
   .growth-rank-list::-webkit-scrollbar-thumb{background:rgba(85,70,255,.35);border-radius:999px}
   .growth-rank-list::-webkit-scrollbar-track{background:transparent}
@@ -367,12 +367,14 @@
   body.public-mode #monitorDashboardCard::after{height:8px}
   body.public-mode #dashboardCard .dashboard-inner{height:100%;display:flex;flex-direction:column;padding:34px 40px 36px}
   body.public-mode #dashboardCard .dashboard-head{padding-right:145px}
-  body.public-mode #dashboardCard .dashboard-grid{flex:1;min-height:0;grid-template-rows:minmax(118px,.72fr) minmax(230px,1.35fr) minmax(340px,1.75fr)}
+  body.public-mode #dashboardCard .dashboard-grid{flex:1;min-height:0;grid-template-rows:minmax(118px,.66fr) minmax(308px,1.7fr) minmax(260px,1.22fr)}
   body.public-mode #dashboardCard .dash-panel{min-height:0}
   body.public-mode #dashboardCard .dash-main,
   body.public-mode #dashboardCard .dash-area{display:flex;flex-direction:column}
   body.public-mode #dashboardCard .dash-chart{flex:1;height:auto;min-height:0}
   body.public-mode #dashboardCard .dash-chart.tall{height:auto}
+  body.public-mode #dashboardCard .dash-main{min-height:308px}
+  body.public-mode #dashboardCard .theme-growth-panel{min-height:0}
   body.public-mode #dashboardCard .dash-progress-row{grid-template-columns:28px minmax(0,1fr) 38px;gap:8px;margin:7px 0}
   body.public-mode #dashboardCard .dash-progress-icon{width:26px;height:26px;border-radius:6px;font-size:15px}
   body.public-mode #dashboardCard .dash-progress-label{font-size:11.5px;margin-bottom:2px}
@@ -2377,7 +2379,7 @@ function renderDashboard(){
       ${dashboardDramaCardHtml("近7天涨幅",grow7,{light:true,icon:"7"})}
       ${dashboardDramaCardHtml("近3天涨幅",grow3,{icon:"3"})}
       ${dashboardDramaCardHtml("近1天涨幅",grow1,{light:true,icon:"1"})}
-      <div class="dash-panel dash-main"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">对比历史新增播放 · 全账号按涨幅排序</div></div><div class="dash-panel-meta">Top 10 · 近30天 · 新增播放</div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems)}</div>
+      <div class="dash-panel dash-main"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">对比历史新增播放 · 全账号按涨幅排序</div></div><div class="dash-panel-meta">Top 10 · 近30天 · 新增播放</div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems,{expanded:true})}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area theme-growth-panel"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本月题材播放增长</div><div class="dash-panel-sub">按题材汇总当前播放量 - 历史播放量</div></div><div class="dash-panel-meta">按增长排序</div></div>${dashboardThemeGrowthPanelHtml(monthThemeGrowth,"本月")}</div>
       <div class="dash-side">
