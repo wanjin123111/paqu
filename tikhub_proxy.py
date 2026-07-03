@@ -20,7 +20,7 @@
  端口被占用?把下面的 PORT 改个数字,网页代理框也跟着改。
 ==============================================================================
 """
-import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures
+import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures, uuid
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -100,6 +100,9 @@ DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECONDS = _env_int("DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECOND
 DRAMA_ZIP_CHUNK_BYTES = _env_int("DRAMA_ZIP_CHUNK_BYTES", 262144, 32768, 1048576)
 DRAMA_ZIP_MAX_VIDEO_BYTES = _env_int("DRAMA_ZIP_MAX_VIDEO_BYTES", 0, 0, 1024 * 1024 * 1024 * 20)
 DRAMA_ZIP_WORKERS = _env_int("DRAMA_ZIP_WORKERS", 3, 1, 8)
+LOCAL_DOWNLOAD_DIR = os.path.abspath(os.environ.get("LOCAL_DOWNLOAD_DIR", os.path.join(ROOT, "downloads")))
+LOCAL_DOWNLOAD_WORKERS = _env_int("LOCAL_DOWNLOAD_WORKERS", DRAMA_ZIP_WORKERS, 1, 12)
+LOCAL_DOWNLOAD_MAX_JOBS = _env_int("LOCAL_DOWNLOAD_MAX_JOBS", 20, 1, 200)
 SCHEDULE_SAVE_EPISODE_HISTORY = _env_bool("SCHEDULE_SAVE_EPISODE_HISTORY", True)
 SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS", 0, 0, 20000)
 SCHEDULE_EPISODE_HISTORY_MAX_EPISODES = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_EPISODES", DRAMA_LINK_MAX_EPISODES, 0, 5000)
@@ -198,6 +201,8 @@ DRAMA_EPISODE_HISTORY_LOCK = threading.Lock()
 TITLE_TRANSLATION_CACHE = {}
 VIDEO_PLAY_URL_CACHE = {}
 VIDEO_PLAY_URL_CACHE_LOCK = threading.Lock()
+LOCAL_DOWNLOAD_JOBS = {}
+LOCAL_DOWNLOAD_JOBS_LOCK = threading.Lock()
 THEME_TRANSLATION_MAP = {
     "rural area": "乡村",
     "ensemble cast": "群像",
@@ -2075,6 +2080,397 @@ def _download_episode_to_temp(index, item, account, started=None):
         }
 
 
+def _local_download_output_dir(account, drama_id):
+    stamp = datetime.datetime.now(BEIJING_TZ).strftime("%Y%m%d-%H%M%S")
+    name = "%s-%s-%s" % (account or "account", _clean_drama_id(drama_id) or "drama", stamp)
+    return os.path.join(LOCAL_DOWNLOAD_DIR, _safe_download_name(name, 140))
+
+
+def _powershell_single_quoted(value):
+    return "'" + _to_text(value).replace("'", "''") + "'"
+
+
+def _build_drama_local_downloader_script(account, drama_id, episode_items):
+    started = time.time()
+    used_names = set()
+    items, errors = [], []
+    for index, item in enumerate(episode_items, 1):
+        summary = _drama_episode_summary(item, account, index)
+        video_id = summary.get("video_id") or ""
+        episode_no = summary.get("episode_no") or index
+        title = summary.get("title") or ("Episode %s" % episode_no)
+        try:
+            direct_url = _episode_direct_play_url(item, started)
+            if not direct_url:
+                raise TikHubError("play source not found")
+            base = "%03d-%s" % (_to_int(episode_no) or index, _safe_download_name(title, 70))
+            if video_id:
+                base += "-" + _safe_download_name(video_id[-10:], 12)
+            filename = _unique_archive_name(base + _media_extension("", direct_url), used_names)
+            items.append({
+                "episode": episode_no,
+                "video_id": video_id,
+                "title": title,
+                "file": filename,
+                "url": direct_url,
+            })
+        except Exception as exc:
+            errors.append({
+                "episode": episode_no,
+                "video_id": video_id,
+                "title": title,
+                "error": str(exc),
+            })
+    stamp = datetime.datetime.now(BEIJING_TZ).strftime("%Y%m%d-%H%M%S")
+    folder_name = _safe_download_name("%s-%s-%s" % (account or "account", _clean_drama_id(drama_id) or "drama", stamp), 120)
+    payload = json.dumps(items, ensure_ascii=False, indent=2)
+    error_payload = json.dumps(errors, ensure_ascii=False, indent=2)
+    script = """# TikHub drama local downloader
+# Generated: %s
+# Account: @%s
+# Drama ID: %s
+
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+$OutputEncoding = [System.Text.UTF8Encoding]::new()
+$ua = %s
+$referer = %s
+$downloadDir = Join-Path $PSScriptRoot %s
+$itemsJson = @'
+%s
+'@
+$errorsJson = @'
+%s
+'@
+$items = $itemsJson | ConvertFrom-Json
+$errors = $errorsJson | ConvertFrom-Json
+New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
+$itemsJson | Out-File -LiteralPath (Join-Path $downloadDir "download_items.json") -Encoding utf8
+$errorsJson | Out-File -LiteralPath (Join-Path $downloadDir "prepare_errors.json") -Encoding utf8
+$maxJobs = 4
+$jobs = @()
+
+function Receive-FinishedJobs {
+  param([array]$CurrentJobs)
+  $running = @()
+  foreach ($job in $CurrentJobs) {
+    if ($job.State -eq "Running") {
+      $running += $job
+    } else {
+      Receive-Job -Job $job | Out-Host
+      Remove-Job -Job $job
+    }
+  }
+  return $running
+}
+
+foreach ($item in $items) {
+  while (($jobs | Where-Object { $_.State -eq "Running" }).Count -ge $maxJobs) {
+    $jobs = Receive-FinishedJobs $jobs
+    Start-Sleep -Milliseconds 500
+  }
+  $jobs += Start-Job -ArgumentList $item.url, $item.file, $downloadDir, $ua, $referer -ScriptBlock {
+    param($url, $file, $dir, $ua, $referer)
+    $out = Join-Path $dir $file
+    if (Test-Path -LiteralPath $out) {
+      Write-Host "Skip existing: $file"
+      return
+    }
+    Write-Host "Downloading: $file"
+    & curl.exe -L --fail --retry 3 --retry-delay 2 --connect-timeout 20 -A $ua -e $referer -o $out $url
+    if ($LASTEXITCODE -ne 0) {
+      throw "curl failed: $file"
+    }
+  }
+}
+
+while ($jobs.Count -gt 0) {
+  $jobs = Receive-FinishedJobs $jobs
+  Start-Sleep -Milliseconds 500
+}
+
+Write-Host ""
+Write-Host "Done: $downloadDir"
+if ($errors.Count -gt 0) {
+  Write-Host "Some play URLs were not prepared. See prepare_errors.json"
+}
+Read-Host "Press Enter to close"
+""" % (
+        datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
+        account,
+        _clean_drama_id(drama_id),
+        _powershell_single_quoted(DEFAULT_UA),
+        _powershell_single_quoted(TIKTOK_HOST + ("/@" + account if account else "/")),
+        _powershell_single_quoted(folder_name),
+        payload,
+        error_payload,
+    )
+    return script.encode("utf-8-sig"), len(items), errors
+
+
+def _local_download_job_snapshot(job_id):
+    with LOCAL_DOWNLOAD_JOBS_LOCK:
+        job = LOCAL_DOWNLOAD_JOBS.get(job_id)
+        if not job:
+            return None
+        snapshot = dict(job)
+        snapshot["files"] = list(job.get("files") or [])
+        snapshot["errors"] = list(job.get("errors") or [])
+        return snapshot
+
+
+def _prune_local_download_jobs_locked():
+    if len(LOCAL_DOWNLOAD_JOBS) <= LOCAL_DOWNLOAD_MAX_JOBS:
+        return
+    removable = [
+        (job.get("started_ts", 0), job_id)
+        for job_id, job in LOCAL_DOWNLOAD_JOBS.items()
+        if not job.get("running")
+    ]
+    removable.sort()
+    overflow = len(LOCAL_DOWNLOAD_JOBS) - LOCAL_DOWNLOAD_MAX_JOBS
+    for _started, job_id in removable[:overflow]:
+        LOCAL_DOWNLOAD_JOBS.pop(job_id, None)
+
+
+def _move_temp_file(src, dst):
+    try:
+        os.replace(src, dst)
+        return
+    except OSError:
+        pass
+    with open(src, "rb") as source, open(dst, "wb") as target:
+        while True:
+            chunk = source.read(DRAMA_ZIP_CHUNK_BYTES)
+            if not chunk:
+                break
+            target.write(chunk)
+    try:
+        os.remove(src)
+    except OSError:
+        pass
+
+
+def _record_local_download_result(job_id, result, used_names, output_dir):
+    episode_no = result.get("episode") or result.get("index") or ""
+    video_id = result.get("video_id") or ""
+    title = result.get("title") or ""
+    if not result.get("ok"):
+        with LOCAL_DOWNLOAD_JOBS_LOCK:
+            job = LOCAL_DOWNLOAD_JOBS.get(job_id)
+            if job:
+                job["processed"] = job.get("processed", 0) + 1
+                job["errors"].append({
+                    "episode": episode_no,
+                    "video_id": video_id,
+                    "title": title,
+                    "error": result.get("error") or "download failed",
+                })
+        return
+    temp_path = result.get("temp_path") or ""
+    try:
+        base = "%03d-%s" % (_to_int(episode_no) or result.get("index") or 0, _safe_download_name(title, 70))
+        if video_id:
+            base += "-" + _safe_download_name(video_id[-10:], 12)
+        filename = _unique_archive_name(base + (result.get("ext") or ".mp4"), used_names)
+        dest = os.path.join(output_dir, filename)
+        _move_temp_file(temp_path, dest)
+        file_meta = {
+            "episode": episode_no,
+            "video_id": video_id,
+            "title": title,
+            "file": filename,
+            "path": dest,
+            "bytes": result.get("bytes") or 0,
+        }
+        with LOCAL_DOWNLOAD_JOBS_LOCK:
+            job = LOCAL_DOWNLOAD_JOBS.get(job_id)
+            if job:
+                job["processed"] = job.get("processed", 0) + 1
+                job["downloaded"] = job.get("downloaded", 0) + 1
+                job["files"].append(file_meta)
+    except Exception as exc:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        with LOCAL_DOWNLOAD_JOBS_LOCK:
+            job = LOCAL_DOWNLOAD_JOBS.get(job_id)
+            if job:
+                job["processed"] = job.get("processed", 0) + 1
+                job["errors"].append({
+                    "episode": episode_no,
+                    "video_id": video_id,
+                    "title": title,
+                    "error": str(exc),
+                })
+
+
+def _write_local_download_manifest(job_id):
+    snapshot = _local_download_job_snapshot(job_id)
+    if not snapshot:
+        return ""
+    manifest = {
+        "id": snapshot.get("id"),
+        "uid": snapshot.get("uid"),
+        "drama_id": snapshot.get("drama_id"),
+        "started_at": snapshot.get("started_at"),
+        "finished_at": snapshot.get("finished_at"),
+        "output_dir": snapshot.get("output_dir"),
+        "total": snapshot.get("total"),
+        "downloaded": snapshot.get("downloaded"),
+        "errors": snapshot.get("errors"),
+        "files": snapshot.get("files"),
+    }
+    path = os.path.join(snapshot.get("output_dir") or LOCAL_DOWNLOAD_DIR, "manifest.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(manifest, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return path
+
+
+def _run_local_download_job(job_id, account, drama_id, episode_items, output_dir):
+    started = time.time()
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        used_names = set()
+        max_workers = min(LOCAL_DOWNLOAD_WORKERS, max(1, len(episode_items)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [
+                pool.submit(_download_episode_to_temp, index, item, account, started)
+                for index, item in enumerate(episode_items, 1)
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                _record_local_download_result(job_id, future.result(), used_names, output_dir)
+        finished = datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds")
+        with LOCAL_DOWNLOAD_JOBS_LOCK:
+            job = LOCAL_DOWNLOAD_JOBS.get(job_id)
+            if job:
+                job["running"] = False
+                job["finished_at"] = finished
+                job["workers"] = max_workers
+                job["files"].sort(key=lambda item: _to_int(item.get("episode")) or 0)
+                job["errors"].sort(key=lambda item: _to_int(item.get("episode")) or 0)
+        manifest_path = _write_local_download_manifest(job_id)
+        with LOCAL_DOWNLOAD_JOBS_LOCK:
+            job = LOCAL_DOWNLOAD_JOBS.get(job_id)
+            if job:
+                job["manifest_path"] = manifest_path
+    except Exception as exc:
+        with LOCAL_DOWNLOAD_JOBS_LOCK:
+            job = LOCAL_DOWNLOAD_JOBS.get(job_id)
+            if job:
+                job["running"] = False
+                job["finished_at"] = datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds")
+                job["error"] = str(exc)
+
+
+def _start_local_download_job(account, drama_id, episode_items):
+    job_id = uuid.uuid4().hex[:12]
+    output_dir = _local_download_output_dir(account, drama_id)
+    now = datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds")
+    job = {
+        "id": job_id,
+        "uid": account,
+        "drama_id": _clean_drama_id(drama_id),
+        "running": True,
+        "started_at": now,
+        "started_ts": time.time(),
+        "finished_at": None,
+        "output_dir": output_dir,
+        "total": len(episode_items),
+        "processed": 0,
+        "downloaded": 0,
+        "workers": min(LOCAL_DOWNLOAD_WORKERS, max(1, len(episode_items))),
+        "files": [],
+        "errors": [],
+        "error": "",
+        "manifest_path": "",
+    }
+    with LOCAL_DOWNLOAD_JOBS_LOCK:
+        LOCAL_DOWNLOAD_JOBS[job_id] = job
+        _prune_local_download_jobs_locked()
+    thread = threading.Thread(
+        target=_run_local_download_job,
+        args=(job_id, account, drama_id, episode_items, output_dir),
+        daemon=True,
+    )
+    thread.start()
+    return job_id
+
+
+def _render_local_download_status_page(job):
+    running = bool(job.get("running"))
+    refresh = '<meta http-equiv="refresh" content="3">' if running else ""
+    status_text = "下载中" if running else ("已完成" if not job.get("error") else "失败")
+    total = _to_int(job.get("total"))
+    processed = _to_int(job.get("processed"))
+    downloaded = _to_int(job.get("downloaded"))
+    error_count = len(job.get("errors") or [])
+    progress = int((processed / total) * 100) if total else 0
+    file_rows = []
+    for item in (job.get("files") or [])[-30:]:
+        file_rows.append("<li>第%s集 · %s · %s</li>" % (
+            _html_text(item.get("episode") or ""),
+            _html_text(item.get("file") or ""),
+            _html_text(_format_chinese_count(item.get("bytes") or 0) + "B"),
+        ))
+    error_rows = []
+    for item in (job.get("errors") or [])[-20:]:
+        error_rows.append("<li>第%s集 · %s</li>" % (
+            _html_text(item.get("episode") or ""),
+            _html_text(item.get("error") or ""),
+        ))
+    body = """<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+%s
+<title>本机下载任务</title>
+<style>
+body{margin:0;background:#f5f7fb;color:#172033;font:14px/1.55 Arial,"Microsoft YaHei",sans-serif}.wrap{max-width:860px;margin:28px auto;padding:0 18px}.panel{background:#fff;border:1px solid #e6eaf1;border-radius:8px;box-shadow:0 10px 28px rgba(31,41,55,.08);padding:22px}h1{margin:0 0 8px;font-size:22px}.muted{color:#667085}.bar{height:10px;background:#e9edf5;border-radius:999px;overflow:hidden;margin:18px 0}.fill{height:100%%;background:#405cff;width:%s%%}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:18px 0}.stat{border:1px solid #e6eaf1;border-radius:8px;padding:12px}.label{color:#667085;font-size:12px}.value{font-weight:800;font-size:18px}.path{word-break:break-all;background:#f8fafc;border:1px solid #e6eaf1;border-radius:8px;padding:10px}.btn{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:6px;text-decoration:none;border:1px solid #e6eaf1;background:#fff;color:#172033;margin-right:8px}.primary{background:#405cff;border-color:#405cff;color:#fff}ul{padding-left:20px}.err{color:#e11d48}@media(max-width:640px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <section class="panel">
+    <h1>本机下载任务：%s</h1>
+    <div class="muted">@%s · 短剧ID %s · workers %s</div>
+    <div class="bar"><div class="fill"></div></div>
+    <div class="grid">
+      <div class="stat"><div class="label">进度</div><div class="value">%s/%s</div></div>
+      <div class="stat"><div class="label">成功 / 失败</div><div class="value">%s / %s</div></div>
+    </div>
+    <div class="label">保存目录</div>
+    <div class="path">%s</div>
+    <p class="muted">这个页面会自动刷新；下载完成后视频已经在上面的本机目录里。</p>
+    <p><a class="btn primary" href="javascript:location.reload()">刷新状态</a><a class="btn" href="/">返回报表</a></p>
+    %s
+    %s
+  </section>
+</div>
+</body>
+</html>""" % (
+        refresh,
+        max(0, min(100, progress)),
+        _html_text(status_text),
+        _html_text(job.get("uid") or ""),
+        _html_text(job.get("drama_id") or ""),
+        _html_text(job.get("workers") or ""),
+        processed,
+        total,
+        downloaded,
+        error_count,
+        _html_text(job.get("output_dir") or ""),
+        ("<h2>最近保存</h2><ul>%s</ul>" % "".join(file_rows)) if file_rows else "",
+        ("<h2 class=\"err\">失败记录</h2><ul>%s</ul>" % "".join(error_rows)) if error_rows else "",
+    )
+    return body.encode("utf-8")
+
+
 def _drama_row_value(row, keys):
     if not isinstance(row, dict):
         return ""
@@ -2208,6 +2604,16 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
         "drama_id": _clean_drama_id(drama_id),
         "target": "zip",
     })
+    local_url = "/drama-link?" + urllib.parse.urlencode({
+        "uid": account,
+        "drama_id": _clean_drama_id(drama_id),
+        "target": "local_save",
+    })
+    local_script_url = "/drama-link?" + urllib.parse.urlencode({
+        "uid": account,
+        "drama_id": _clean_drama_id(drama_id),
+        "target": "local_script",
+    })
     body = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -2230,6 +2636,8 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
       <div class="tools">
         <a class="btn" href="/" target="_self">&#36820;&#22238;&#25253;&#34920;</a>
         <a class="btn primary" href="%s" target="_blank" rel="noopener">&#19979;&#36733;&#20840;&#37096; ZIP</a>
+        <a class="btn" href="%s" target="_blank" rel="noopener">&#26412;&#26426;&#19979;&#36733;&#33050;&#26412;</a>
+        <a class="btn" href="%s" target="_blank" rel="noopener">&#20445;&#23384;&#21040;&#26412;&#26426;</a>
         <a class="btn" href="%s" target="_blank" rel="noopener">JSON</a>
       </div>
     </div>
@@ -2238,7 +2646,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
       <tbody>%s</tbody>
     </table>
   </section>
-  <div class="note">&#25773;&#25918;&#28304;&#38142;&#25509;&#20250;&#22312;&#28857;&#20987;&#26102;&#23454;&#26102;&#33719;&#21462;&#26368;&#26032;&#30452;&#38142;&#12290;</div>
+  <div class="note">&#25773;&#25918;&#28304;&#38142;&#25509;&#20250;&#22312;&#28857;&#20987;&#26102;&#23454;&#26102;&#33719;&#21462;&#26368;&#26032;&#30452;&#38142;&#12290;&#8220;&#26412;&#26426;&#19979;&#36733;&#33050;&#26412;&#8221;&#21487;&#20197;&#22312;&#32447;&#19978;&#39029;&#38754;&#29983;&#25104;&#65292;&#8220;&#20445;&#23384;&#21040;&#26412;&#26426;&#8221;&#38656;&#35201;&#29992;&#26412;&#22320;&#20195;&#29702;&#25171;&#24320;&#39029;&#38754;&#12290;</div>
 </div>
 </body>
 </html>""" % (
@@ -2246,6 +2654,8 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
         len(episodes),
         _html_text(_clean_drama_id(drama_id)),
         _html_text(zip_url),
+        _html_text(local_script_url),
+        _html_text(local_url),
         _html_text(source_url),
         "\n".join(rows),
     )
@@ -2361,6 +2771,92 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return self._require_schedule_secret(qs)
 
+    def _is_local_request(self):
+        client = (self.client_address[0] if self.client_address else "").lower()
+        host = (self.headers.get("Host") or "").split(":", 1)[0].strip("[]").lower()
+        return client in ("127.0.0.1", "::1", "localhost") or host in ("127.0.0.1", "::1", "localhost")
+
+    def _send_local_download_unavailable(self):
+        body = """<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>需要本地代理</title></head>
+<body style="margin:0;background:#f5f7fb;color:#172033;font:14px/1.6 Arial,'Microsoft YaHei',sans-serif">
+<div style="max-width:720px;margin:40px auto;padding:24px;background:#fff;border:1px solid #e6eaf1;border-radius:8px">
+<h1 style="margin-top:0">保存到本机需要本地代理</h1>
+<p>线上 Render 服务器不能直接写入你的电脑硬盘。请在项目目录运行 <b>启动代理.bat</b>，用 <b>http://localhost:8787/</b> 打开页面后再点“保存到本机”。</p>
+<p style="color:#667085">这样视频会从视频源直接下载到你电脑的项目 <b>downloads</b> 目录，不再走浏览器下载 ZIP。</p>
+<p><a href="/" style="display:inline-flex;padding:8px 12px;border:1px solid #e6eaf1;border-radius:6px;text-decoration:none;color:#172033">返回</a></p>
+</div>
+</body></html>"""
+        self._send_bytes(403, body.encode("utf-8"), "text/html; charset=utf-8", no_cache=True)
+
+    def _send_local_download_status(self, job_id):
+        if not self._is_local_request():
+            self._send_local_download_unavailable()
+            return
+        job = _local_download_job_snapshot(job_id)
+        if not job:
+            self._send_json(404, {"ok": False, "error": "local download job not found"})
+            return
+        self._send_bytes(200, _render_local_download_status_page(job), "text/html; charset=utf-8", no_cache=True)
+
+    def _start_drama_local_download(self, uid, drama_id, qs):
+        if not self._is_local_request():
+            self._send_local_download_unavailable()
+            return
+        if not drama_id:
+            self._send_json(400, {"ok": False, "error": "missing drama_id"})
+            return
+        account = (uid or "").strip().lstrip("@")
+        try:
+            episode_items = _get_drama_episode_items(drama_id, account, limit=DRAMA_ZIP_MAX_EPISODES)
+        except Exception as exc:
+            self._send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if not episode_items:
+            self._send_json(404, {"ok": False, "error": "no episodes found"})
+            return
+        job_id = _start_local_download_job(account, drama_id, episode_items)
+        status_url = "/drama-link?" + urllib.parse.urlencode({"target": "local_status", "job_id": job_id})
+        redirect = str(qs.get("redirect", ["1"])[0]).lower() not in ("0", "false", "no")
+        if not redirect:
+            self._send_json(202, {"ok": True, "job_id": job_id, "status_url": status_url})
+            return
+        self.send_response(302)
+        self.send_header("Location", status_url)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send_drama_local_downloader_script(self, uid, drama_id):
+        if not drama_id:
+            self._send_json(400, {"ok": False, "error": "missing drama_id"})
+            return
+        account = (uid or "").strip().lstrip("@")
+        try:
+            episode_items = _get_drama_episode_items(drama_id, account, limit=DRAMA_ZIP_MAX_EPISODES)
+            if not episode_items:
+                self._send_json(404, {"ok": False, "error": "no episodes found"})
+                return
+            script, count, errors = _build_drama_local_downloader_script(account, drama_id, episode_items)
+        except Exception as exc:
+            self._send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if not count and errors:
+            self._send_json(502, {"ok": False, "error": "no playable URLs prepared", "errors": errors[:10]})
+            return
+        filename = _safe_download_name("%s-%s-downloader.ps1" % (account or "account", _clean_drama_id(drama_id) or "drama"), 120)
+        self.send_response(200)
+        self._cors()
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Disposition", _attachment_header(filename))
+        self.send_header("Content-Length", str(len(script)))
+        self.end_headers()
+        self.wfile.write(script)
+
     def _send_drama_episode_zip(self, uid, drama_id, episode_items):
         account = (uid or "").strip().lstrip("@")
         clean_drama_id = _clean_drama_id(drama_id)
@@ -2456,6 +2952,15 @@ class Handler(BaseHTTPRequestHandler):
         target = qs.get("target", ["play"])[0] or "play"
         target_norm = str(target or "").strip().lower()
         redirect = str(qs.get("redirect", ["1"])[0]).lower() not in ("0", "false", "no")
+        if target_norm in ("local_status", "local_download_status"):
+            self._send_local_download_status(qs.get("job_id", [""])[0])
+            return
+        if target_norm in ("local", "local_save", "save_local", "local_download"):
+            self._start_drama_local_download(uid, drama_id, qs)
+            return
+        if target_norm in ("local_script", "download_script", "ps1"):
+            self._send_drama_local_downloader_script(uid, drama_id)
+            return
         if target_norm in ("zip", "download", "download_zip", "archive"):
             if not drama_id:
                 self._send_json(400, {"ok": False, "error": "missing drama_id"})
