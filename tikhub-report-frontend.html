@@ -159,6 +159,16 @@
   .search-field input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:var(--ink);font-family:var(--mono);font-size:12px;padding:0}
   .search-field input::placeholder{color:#8B93A5}
   .search-status{font-size:12px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .platform-search{flex:1 1 520px}
+  .platform-select{height:34px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:0 10px;color:var(--ink);font-size:12px}
+  .platform-video-cell{display:flex;align-items:center;gap:10px;min-width:0}
+  .platform-cover{width:46px;height:60px;flex:none;border-radius:6px;background:#EEF0F5;object-fit:cover;border:1px solid var(--line)}
+  .platform-title{font-weight:700;color:var(--ink);line-height:1.35;word-break:break-word}
+  .platform-meta{margin-top:4px;font-size:11.5px;color:var(--ink-faint);font-family:var(--mono);word-break:break-all}
+  .platform-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .platform-source-btn{border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:7px;padding:7px 10px;text-decoration:none;white-space:nowrap}
+  .platform-page-btn{border:1px solid var(--line-strong);background:#fff;color:var(--accent);border-radius:7px;padding:7px 10px;text-decoration:none;white-space:nowrap}
+  .platform-source-btn:hover,.platform-page-btn:hover{text-decoration:none}
   .sort-btn{min-width:52px}
   .growth-filter{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:38px;flex:1 1 320px}
   .growth-filter[hidden]{display:none!important}
@@ -230,11 +240,11 @@
   .dash-growth-line{display:inline-flex;align-items:center;gap:4px;min-width:0;max-width:100%}
   .dash-growth-arrow,.dash-growth-value{color:#EF4444;font-weight:800}
   .dash-growth-arrow{font-size:14px;line-height:1;transform:translateY(-1px)}
-  .dash-main{grid-column:1 / span 4;min-height:160px;padding:12px 14px 10px;background:linear-gradient(180deg,#fff 0%,#FBFBFF 100%)}
+  .dash-main{grid-column:1 / span 4;grid-row:2;min-height:160px;padding:12px 14px 10px;background:linear-gradient(180deg,#fff 0%,#FBFBFF 100%)}
   .dash-donut{grid-column:5;grid-row:1 / span 2;padding:14px 12px}
   .dash-area{min-height:188px;padding:11px}
   .dash-growth-wide{grid-column:1 / span 4;grid-row:2 / span 2;min-height:350px;padding:12px 14px 10px;display:flex;flex-direction:column;background:linear-gradient(180deg,#fff 0%,#F5F4FF 100%);border-color:#D8D6EA}
-  .theme-growth-panel{grid-column:span 2;display:flex;flex-direction:column;background:linear-gradient(180deg,#F1F0FA 0%,#E9EBF5 100%);border-color:#D8D6EA}
+  .theme-growth-panel{grid-column:1 / span 4;grid-row:3;display:flex;flex-direction:column;background:linear-gradient(180deg,#F1F0FA 0%,#E9EBF5 100%);border-color:#D8D6EA}
   .theme-growth-panel .dash-panel-title{color:#151B2C}
   .theme-growth-panel .dash-panel-sub,.theme-growth-panel .dash-panel-meta{color:#5F667A}
   .dash-side{grid-column:5;grid-row:3;display:grid;gap:10px}
@@ -267,11 +277,14 @@
   .growth-rank-row:hover .growth-rank-fill{filter:brightness(1.06)}
   .growth-rank-row.is-second .growth-rank-fill{background:#1F2733}
   .growth-rank-foot{margin-top:2px;font-size:9.8px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .theme-growth-list{flex:0 0 auto;display:grid;grid-template-columns:minmax(150px,.95fr) repeat(2,minmax(0,1fr));grid-auto-rows:minmax(58px,auto);gap:8px;min-height:0;padding:2px 2px 7px;overflow:visible}
+  .theme-growth-list{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,230px));grid-auto-rows:auto;align-content:start;justify-content:start;gap:8px;padding:2px 6px 7px 2px;overflow-y:auto;overscroll-behavior:contain}
+  .theme-growth-list::-webkit-scrollbar{width:6px}
+  .theme-growth-list::-webkit-scrollbar-thumb{background:rgba(85,70,255,.38);border-radius:99px}
+  .theme-growth-list::-webkit-scrollbar-track{background:rgba(31,39,51,.07);border-radius:99px}
   .theme-growth-card{position:relative;min-width:0;overflow:hidden;border:1px solid #D7D4F3;border-radius:8px;background:linear-gradient(180deg,#F9F8FF 0%,#F0EEFF 100%);padding:8px 9px 7px;color:#171D2F;box-shadow:inset 0 1px 0 rgba(255,255,255,.78);animation:growthRowEnter .34s cubic-bezier(.16,1,.3,1) both}
-  .theme-growth-card.is-top{grid-row:span 2;padding:11px 12px;background:linear-gradient(135deg,#1F2733,#2A2E3A);border-color:#1F2733;color:#fff}
+  .theme-growth-card.is-top{min-height:80px;padding:11px 12px;background:linear-gradient(135deg,#1F2733,#2A2E3A);border-color:#1F2733;color:#fff}
   .theme-growth-card.is-second{background:linear-gradient(180deg,#ECEFF7 0%,#E5E8F2 100%);border-color:#CCD2E4}
-  .theme-growth-card:not(.is-top){display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:42px;padding:7px 9px}
+  .theme-growth-card:not(.is-top){display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:54px;padding:7px 9px}
   .theme-growth-card::after{content:"";position:absolute;right:8px;bottom:8px;width:30px;height:30px;border-radius:50%;background:conic-gradient(var(--accent) var(--growth-deg),rgba(196,201,222,.95) 0);opacity:.12}
   .theme-growth-card.is-top::after{right:-18px;bottom:-18px;width:96px;height:96px;opacity:.2;background:rgba(124,114,255,.55)}
   .theme-growth-top{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
@@ -376,7 +389,7 @@
   body.public-mode #dashboardCard .dash-progress-meta{font-size:10.5px}
   body.public-mode #dashboardCard .dash-progress-track{height:6px}
   @media (max-width:620px){body.public-mode.dashboard-view,body.public-mode.monitor-view{overflow:auto}body.public-mode .dashboard-page,body.public-mode .monitor-page{height:auto;min-height:100vh;overflow:visible}body.public-mode #dashboardCard,body.public-mode #monitorDashboardCard{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-inner,body.public-mode #monitorDashboardCard .monitor-dashboard-inner{height:auto;min-height:100vh}body.public-mode #dashboardCard .dashboard-grid{flex:none;grid-template-rows:auto;grid-auto-rows:auto}body.public-mode #dashboardCard .dash-chart{height:180px;flex:none}body.public-mode #dashboardCard .dash-chart.tall{height:190px}}
-  @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-side,.dash-growth-wide{grid-column:auto;grid-row:auto}.theme-growth-panel,.dash-growth-wide{grid-column:span 2}.dash-donut{grid-column:span 2}.dash-side{grid-column:span 2}.growth-rank-list.expanded{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}.monitor-dashboard-head{padding-right:0}.monitor-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.monitor-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(120px,auto)}}
+  @media (max-width:980px){.dashboard-grid{grid-template-columns:repeat(2,1fr)}.dash-main,.dash-donut,.dash-side,.theme-growth-panel,.dash-growth-wide{grid-column:auto;grid-row:auto}.theme-growth-panel,.dash-growth-wide{grid-column:span 2}.dash-donut{grid-column:span 2}.dash-side{grid-column:span 2}.growth-rank-list.expanded{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-title{font-size:22px}.dashboard-stamp{white-space:normal}.monitor-dashboard-head{padding-right:0}.monitor-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.monitor-grid{grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(120px,auto)}}
   @media (max-width:620px){.dash-panel-heading{flex-direction:column;gap:6px}.dash-panel-meta{text-align:left;white-space:normal}.dash-panel-sub{white-space:normal}}
   @media (max-width:620px){.dashboard-inner{padding:18px 14px 24px}.dashboard-head,.monitor-dashboard-head{flex-direction:column}.dashboard-grid{grid-template-columns:1fr}.dash-main,.dash-donut,.dash-side,.theme-growth-panel,.dash-growth-wide{grid-column:auto;grid-row:auto}.growth-rank-list.expanded,.theme-growth-list{grid-template-columns:1fr}.theme-growth-card.is-top{grid-row:auto}.dash-kpi::after{display:none}.dash-donut-visual{width:170px;height:170px}.dash-kpi-value{font-size:24px}.monitor-dashboard-inner{padding:18px 14px 24px}.monitor-dashboard-title{font-size:22px}.monitor-dashboard-stamp{white-space:normal}.monitor-summary-grid,.monitor-grid{grid-template-columns:1fr}.monitor-grid{overflow:visible;padding-right:0;margin-right:0}.monitor-account-row{grid-template-columns:50px minmax(0,1fr) auto}.report-search,.search-field,.monitor-searchbar .search-field{width:100%;min-width:0;max-width:none}}
 
@@ -690,6 +703,7 @@ shortdramatime"></textarea>
         <div class="result-tabs" role="tablist" aria-label="报表视图">
           <button class="tab-btn active" id="summaryTabBtn" type="button" data-view="summary">账号汇总</button>
           <button class="tab-btn" id="detailTabBtn" type="button" data-view="detail">账号明细</button>
+          <button class="tab-btn" id="platformTabBtn" type="button" data-view="platform">其他平台</button>
         </div>
         <div class="report-search" id="summarySearchBox">
           <label class="search-field"><span>搜索账号</span><input id="summarySearchInput" type="search" placeholder="昵称 / @账号 / 最高观看短剧" autocomplete="off" aria-label="搜索账号"></label>
@@ -699,6 +713,15 @@ shortdramatime"></textarea>
           <label class="search-field"><span>搜索短剧</span><input id="detailSearchInput" type="search" placeholder="英文剧名 / 中文译名 / 账号 / 题材" autocomplete="off" aria-label="搜索短剧"></label>
           <span class="search-status" id="detailSearchStatus"></span>
         </div>
+        <div class="report-search platform-search" id="platformSearchBox" hidden>
+          <select class="platform-select" id="platformSelect" aria-label="选择平台">
+            <option value="douyin">抖音</option>
+            <option value="hongguo" disabled>红果（暂未接入）</option>
+          </select>
+          <label class="search-field"><span>搜视频</span><input id="platformSearchInput" type="search" placeholder="短剧名 / 视频标题 / 作者" autocomplete="off" aria-label="搜索其他平台视频"></label>
+          <button class="mini-btn" id="platformSearchBtn" type="button">搜索</button>
+          <span class="search-status" id="platformSearchStatus"></span>
+        </div>
         <div class="growth-filter" id="growthFilter">
           <label><span>&#36817;</span><input id="growthDaysInput" type="number" min="1" step="1" value="7" aria-label="growth days"><span>&#22825;</span></label>
           <label><span>&#22686;&#38271;&#8805;</span><input class="growth-min-input" id="growthMinInput" type="text" value="100&#19975;" placeholder="100&#19975;" aria-label="growth plays"></label>
@@ -707,7 +730,7 @@ shortdramatime"></textarea>
           <span class="growth-filter-status" id="growthFilterStatus"></span>
         </div>
         <div class="result-controls">
-          <div class="result-tabs" role="group" aria-label="排序筛选">
+          <div class="result-tabs" id="sortGroup" role="group" aria-label="排序筛选">
             <button class="tab-btn sort-btn" id="sortHotBtn" type="button" aria-pressed="false">最热</button>
             <button class="tab-btn sort-btn active" id="sortLatestBtn" type="button" aria-pressed="true">最新</button>
           </div>
@@ -796,6 +819,7 @@ const DRAMA_LINK_FIELDS=["短剧链接","Drama Link / 短剧链接","Drama URL /
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","日增播放","时长","题材","简介","短剧链接"];
+const PLATFORM_COLUMNS=["平台","视频","作者","观看","发布时间","视频源"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
 
@@ -844,6 +868,12 @@ let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7
 let monitorSearchText=store.get("thr_monitor_search")||"";
 let summarySearchText=store.get("thr_summary_search")||"";
 let detailSearchText=store.get("thr_detail_search")||"";
+let platformSearchText=store.get("thr_platform_search")||"";
+let platformKind=store.get("thr_platform_kind")||"douyin";
+if(platformKind!=="douyin")platformKind="douyin";
+let platformResults=[];
+let platformSearching=false;
+let platformStatus="输入关键词搜索抖音视频源；红果暂未接入。";
 let detailAccountIndex=0;
 let detailAccountKey=store.get("thr_detail_account")||"";
 const DETAIL_PAGE_SIZE=7;
@@ -1723,13 +1753,15 @@ function updateGrowthFilterControls(matchCount,totalCount){
   }
 }
 function updateReportSearchControls(count,total){
-  const summaryBox=$("summarySearchBox"), detailBox=$("detailSearchBox");
-  const summaryInput=$("summarySearchInput"), detailInput=$("detailSearchInput");
-  const summaryStatus=$("summarySearchStatus"), detailStatus=$("detailSearchStatus");
+  const summaryBox=$("summarySearchBox"), detailBox=$("detailSearchBox"), platformBox=$("platformSearchBox");
+  const summaryInput=$("summarySearchInput"), detailInput=$("detailSearchInput"), platformInput=$("platformSearchInput");
+  const summaryStatus=$("summarySearchStatus"), detailStatus=$("detailSearchStatus"), platformStatusEl=$("platformSearchStatus");
   if(summaryBox)summaryBox.hidden=resultView!=="summary";
   if(detailBox)detailBox.hidden=resultView!=="detail";
+  if(platformBox)platformBox.hidden=resultView!=="platform";
   if(summaryInput&&document.activeElement!==summaryInput)summaryInput.value=summarySearchText;
   if(detailInput&&document.activeElement!==detailInput)detailInput.value=detailSearchText;
+  if(platformInput&&document.activeElement!==platformInput)platformInput.value=platformSearchText;
   if(resultView==="summary"&&summaryStatus){
     const active=hasSearch(summarySearchText);
     summaryStatus.textContent=active?("命中 "+fmt(count||0)+"/"+fmt(total||0)+" 个账号"):("共 "+fmt(total||0)+" 个账号");
@@ -1737,6 +1769,9 @@ function updateReportSearchControls(count,total){
   if(resultView==="detail"&&detailStatus){
     const active=hasSearch(detailSearchText);
     detailStatus.textContent=active?("命中 "+fmt(count||0)+"/"+fmt(total||0)+" 部短剧"):("共 "+fmt(total||0)+" 部短剧");
+  }
+  if(resultView==="platform"&&platformStatusEl){
+    platformStatusEl.textContent=platformSearching?"搜索中...":platformStatus;
   }
 }
 async function applyGrowthFilter(){
@@ -2500,6 +2535,8 @@ async function refreshDashboardHistory(opts){
 }
 function updateSortControls(){
   const hot=$("sortHotBtn"), latest=$("sortLatestBtn");
+  const sortGroup=$("sortGroup");
+  if(sortGroup)sortGroup.hidden=resultView==="platform";
   if(!hot||!latest)return;
   hot.classList.toggle("active",resultSort==="hot");
   latest.classList.toggle("active",resultSort==="latest");
@@ -2749,19 +2786,153 @@ function updateDetailControls(list){
   updateDetailPager(total);
   return list;
 }
+function platformLabel(value){
+  return value==="hongguo"?"红果":"抖音";
+}
+function platformSearchPayload(){
+  return {
+    platform:platformKind||"douyin",
+    query:platformSearchText,
+    count:20
+  };
+}
+async function runPlatformSearch(){
+  const select=$("platformSelect"), input=$("platformSearchInput");
+  platformKind=(select&&select.value)||platformKind||"douyin";
+  platformSearchText=(input&&input.value?input.value:platformSearchText).trim();
+  store.set("thr_platform_kind",platformKind);
+  store.set("thr_platform_search",platformSearchText);
+  if(platformKind==="hongguo"){
+    platformResults=[];
+    platformStatus="红果暂未接入：当前 TikHub 文档没有可用端点。";
+    renderResultTable();
+    return;
+  }
+  if(!platformSearchText){
+    platformResults=[];
+    platformStatus="请输入短剧名、视频标题或作者。";
+    renderResultTable();
+    return;
+  }
+  platformSearching=true;
+  platformStatus="搜索中...";
+  renderResultTable();
+  try{
+    const data=await backendPostJson("/platform-search",platformSearchPayload(),{}, {sendSecret:false,sameOrigin:true});
+    platformResults=Array.isArray(data&&data.results)?data.results:[];
+    platformStatus=platformResults.length?("抖音命中 "+fmt(platformResults.length)+" 条视频"):("没有搜到匹配视频");
+  }catch(e){
+    platformResults=[];
+    platformStatus="搜索失败："+(e.message||e);
+  }finally{
+    platformSearching=false;
+    renderResultTable();
+  }
+}
+function appendPlatformCell(tr,c,item){
+  const td=document.createElement("td");
+  if(c==="平台"){
+    td.textContent=item.platform_name||platformLabel(item.platform);
+  }else if(c==="视频"){
+    td.className="detail-text";
+    const wrap=document.createElement("div");
+    wrap.className="platform-video-cell";
+    if(item.cover){
+      const img=document.createElement("img");
+      img.className="platform-cover";
+      img.src=item.cover;
+      img.alt="";
+      img.loading="lazy";
+      wrap.appendChild(img);
+    }
+    const body=document.createElement("div");
+    body.innerHTML='<div class="platform-title">'+esc(item.title||"未命名视频")+'</div><div class="platform-meta">ID '+esc(item.video_id||"-")+'</div>';
+    wrap.appendChild(body);
+    td.appendChild(wrap);
+  }else if(c==="作者"){
+    td.textContent=item.author||"";
+  }else if(c==="观看"){
+    td.className="num";
+    td.textContent=item.views_text||fmtPlay(item.views||0);
+  }else if(c==="发布时间"){
+    td.className="num";
+    td.textContent=item.publish_time||"";
+  }else if(c==="视频源"){
+    td.className="link";
+    const actions=document.createElement("div");
+    actions.className="platform-actions";
+    if(item.play_url){
+      const source=document.createElement("a");
+      source.className="platform-source-btn";
+      source.href=item.play_url;
+      source.target="_blank";
+      source.rel="noopener";
+      source.textContent="播放源";
+      actions.appendChild(source);
+    }
+    if(item.page_url){
+      const page=document.createElement("a");
+      page.className="platform-page-btn";
+      page.href=item.page_url;
+      page.target="_blank";
+      page.rel="noopener";
+      page.textContent="作品页";
+      actions.appendChild(page);
+    }
+    if(!actions.childNodes.length)actions.textContent="暂无";
+    td.appendChild(actions);
+  }
+  tr.appendChild(td);
+}
+function renderPlatformRows(tb){
+  setHeader(PLATFORM_COLUMNS);
+  if(platformSearching){
+    const tr=document.createElement("tr");
+    const td=document.createElement("td");
+    td.colSpan=PLATFORM_COLUMNS.length;
+    td.className="detail-text";
+    td.textContent="正在搜索其他平台视频...";
+    tr.appendChild(td);
+    tb.appendChild(tr);
+    return;
+  }
+  if(!platformResults.length){
+    const tr=document.createElement("tr");
+    const td=document.createElement("td");
+    td.colSpan=PLATFORM_COLUMNS.length;
+    td.className="detail-text";
+    td.textContent=platformStatus||"输入关键词后搜索抖音视频源。";
+    tr.appendChild(td);
+    tb.appendChild(tr);
+    return;
+  }
+  platformResults.forEach(item=>{
+    const tr=document.createElement("tr");
+    PLATFORM_COLUMNS.forEach(c=>appendPlatformCell(tr,c,item));
+    tb.appendChild(tr);
+  });
+}
 function renderResultTable(){
   const card=$("resultCard");
   const tb=$("resultTable").querySelector("tbody");
-  card.style.display=(rows.length||dramaRows.length)?"block":"none";
+  card.style.display=(rows.length||dramaRows.length||resultView==="platform"||platformResults.length)?"block":"none";
   card.classList.toggle("detail-view",resultView==="detail");
-  card.classList.toggle("summary-view",resultView!=="detail");
+  card.classList.toggle("summary-view",resultView==="summary");
+  card.classList.toggle("platform-view",resultView==="platform");
   $("summaryTabBtn").classList.toggle("active",resultView==="summary");
   $("detailTabBtn").classList.toggle("active",resultView==="detail");
+  const platformTab=$("platformTabBtn");
+  if(platformTab)platformTab.classList.toggle("active",resultView==="platform");
   updateSortControls();
   updateGrowthFilterControls();
   updateReportSearchControls(0,resultView==="summary"?rows.length:dramaRows.length);
   tb.innerHTML="";
   const list=updateDetailControls(detailAccounts());
+  if(resultView==="platform"){
+    updateReportSearchControls(platformResults.length,platformResults.length);
+    renderPlatformRows(tb);
+    return;
+  }
   if(resultView==="detail"){
     setHeader(DRAMA_DETAIL_COLUMNS);
     const current=list[detailAccountIndex];
@@ -2918,6 +3089,11 @@ function backendUrl(path, params){
   const qs=new URLSearchParams(params).toString();
   return backendBase()+path+(qs?"?"+qs:"");
 }
+function sameOriginBackendUrl(path, params){
+  params=Object.assign({}, params||{});
+  const qs=new URLSearchParams(params).toString();
+  return path+(qs?"?"+qs:"");
+}
 async function backendFetchJson(path, params, opts){
   params=Object.assign({}, params||{});
   opts=opts||{};
@@ -2939,7 +3115,7 @@ async function backendPostJson(path, body, params, opts){
   const secret=backendSecret();
   if(opts.requireSecret&&!secret)throw new Error("missing SCHEDULE_SECRET");
   if(secret&&opts.sendSecret!==false)params.secret=secret;
-  const r=await fetch(backendUrl(path,params),{
+  const r=await fetch((opts.sameOrigin?sameOriginBackendUrl:backendUrl)(path,params),{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     cache:"no-store",
@@ -3549,6 +3725,8 @@ function init(){
   setPublicPageView("dashboard");
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
+  const platformTab=$("platformTabBtn");
+  if(platformTab)platformTab.addEventListener("click",()=>{resultView="platform";renderResultTable();});
   $("sortHotBtn").addEventListener("click",()=>setResultSort("hot"));
   $("sortLatestBtn").addEventListener("click",()=>setResultSort("latest"));
   const growthApply=$("growthApplyBtn"), growthClear=$("growthClearBtn"), growthDays=$("growthDaysInput"), growthMin=$("growthMinInput");
@@ -3573,6 +3751,30 @@ function init(){
       renderResultTable();
     });
   }
+  const platformSelect=$("platformSelect"), platformSearch=$("platformSearchInput"), platformBtn=$("platformSearchBtn");
+  if(platformSelect){
+    platformSelect.value=platformKind;
+    platformSelect.addEventListener("change",()=>{
+      platformKind=platformSelect.value;
+      store.set("thr_platform_kind",platformKind);
+      if(platformKind==="hongguo"){
+        platformStatus="红果暂未接入：当前 TikHub 文档没有可用端点。";
+        platformResults=[];
+      }else if(!platformResults.length){
+        platformStatus="输入关键词搜索抖音视频源；红果暂未接入。";
+      }
+      renderResultTable();
+    });
+  }
+  if(platformSearch){
+    platformSearch.value=platformSearchText;
+    platformSearch.addEventListener("input",()=>{
+      platformSearchText=platformSearch.value;
+      store.set("thr_platform_search",platformSearchText);
+    });
+    platformSearch.addEventListener("keydown",e=>{if(e.key==="Enter")runPlatformSearch();});
+  }
+  if(platformBtn)platformBtn.addEventListener("click",runPlatformSearch);
   updateSortControls();
   $("detailAccountSelect").addEventListener("change",()=>{
     setDetailAccountSelection(detailAccounts(),Number($("detailAccountSelect").value)||0);

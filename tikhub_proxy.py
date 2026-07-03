@@ -127,6 +127,9 @@ SINGLE_VIDEO_EP_CANDIDATES = [
     "/api/v1/tiktok/app/v3/fetch_one_video_v2",
     "/api/v1/tiktok/app/v3/fetch_one_video_v3",
 ]
+DOUYIN_SEARCH_ENDPOINT = "/api/v1/douyin/search/fetch_video_search_v2"
+DOUYIN_PLAY_ENDPOINT = "/api/v1/douyin/app/v3/fetch_video_high_quality_play_url"
+OTHER_PLATFORM_SEARCH_LIMIT = _env_int("OTHER_PLATFORM_SEARCH_LIMIT", 20, 1, 50)
 PLAY_KEYS = ("play_count", "playCount", "play_cnt")
 DESC_KEYS = ("desc", "title", "content", "aweme_title", "text")
 ID_KEYS = ("aweme_id", "awemeId", "id", "item_id", "itemId")
@@ -248,6 +251,40 @@ def _send_tikhub_get(path, params, label):
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")[:500]
             last_error = TikHubError("%s failed with HTTP %s: %s" % (label, exc.code, body), exc.code)
+            if exc.code in (429, 500, 502, 503, 504) and attempt < SCHEDULE_RETRIES:
+                time.sleep(max(0.5, SCHEDULE_DELAY_MS / 1000.0) * attempt)
+                continue
+            raise last_error
+        except Exception as exc:
+            last_error = TikHubError("%s request failed: %s" % (label, exc))
+            if attempt < SCHEDULE_RETRIES:
+                time.sleep(max(0.5, SCHEDULE_DELAY_MS / 1000.0) * attempt)
+                continue
+            raise last_error
+    raise last_error or TikHubError("%s request failed" % label)
+
+
+def _send_tikhub_post(path, payload, label):
+    if not SERVER_API_KEY:
+        raise TikHubError("TIKHUB_API_KEY is not configured on Render")
+    url = TIKHUB_HOST + path
+    body = json.dumps({k: v for k, v in (payload or {}).items() if v not in (None, "")}, ensure_ascii=False).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "Authorization": "Bearer " + SERVER_API_KEY,
+        "Content-Type": "application/json",
+        "User-Agent": DEFAULT_UA,
+    }
+    last_error = None
+    for attempt in range(1, SCHEDULE_RETRIES + 1):
+        try:
+            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                text = resp.read().decode("utf-8", "replace")
+                return json.loads(text) if text else None
+        except urllib.error.HTTPError as exc:
+            body_text = exc.read().decode("utf-8", "replace")[:500]
+            last_error = TikHubError("%s failed with HTTP %s: %s" % (label, exc.code, body_text), exc.code)
             if exc.code in (429, 500, 502, 503, 504) and attempt < SCHEDULE_RETRIES:
                 time.sleep(max(0.5, SCHEDULE_DELAY_MS / 1000.0) * attempt)
                 continue
@@ -849,6 +886,91 @@ def _find_video_list(obj, depth=0):
             if len(found) > len(best):
                 best = found
     return best
+
+
+def _collect_platform_videos(obj, out=None, seen=None, depth=0):
+    if out is None:
+        out = []
+    if seen is None:
+        seen = set()
+    if depth > 10 or obj is None:
+        return out
+    if isinstance(obj, list):
+        for item in obj:
+            _collect_platform_videos(item, out, seen, depth + 1)
+        return out
+    if not isinstance(obj, dict):
+        return out
+    candidates = [obj]
+    for key in ("aweme_info", "awemeInfo", "aweme_detail", "awemeDetail", "item_info", "itemInfo", "item", "aweme", "video_detail", "videoDetail"):
+        value = obj.get(key)
+        if isinstance(value, dict):
+            candidates.append(value)
+    for item in candidates:
+        video_id = _get_video_id(item)
+        if not video_id or video_id in seen:
+            continue
+        if _get_desc(item) or _get_play_count(item) or _video_play_url_from_tree(item):
+            seen.add(video_id)
+            out.append(item)
+    for value in obj.values():
+        if isinstance(value, (dict, list)):
+            _collect_platform_videos(value, out, seen, depth + 1)
+    return out
+
+
+def _first_platform_cover(item):
+    for key in (
+        "cover", "origin_cover", "originCover", "dynamic_cover", "dynamicCover",
+        "video_cover", "videoCover", "cover_url", "coverUrl", "poster",
+    ):
+        value = _deep_find_any(item, (key,))
+        url = _first_addr_url(value)
+        if url:
+            return url
+        text = _to_text(value)
+        if text.startswith("http"):
+            return text
+    return ""
+
+
+def _platform_author_text(item):
+    author = item.get("author") if isinstance(item, dict) else None
+    value = _deep_find_any(author or item, (
+        "nickname", "nick_name", "unique_id", "uniqueId", "short_id", "shortId", "authorName", "author_name",
+    ))
+    return _to_text(value, 80)
+
+
+def _platform_page_url(platform, item, video_id):
+    link = _first_http_url(item, ("share_url", "shareUrl", "shareLink", "share_link", "url", "web_url", "webUrl"))
+    if link:
+        return link
+    if platform == "douyin" and video_id:
+        return "https://www.douyin.com/video/%s" % urllib.parse.quote(str(video_id), safe="")
+    return ""
+
+
+def _platform_video_summary(platform, item):
+    video_id = _get_video_id(item)
+    play_url = _video_play_url_from_tree(item)
+    source_url = play_url
+    if not source_url and platform == "douyin" and video_id:
+        source_url = "/platform-source?" + urllib.parse.urlencode({"platform": "douyin", "video_id": video_id, "target": "play"})
+    views = _get_play_count(item)
+    return {
+        "platform": platform,
+        "platform_name": "抖音" if platform == "douyin" else platform,
+        "video_id": video_id,
+        "title": _get_desc(item),
+        "author": _platform_author_text(item),
+        "views": views,
+        "views_text": _format_chinese_count(views),
+        "publish_time": _publish_time_of(item),
+        "cover": _first_platform_cover(item),
+        "page_url": _platform_page_url(platform, item, video_id),
+        "play_url": source_url,
+    }
 
 
 def _find_playlist_list(obj, depth=0):
@@ -2189,6 +2311,10 @@ class Handler(BaseHTTPRequestHandler):
             self._schedule_accounts_endpoint(qs)
         elif parsed.path == "/drama-link":
             self._resolve_drama_link(qs)
+        elif parsed.path == "/platform-search":
+            self._platform_search_endpoint(qs)
+        elif parsed.path == "/platform-source":
+            self._platform_source_endpoint(qs)
         elif parsed.path == "/reports":
             self._list_reports(qs)
         elif parsed.path.startswith("/reports/"):
@@ -2209,6 +2335,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/translate-titles":
             self._translate_titles()
+            return
+        if parsed.path == "/platform-search":
+            self._platform_search_endpoint(qs)
             return
         target = qs.get("url", [None])[0]
         if not target:
@@ -2281,6 +2410,107 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
             self._send_json(200, {"ok": True, "url": link, "target": target})
+
+    def _read_json_body(self):
+        try:
+            ln = int(self.headers.get("Content-Length", 0) or 0)
+            if not ln:
+                return {}
+            return json.loads(self.rfile.read(ln) or b"{}")
+        except Exception:
+            return {}
+
+    def _platform_unavailable(self, platform):
+        self._send_json(501, {
+            "ok": False,
+            "platform": platform,
+            "error": "platform is not connected",
+            "message": "当前 TikHub 文档没有找到这个平台的可用端点，暂未接入。",
+        })
+
+    def _platform_search_endpoint(self, qs):
+        body = self._read_json_body() if self.command == "POST" else {}
+        platform = (body.get("platform") or qs.get("platform", ["douyin"])[0] or "douyin").strip().lower()
+        if platform in ("hongguo", "hong-guo", "redfruit", "red-fruit"):
+            self._platform_unavailable("hongguo")
+            return
+        if platform not in ("douyin", "douyin_video"):
+            self._send_json(400, {"ok": False, "error": "unsupported platform"})
+            return
+        if not SERVER_API_KEY:
+            self._send_json(503, {"ok": False, "error": "TIKHUB_API_KEY is not configured"})
+            return
+        query = (body.get("query") or body.get("keyword") or qs.get("q", [""])[0] or qs.get("keyword", [""])[0] or "").strip()
+        if not query:
+            self._send_json(400, {"ok": False, "error": "missing query"})
+            return
+        count = max(1, min(_to_int(body.get("count") or qs.get("count", [OTHER_PLATFORM_SEARCH_LIMIT])[0]), OTHER_PLATFORM_SEARCH_LIMIT))
+        cursor = str(body.get("cursor") or qs.get("cursor", ["0"])[0] or "0")
+        payload = {
+            "keyword": query,
+            "count": count,
+            "offset": cursor,
+            "cursor": cursor,
+            "sort_type": body.get("sort_type", 0),
+            "publish_time": body.get("publish_time", 0),
+            "filter_duration": body.get("filter_duration", 0),
+        }
+        try:
+            data = _send_tikhub_post(DOUYIN_SEARCH_ENDPOINT, payload, "Douyin video search endpoint")
+            videos = _collect_platform_videos(data)[:count]
+            results = [_platform_video_summary("douyin", item) for item in videos]
+            cursor_info = {}
+            if isinstance(data, dict):
+                for key in ("cursor", "offset", "max_cursor", "maxCursor", "has_more", "hasMore"):
+                    found = _deep_find(data, (key,))
+                    if found not in (None, ""):
+                        cursor_info[key] = found
+            self._send_json(200, {
+                "ok": True,
+                "platform": "douyin",
+                "platform_name": "抖音",
+                "query": query,
+                "count": len(results),
+                "results": results,
+                "cursor": cursor_info,
+            })
+        except TikHubError as exc:
+            self._send_json(exc.status or 502, {"ok": False, "platform": "douyin", "error": str(exc)})
+        except Exception as exc:
+            self._send_json(500, {"ok": False, "platform": "douyin", "error": str(exc)})
+
+    def _platform_source_endpoint(self, qs):
+        platform = (qs.get("platform", ["douyin"])[0] or "douyin").strip().lower()
+        if platform in ("hongguo", "hong-guo", "redfruit", "red-fruit"):
+            self._platform_unavailable("hongguo")
+            return
+        if platform not in ("douyin", "douyin_video"):
+            self._send_json(400, {"ok": False, "error": "unsupported platform"})
+            return
+        video_id = qs.get("video_id", [""])[0] or qs.get("aweme_id", [""])[0] or qs.get("item_id", [""])[0]
+        video_id = _clean_drama_id(video_id)
+        if not video_id:
+            self._send_json(400, {"ok": False, "error": "missing video_id"})
+            return
+        redirect = str(qs.get("redirect", ["1"])[0]).lower() not in ("0", "false", "no")
+        try:
+            data = _send_tikhub_get(DOUYIN_PLAY_ENDPOINT, {"aweme_id": video_id, "video_id": video_id}, "Douyin play source endpoint")
+            url = _video_play_url_from_tree(data) or _first_http_url(data, ("play_url", "playUrl", "url", "download_url", "downloadUrl"))
+            if not url:
+                self._send_json(404, {"ok": False, "platform": "douyin", "error": "video source not found"})
+                return
+            if redirect:
+                self.send_response(302)
+                self.send_header("Location", url)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self._send_json(200, {"ok": True, "platform": "douyin", "video_id": video_id, "url": url})
+        except TikHubError as exc:
+            self._send_json(exc.status or 502, {"ok": False, "platform": "douyin", "error": str(exc)})
+        except Exception as exc:
+            self._send_json(500, {"ok": False, "platform": "douyin", "error": str(exc)})
 
     def _schedule_accounts_endpoint(self, qs):
         if not self._require_schedule_secret(qs):
