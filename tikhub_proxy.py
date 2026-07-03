@@ -20,7 +20,7 @@
  端口被占用?把下面的 PORT 改个数字,网页代理框也跟着改。
 ==============================================================================
 """
-import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, html, io, re, threading, time
+import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, html, io, re, threading, time, tempfile, zipfile
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -95,6 +95,10 @@ AUTO_REFRESH_COOLDOWN_SECONDS = _env_int("AUTO_REFRESH_COOLDOWN_SECONDS", 300, 3
 VIDEO_PLAY_URL_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_URL_CACHE_TTL_SECONDS", 600, 0, 86400)
 DRAMA_LINK_PAGE_SIZE = _env_int("DRAMA_LINK_PAGE_SIZE", 50, 1, 50)
 DRAMA_LINK_MAX_EPISODES = _env_int("DRAMA_LINK_MAX_EPISODES", 500, 1, 5000)
+DRAMA_ZIP_MAX_EPISODES = _env_int("DRAMA_ZIP_MAX_EPISODES", DRAMA_LINK_MAX_EPISODES, 1, 5000)
+DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECONDS = _env_int("DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECONDS", 120, 10, 600)
+DRAMA_ZIP_CHUNK_BYTES = _env_int("DRAMA_ZIP_CHUNK_BYTES", 262144, 32768, 1048576)
+DRAMA_ZIP_MAX_VIDEO_BYTES = _env_int("DRAMA_ZIP_MAX_VIDEO_BYTES", 0, 0, 1024 * 1024 * 1024 * 20)
 SCHEDULE_SAVE_EPISODE_HISTORY = _env_bool("SCHEDULE_SAVE_EPISODE_HISTORY", True)
 SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS", 0, 0, 20000)
 SCHEDULE_EPISODE_HISTORY_MAX_EPISODES = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_EPISODES", DRAMA_LINK_MAX_EPISODES, 0, 5000)
@@ -1957,6 +1961,69 @@ def _drama_episode_summary(item, uid, index):
     }
 
 
+def _safe_download_name(value, limit=90):
+    text = _to_text(value, limit) or "video"
+    text = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "_", text)
+    text = re.sub(r"\s+", " ", text).strip().strip(".")
+    return text or "video"
+
+
+def _unique_archive_name(name, used):
+    base, ext = os.path.splitext(name)
+    candidate = name
+    idx = 2
+    while candidate in used:
+        candidate = "%s-%s%s" % (base, idx, ext)
+        idx += 1
+    used.add(candidate)
+    return candidate
+
+
+def _drama_zip_filename(uid, drama_id):
+    parts = [part for part in (_safe_download_name(uid or "account", 36), _clean_drama_id(drama_id) or "drama") if part]
+    return _safe_download_name("-".join(parts), 120) + "-videos.zip"
+
+
+def _attachment_header(filename):
+    ascii_name = re.sub(r"[^A-Za-z0-9._-]+", "_", filename).strip("_") or "videos.zip"
+    return 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (
+        ascii_name,
+        urllib.parse.quote(filename),
+    )
+
+
+def _episode_direct_play_url(item, started=None):
+    url = _video_play_url_from_item(item)
+    if url:
+        return url
+    video_id = _get_video_id(item)
+    return _get_video_play_url(video_id, started) if video_id else ""
+
+
+def _media_extension(content_type, url):
+    parsed_ext = os.path.splitext(urllib.parse.urlparse(url or "").path)[1].lower()
+    if parsed_ext in (".mp4", ".mov", ".m4v", ".webm", ".mkv"):
+        return parsed_ext
+    ctype = (content_type or "").split(";", 1)[0].strip().lower()
+    if ctype == "video/webm":
+        return ".webm"
+    if ctype in ("video/quicktime", "video/mov"):
+        return ".mov"
+    if ctype in ("video/mp4", "application/octet-stream", "binary/octet-stream"):
+        return ".mp4"
+    return ".mp4"
+
+
+def _open_video_download(url, uid):
+    headers = {
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": TIKTOK_HOST + ("/@" + uid if uid else "/"),
+        "User-Agent": DEFAULT_UA,
+    }
+    return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECONDS)
+
+
 def _drama_row_value(row, keys):
     if not isinstance(row, dict):
         return ""
@@ -2085,6 +2152,11 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
         "target": "list",
         "redirect": "0",
     })
+    zip_url = "/drama-link?" + urllib.parse.urlencode({
+        "uid": account,
+        "drama_id": _clean_drama_id(drama_id),
+        "target": "zip",
+    })
     body = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -2093,7 +2165,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
 <title>&#30701;&#21095;&#35270;&#39057;&#21015;&#34920;</title>
 <style>
 :root{color-scheme:light;--ink:#172033;--muted:#667085;--line:#e6eaf1;--head:#1d2633;--bg:#f5f7fb;--blue:#405cff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Arial,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:24px auto;padding:0 18px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(31,41,55,.08);overflow:hidden}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px}.tools{display:flex;gap:8px;flex-wrap:wrap}.btn,.link{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:6px;text-decoration:none;border:1px solid var(--line);white-space:nowrap}.btn{color:var(--ink);background:#fff}.link.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.ghost{color:var(--blue);background:#fff;margin-left:8px}table{width:100%%;border-collapse:collapse;table-layout:fixed}thead th{background:var(--head);color:#fff;text-align:left;font-weight:700;padding:12px 14px}tbody td{border-top:1px solid var(--line);padding:12px 14px;vertical-align:top}tbody tr:nth-child(even){background:#fafbfe}.idx{width:64px;color:var(--muted)}.time-col{width:154px}.view-col{width:96px}.growth-col{width:118px}.action-col{width:178px}.name{font-weight:700;word-break:break-word}.meta{margin-top:3px;color:var(--muted);font-size:12px;word-break:break-all}.growth-cell{font-weight:800;white-space:nowrap}.growth-up{display:inline-flex;align-items:center;gap:4px;color:#e11d48}.growth-flat,.growth-empty{color:#98a2b3;font-weight:700}.trend-arrow{font-size:16px;line-height:1}.actions{white-space:nowrap}.empty{text-align:center;color:var(--muted);padding:34px}.note{color:var(--muted);font-size:12px;margin-top:12px}@media(max-width:760px){.top{display:block}.tools{margin-top:12px}table{table-layout:auto}.hide-sm{display:none}.actions{white-space:normal}.link.ghost{margin-left:0;margin-top:6px}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Arial,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:24px auto;padding:0 18px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(31,41,55,.08);overflow:hidden}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px}.tools{display:flex;gap:8px;flex-wrap:wrap}.btn,.link{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:6px;text-decoration:none;border:1px solid var(--line);white-space:nowrap}.btn{color:var(--ink);background:#fff}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.ghost{color:var(--blue);background:#fff;margin-left:8px}table{width:100%%;border-collapse:collapse;table-layout:fixed}thead th{background:var(--head);color:#fff;text-align:left;font-weight:700;padding:12px 14px}tbody td{border-top:1px solid var(--line);padding:12px 14px;vertical-align:top}tbody tr:nth-child(even){background:#fafbfe}.idx{width:64px;color:var(--muted)}.time-col{width:154px}.view-col{width:96px}.growth-col{width:118px}.action-col{width:178px}.name{font-weight:700;word-break:break-word}.meta{margin-top:3px;color:var(--muted);font-size:12px;word-break:break-all}.growth-cell{font-weight:800;white-space:nowrap}.growth-up{display:inline-flex;align-items:center;gap:4px;color:#e11d48}.growth-flat,.growth-empty{color:#98a2b3;font-weight:700}.trend-arrow{font-size:16px;line-height:1}.actions{white-space:nowrap}.empty{text-align:center;color:var(--muted);padding:34px}.note{color:var(--muted);font-size:12px;margin-top:12px}@media(max-width:760px){.top{display:block}.tools{margin-top:12px}table{table-layout:auto}.hide-sm{display:none}.actions{white-space:normal}.link.ghost{margin-left:0;margin-top:6px}}
 </style>
 </head>
 <body>
@@ -2106,6 +2178,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
       </div>
       <div class="tools">
         <a class="btn" href="/" target="_self">&#36820;&#22238;&#25253;&#34920;</a>
+        <a class="btn primary" href="%s" target="_blank" rel="noopener">&#19979;&#36733;&#20840;&#37096; ZIP</a>
         <a class="btn" href="%s" target="_blank" rel="noopener">JSON</a>
       </div>
     </div>
@@ -2121,6 +2194,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
         _html_text(account),
         len(episodes),
         _html_text(_clean_drama_id(drama_id)),
+        _html_text(zip_url),
         _html_text(source_url),
         "\n".join(rows),
     )
@@ -2236,6 +2310,101 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return self._require_schedule_secret(qs)
 
+    def _send_drama_episode_zip(self, uid, drama_id, episode_items):
+        account = (uid or "").strip().lstrip("@")
+        clean_drama_id = _clean_drama_id(drama_id)
+        if not episode_items:
+            self._send_json(404, {"ok": False, "error": "no episodes found"})
+            return
+        filename = _drama_zip_filename(account, clean_drama_id)
+        started = time.time()
+        self.send_response(200)
+        self._cors()
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", _attachment_header(filename))
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        manifest = {
+            "uid": account,
+            "drama_id": clean_drama_id,
+            "generated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
+            "count": 0,
+            "files": [],
+            "errors": [],
+        }
+        used_names = set()
+        try:
+            with zipfile.ZipFile(self.wfile, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
+                for index, item in enumerate(episode_items, 1):
+                    summary = _drama_episode_summary(item, account, index)
+                    video_id = summary.get("video_id") or ""
+                    episode_no = summary.get("episode_no") or index
+                    title = summary.get("title") or ("Episode %s" % episode_no)
+                    try:
+                        direct_url = _episode_direct_play_url(item, started)
+                        if not direct_url:
+                            raise TikHubError("play source not found")
+                        with _open_video_download(direct_url, account) as resp:
+                            final_url = resp.geturl() or direct_url
+                            ext = _media_extension(resp.headers.get("Content-Type", ""), final_url)
+                            base = "%03d-%s" % (_to_int(episode_no) or index, _safe_download_name(title, 70))
+                            if video_id:
+                                base += "-" + _safe_download_name(video_id[-10:], 12)
+                            archive_name = _unique_archive_name(base + ext, used_names)
+                            size, temp_path = 0, ""
+                            try:
+                                with tempfile.NamedTemporaryFile(prefix="thr_video_", suffix=ext, delete=False) as temp_file:
+                                    temp_path = temp_file.name
+                                    while True:
+                                        chunk = resp.read(DRAMA_ZIP_CHUNK_BYTES)
+                                        if not chunk:
+                                            break
+                                        size += len(chunk)
+                                        if DRAMA_ZIP_MAX_VIDEO_BYTES and size > DRAMA_ZIP_MAX_VIDEO_BYTES:
+                                            raise TikHubError("video exceeds DRAMA_ZIP_MAX_VIDEO_BYTES")
+                                        temp_file.write(chunk)
+                                zf.write(temp_path, archive_name)
+                            finally:
+                                if temp_path:
+                                    try:
+                                        os.remove(temp_path)
+                                    except OSError:
+                                        pass
+                            manifest["files"].append({
+                                "episode": episode_no,
+                                "video_id": video_id,
+                                "title": title,
+                                "file": archive_name,
+                                "bytes": size,
+                            })
+                    except Exception as exc:
+                        manifest["errors"].append({
+                            "episode": episode_no,
+                            "video_id": video_id,
+                            "title": title,
+                            "error": str(exc),
+                        })
+                manifest["count"] = len(manifest["files"])
+                zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+                if manifest["errors"]:
+                    lines = [
+                        "Some episodes could not be downloaded.",
+                        "uid=%s drama_id=%s" % (account, clean_drama_id),
+                        "",
+                    ]
+                    for item in manifest["errors"]:
+                        lines.append("Episode %s %s: %s" % (
+                            item.get("episode") or "",
+                            item.get("video_id") or "",
+                            item.get("error") or "",
+                        ))
+                    zf.writestr("download_errors.txt", "\n".join(lines))
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def _resolve_drama_link(self, qs):
         uid = (qs.get("uid", [""])[0] or qs.get("account", [""])[0]).strip().lstrip("@")
         drama_id = qs.get("drama_id", [""])[0] or qs.get("dramaID", [""])[0]
@@ -2243,6 +2412,13 @@ class Handler(BaseHTTPRequestHandler):
         target = qs.get("target", ["play"])[0] or "play"
         target_norm = str(target or "").strip().lower()
         redirect = str(qs.get("redirect", ["1"])[0]).lower() not in ("0", "false", "no")
+        if target_norm in ("zip", "download", "download_zip", "archive"):
+            if not drama_id:
+                self._send_json(400, {"ok": False, "error": "missing drama_id"})
+                return
+            episode_items = _get_drama_episode_items(drama_id, uid, limit=DRAMA_ZIP_MAX_EPISODES)
+            self._send_drama_episode_zip(uid, drama_id, episode_items)
+            return
         if target_norm in ("list", "episodes", "episode_list", "all"):
             if not drama_id:
                 self._send_json(400, {"ok": False, "error": "missing drama_id"})
