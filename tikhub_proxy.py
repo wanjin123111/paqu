@@ -2208,6 +2208,26 @@ Read-Host "Press Enter to close"
     return script.encode("utf-8-sig"), len(items), errors
 
 
+def _wrap_powershell_downloader_cmd(script_bytes):
+    script_text = script_bytes.decode("utf-8-sig")
+    wrapper = """@echo off
+setlocal
+set "SCRIPT_PATH=%~f0"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $lines=Get-Content -LiteralPath $env:SCRIPT_PATH -Encoding UTF8; $idx=[Array]::IndexOf($lines,'__POWERSHELL__'); if($idx -lt 0){throw 'script marker not found'}; $temp=Join-Path $env:TEMP ('tikhub_downloader_' + [guid]::NewGuid().ToString('N') + '.ps1'); $lines[($idx+1)..($lines.Count-1)] | Set-Content -LiteralPath $temp -Encoding UTF8; & powershell -NoProfile -ExecutionPolicy Bypass -File $temp; $code=$LASTEXITCODE; Remove-Item -LiteralPath $temp -ErrorAction SilentlyContinue; exit $code"
+if errorlevel 1 (
+  echo.
+  echo Downloader failed. Please copy the error above and send it to Codex.
+) else (
+  echo.
+  echo Downloader finished.
+)
+pause
+exit /b
+__POWERSHELL__
+"""
+    return (wrapper + script_text).encode("utf-8")
+
+
 def _local_download_job_snapshot(job_id):
     with LOCAL_DOWNLOAD_JOBS_LOCK:
         job = LOCAL_DOWNLOAD_JOBS.get(job_id)
@@ -2839,19 +2859,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(404, {"ok": False, "error": "no episodes found"})
                 return
             script, count, errors = _build_drama_local_downloader_script(account, drama_id, episode_items)
+            script = _wrap_powershell_downloader_cmd(script)
         except Exception as exc:
             self._send_json(500, {"ok": False, "error": str(exc)})
             return
         if not count and errors:
             self._send_json(502, {"ok": False, "error": "no playable URLs prepared", "errors": errors[:10]})
             return
-        filename = _safe_download_name("%s-%s-downloader.ps1" % (account or "account", _clean_drama_id(drama_id) or "drama"), 120)
+        filename = _safe_download_name("%s-%s-downloader.cmd" % (account or "account", _clean_drama_id(drama_id) or "drama"), 120)
         self.send_response(200)
         self._cors()
         self.send_header("Cache-Control", "no-store")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Disposition", _attachment_header(filename))
         self.send_header("Content-Length", str(len(script)))
         self.end_headers()
