@@ -20,7 +20,7 @@
  端口被占用?把下面的 PORT 改个数字,网页代理框也跟着改。
 ==============================================================================
 """
-import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, html, io, re, threading, time, tempfile, zipfile
+import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -99,6 +99,7 @@ DRAMA_ZIP_MAX_EPISODES = _env_int("DRAMA_ZIP_MAX_EPISODES", DRAMA_LINK_MAX_EPISO
 DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECONDS = _env_int("DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECONDS", 120, 10, 600)
 DRAMA_ZIP_CHUNK_BYTES = _env_int("DRAMA_ZIP_CHUNK_BYTES", 262144, 32768, 1048576)
 DRAMA_ZIP_MAX_VIDEO_BYTES = _env_int("DRAMA_ZIP_MAX_VIDEO_BYTES", 0, 0, 1024 * 1024 * 1024 * 20)
+DRAMA_ZIP_WORKERS = _env_int("DRAMA_ZIP_WORKERS", 3, 1, 8)
 SCHEDULE_SAVE_EPISODE_HISTORY = _env_bool("SCHEDULE_SAVE_EPISODE_HISTORY", True)
 SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS", 0, 0, 20000)
 SCHEDULE_EPISODE_HISTORY_MAX_EPISODES = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_EPISODES", DRAMA_LINK_MAX_EPISODES, 0, 5000)
@@ -2024,6 +2025,56 @@ def _open_video_download(url, uid):
     return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECONDS)
 
 
+def _download_episode_to_temp(index, item, account, started=None):
+    summary = _drama_episode_summary(item, account, index)
+    video_id = summary.get("video_id") or ""
+    episode_no = summary.get("episode_no") or index
+    title = summary.get("title") or ("Episode %s" % episode_no)
+    temp_path = ""
+    try:
+        direct_url = _episode_direct_play_url(item, started)
+        if not direct_url:
+            raise TikHubError("play source not found")
+        with _open_video_download(direct_url, account) as resp:
+            final_url = resp.geturl() or direct_url
+            ext = _media_extension(resp.headers.get("Content-Type", ""), final_url)
+            size = 0
+            with tempfile.NamedTemporaryFile(prefix="thr_video_", suffix=ext, delete=False) as temp_file:
+                temp_path = temp_file.name
+                while True:
+                    chunk = resp.read(DRAMA_ZIP_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if DRAMA_ZIP_MAX_VIDEO_BYTES and size > DRAMA_ZIP_MAX_VIDEO_BYTES:
+                        raise TikHubError("video exceeds DRAMA_ZIP_MAX_VIDEO_BYTES")
+                    temp_file.write(chunk)
+        return {
+            "ok": True,
+            "index": index,
+            "episode": episode_no,
+            "video_id": video_id,
+            "title": title,
+            "ext": ext,
+            "bytes": size,
+            "temp_path": temp_path,
+        }
+    except Exception as exc:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        return {
+            "ok": False,
+            "index": index,
+            "episode": episode_no,
+            "video_id": video_id,
+            "title": title,
+            "error": str(exc),
+        }
+
+
 def _drama_row_value(row, keys):
     if not isinstance(row, dict):
         return ""
@@ -2331,6 +2382,7 @@ class Handler(BaseHTTPRequestHandler):
             "uid": account,
             "drama_id": clean_drama_id,
             "generated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
+            "workers": min(DRAMA_ZIP_WORKERS, max(1, len(episode_items))),
             "count": 0,
             "files": [],
             "errors": [],
@@ -2338,55 +2390,47 @@ class Handler(BaseHTTPRequestHandler):
         used_names = set()
         try:
             with zipfile.ZipFile(self.wfile, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
-                for index, item in enumerate(episode_items, 1):
-                    summary = _drama_episode_summary(item, account, index)
-                    video_id = summary.get("video_id") or ""
-                    episode_no = summary.get("episode_no") or index
-                    title = summary.get("title") or ("Episode %s" % episode_no)
-                    try:
-                        direct_url = _episode_direct_play_url(item, started)
-                        if not direct_url:
-                            raise TikHubError("play source not found")
-                        with _open_video_download(direct_url, account) as resp:
-                            final_url = resp.geturl() or direct_url
-                            ext = _media_extension(resp.headers.get("Content-Type", ""), final_url)
-                            base = "%03d-%s" % (_to_int(episode_no) or index, _safe_download_name(title, 70))
+                max_workers = manifest["workers"]
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    futures = [
+                        pool.submit(_download_episode_to_temp, index, item, account, started)
+                        for index, item in enumerate(episode_items, 1)
+                    ]
+                    for future in concurrent.futures.as_completed(futures):
+                        result = future.result()
+                        episode_no = result.get("episode") or result.get("index") or ""
+                        video_id = result.get("video_id") or ""
+                        title = result.get("title") or ""
+                        if not result.get("ok"):
+                            manifest["errors"].append({
+                                "episode": episode_no,
+                                "video_id": video_id,
+                                "title": title,
+                                "error": result.get("error") or "download failed",
+                            })
+                            continue
+                        temp_path = result.get("temp_path") or ""
+                        try:
+                            base = "%03d-%s" % (_to_int(episode_no) or result.get("index") or 0, _safe_download_name(title, 70))
                             if video_id:
                                 base += "-" + _safe_download_name(video_id[-10:], 12)
-                            archive_name = _unique_archive_name(base + ext, used_names)
-                            size, temp_path = 0, ""
-                            try:
-                                with tempfile.NamedTemporaryFile(prefix="thr_video_", suffix=ext, delete=False) as temp_file:
-                                    temp_path = temp_file.name
-                                    while True:
-                                        chunk = resp.read(DRAMA_ZIP_CHUNK_BYTES)
-                                        if not chunk:
-                                            break
-                                        size += len(chunk)
-                                        if DRAMA_ZIP_MAX_VIDEO_BYTES and size > DRAMA_ZIP_MAX_VIDEO_BYTES:
-                                            raise TikHubError("video exceeds DRAMA_ZIP_MAX_VIDEO_BYTES")
-                                        temp_file.write(chunk)
-                                zf.write(temp_path, archive_name)
-                            finally:
-                                if temp_path:
-                                    try:
-                                        os.remove(temp_path)
-                                    except OSError:
-                                        pass
+                            archive_name = _unique_archive_name(base + (result.get("ext") or ".mp4"), used_names)
+                            zf.write(temp_path, archive_name)
                             manifest["files"].append({
                                 "episode": episode_no,
                                 "video_id": video_id,
                                 "title": title,
                                 "file": archive_name,
-                                "bytes": size,
+                                "bytes": result.get("bytes") or 0,
                             })
-                    except Exception as exc:
-                        manifest["errors"].append({
-                            "episode": episode_no,
-                            "video_id": video_id,
-                            "title": title,
-                            "error": str(exc),
-                        })
+                        finally:
+                            if temp_path:
+                                try:
+                                    os.remove(temp_path)
+                                except OSError:
+                                    pass
+                manifest["files"].sort(key=lambda item: _to_int(item.get("episode")) or 0)
+                manifest["errors"].sort(key=lambda item: _to_int(item.get("episode")) or 0)
                 manifest["count"] = len(manifest["files"])
                 zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
                 if manifest["errors"]:
