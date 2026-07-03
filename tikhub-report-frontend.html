@@ -235,7 +235,6 @@
   .dash-area{min-height:188px;padding:11px}
   .dash-growth-wide{grid-column:1 / span 4;grid-row:2 / span 2;min-height:350px;padding:12px 14px 10px;display:flex;flex-direction:column;background:linear-gradient(180deg,#fff 0%,#F5F4FF 100%);border-color:#D8D6EA}
   .theme-growth-panel{grid-column:span 2;display:flex;flex-direction:column;background:linear-gradient(180deg,#F1F0FA 0%,#E9EBF5 100%);border-color:#D8D6EA}
-  .theme-growth-panel.is-wide{grid-column:1 / span 4}
   .theme-growth-panel .dash-panel-title{color:#151B2C}
   .theme-growth-panel .dash-panel-sub,.theme-growth-panel .dash-panel-meta{color:#5F667A}
   .dash-side{grid-column:5;grid-row:3;display:grid;gap:10px}
@@ -268,16 +267,15 @@
   .growth-rank-row:hover .growth-rank-fill{filter:brightness(1.06)}
   .growth-rank-row.is-second .growth-rank-fill{background:#1F2733}
   .growth-rank-foot{margin-top:2px;font-size:9.8px;color:var(--ink-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .theme-growth-list{flex:1;display:grid;grid-template-columns:minmax(150px,.95fr) repeat(2,minmax(0,1fr));grid-auto-rows:minmax(62px,auto);gap:8px;min-height:0;max-height:100%;padding:2px 7px 7px 2px;margin-right:-4px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-gutter:stable}
-  .theme-growth-list::-webkit-scrollbar{width:6px}
-  .theme-growth-list::-webkit-scrollbar-thumb{background:rgba(85,70,255,.3);border-radius:99px}
-  .theme-growth-list::-webkit-scrollbar-track{background:rgba(31,39,51,.08);border-radius:99px}
+  .theme-growth-list{flex:0 0 auto;display:grid;grid-template-columns:minmax(150px,.95fr) repeat(2,minmax(0,1fr));grid-auto-rows:minmax(58px,auto);gap:8px;min-height:0;padding:2px 2px 7px;overflow:visible}
   .theme-growth-card{position:relative;min-width:0;overflow:hidden;border:1px solid #D7D4F3;border-radius:8px;background:linear-gradient(180deg,#F9F8FF 0%,#F0EEFF 100%);padding:8px 9px 7px;color:#171D2F;box-shadow:inset 0 1px 0 rgba(255,255,255,.78);animation:growthRowEnter .34s cubic-bezier(.16,1,.3,1) both}
   .theme-growth-card.is-top{grid-row:span 2;padding:11px 12px;background:linear-gradient(135deg,#1F2733,#2A2E3A);border-color:#1F2733;color:#fff}
   .theme-growth-card.is-second{background:linear-gradient(180deg,#ECEFF7 0%,#E5E8F2 100%);border-color:#CCD2E4}
+  .theme-growth-card:not(.is-top){display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:42px;padding:7px 9px}
   .theme-growth-card::after{content:"";position:absolute;right:8px;bottom:8px;width:30px;height:30px;border-radius:50%;background:conic-gradient(var(--accent) var(--growth-deg),rgba(196,201,222,.95) 0);opacity:.12}
   .theme-growth-card.is-top::after{right:-18px;bottom:-18px;width:96px;height:96px;opacity:.2;background:rgba(124,114,255,.55)}
   .theme-growth-top{position:relative;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+  .theme-growth-card:not(.is-top) .theme-growth-top{display:contents}
   .theme-growth-index{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;background:#F0EEFF;color:var(--accent);font-family:var(--mono);font-size:10px;font-weight:800;flex:none}
   .theme-growth-card.is-top .theme-growth-index{background:linear-gradient(135deg,var(--accent),#7C72FF);color:#fff;box-shadow:0 7px 18px rgba(85,70,255,.2)}
   .theme-growth-card.is-second .theme-growth-index{background:#1F2733;color:#fff}
@@ -290,6 +288,7 @@
   .theme-growth-meta{position:relative;z-index:1;margin-top:4px;font-size:9.8px;color:#5F667A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .theme-growth-card.is-top .theme-growth-meta{color:rgba(255,255,255,.72)}
   .theme-growth-tags{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
+  .theme-growth-card:not(.is-top) .theme-growth-meta,.theme-growth-card:not(.is-top) .theme-growth-tags{display:none}
   .theme-growth-tag{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:6px;background:rgba(255,255,255,.72);color:#4F46E5;font-size:9.5px;font-weight:800;white-space:nowrap}
   .theme-growth-card.is-top .theme-growth-tag{background:rgba(255,255,255,.12);color:rgba(255,255,255,.86)}
   @keyframes growthRowEnter{from{opacity:.72;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
@@ -362,7 +361,7 @@
   body.public-mode #monitorDashboardCard::after{height:8px}
   body.public-mode #dashboardCard .dashboard-inner{height:100%;display:flex;flex-direction:column;padding:34px 40px 36px}
   body.public-mode #dashboardCard .dashboard-head{padding-right:145px}
-  body.public-mode #dashboardCard .dashboard-grid{flex:1;min-height:0;grid-template-rows:minmax(118px,.72fr) minmax(230px,1.55fr) minmax(230px,1.55fr)}
+  body.public-mode #dashboardCard .dashboard-grid{flex:1;min-height:0;grid-template-rows:minmax(118px,.72fr) minmax(230px,1.35fr) minmax(340px,1.75fr)}
   body.public-mode #dashboardCard .dash-panel{min-height:0}
   body.public-mode #dashboardCard .dash-main,
   body.public-mode #dashboardCard .dash-area{display:flex;flex-direction:column}
@@ -2415,7 +2414,7 @@ function renderDashboard(){
       ${dashboardDramaCardHtml("近1天涨幅",grow1,{light:true,icon:"1"})}
       <div class="dash-panel dash-main"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">近30天热度新增榜</div><div class="dash-panel-sub">对比历史新增播放 · 全账号按涨幅排序</div></div><div class="dash-panel-meta">Top 10 · 近30天 · 新增播放</div></div>${dashboardDramaGrowthBarSvg(monthGrowthItems)}</div>
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
-      <div class="dash-panel dash-area theme-growth-panel is-wide"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本月题材播放增长</div><div class="dash-panel-sub">按题材汇总当前播放量 - 历史播放量</div></div><div class="dash-panel-meta">按增长排序</div></div>${dashboardThemeGrowthPanelHtml(monthThemeGrowth,"本月")}</div>
+      <div class="dash-panel dash-area theme-growth-panel"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本月题材播放增长</div><div class="dash-panel-sub">按题材汇总当前播放量 - 历史播放量</div></div><div class="dash-panel-meta">按增长排序</div></div>${dashboardThemeGrowthPanelHtml(monthThemeGrowth,"本月")}</div>
       <div class="dash-side">
         <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">监控账号：${fmt(current.accountCount)}</div><div class="dash-stat-sub">账号汇总记录</div></div></div>
         <div class="dash-stat"><div class="dash-stat-icon">N</div><div><div class="dash-stat-title">本周新增短剧：${fmt(weeklyDramaGrowth.diff)}部</div><div class="dash-stat-sub">${esc(weeklyDramaSub)}</div></div></div>
