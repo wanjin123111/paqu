@@ -281,7 +281,10 @@
   .theme-growth-card.is-second .theme-growth-index{background:#1F2733;color:#fff}
   .theme-growth-name{position:relative;z-index:1;font-size:12px;font-weight:800;color:#121827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .theme-growth-card.is-top .theme-growth-name{font-size:15px;line-height:1.25;color:#fff;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .theme-growth-card:not(.is-top) .theme-growth-index{grid-column:1;grid-row:1}
+  .theme-growth-card:not(.is-top) .theme-growth-name{grid-column:2;grid-row:1;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.2}
   .theme-growth-delta{position:relative;z-index:1;font-family:var(--display);font-size:12px;font-weight:800;color:var(--accent);white-space:nowrap}
+  .theme-growth-card:not(.is-top) .theme-growth-delta{grid-column:3;grid-row:1;align-self:start}
   .theme-growth-card.is-top .theme-growth-delta{color:#fff}
   .theme-growth-card.is-second .theme-growth-delta{color:#1F2733}
   .theme-growth-card.is-top.is-second .theme-growth-delta{color:#fff}
@@ -1419,6 +1422,12 @@ function themeDisplayList(row){
     return themeLabelCache.get(label)||themeLabelCache.get(label.replace(/\//g,"/"))||label;
   }).filter(Boolean);
 }
+function dashboardThemeGroupOf(row){
+  const labels=themeDisplayList(row).map(label=>String(label||"").trim()).filter(Boolean).slice(0,3);
+  if(!labels.length)return null;
+  const key=labels.map(label=>label.toLowerCase()).join("|");
+  return {key,name:labels.join(" / "),labels};
+}
 function themeHasPendingTranslation(row){
   return englishThemeLabelsOf(row).some(label=>label&&!CJK_RE.test(label)&&!themeLabelCache.has(label));
 }
@@ -1734,21 +1743,18 @@ function dashboardSnapshotFromPayload(payload){
   const topAccounts=[...summary].sort((a,b)=>summaryHotOf(b)-summaryHotOf(a)).slice(0,5).map(row=>({name:nickOf(row)||accountOf(row),account:accountOf(row),views:summaryHotOf(row)}));
   const themeMap=new Map();
   for(const row of details){
-    const labels=themeDisplayList(row);
-    if(!labels.length)continue;
+    const group=dashboardThemeGroupOf(row);
+    if(!group)continue;
     const views=dramaViewsOf(row);
     const account=accountOf(row);
-    for(const label of labels){
-      const key=String(label).toLowerCase();
-      const item=themeMap.get(key)||{name:label,views:0,dramas:0,accounts:new Set()};
-      item.views+=views;
-      item.dramas+=1;
-      if(account)item.accounts.add(account);
-      themeMap.set(key,item);
-    }
+    const item=themeMap.get(group.key)||{key:group.key,name:group.name,labels:group.labels,views:0,dramas:0,accounts:new Set()};
+    item.views+=views;
+    item.dramas+=1;
+    if(account)item.accounts.add(account);
+    themeMap.set(group.key,item);
   }
   const topThemes=Array.from(themeMap.values())
-    .map(item=>({name:item.name,views:item.views,dramas:item.dramas,accounts:item.accounts.size}))
+    .map(item=>({name:item.name,labels:item.labels,views:item.views,dramas:item.dramas,accounts:item.accounts.size}))
     .sort((a,b)=>b.views-a.views||b.dramas-a.dramas)
     .slice(0,5);
   const topDrama=[...details].sort((a,b)=>dramaViewsOf(b)-dramaViewsOf(a))[0];
@@ -1844,20 +1850,15 @@ function dashboardPayloadDetails(payload){
 function dashboardThemeViewMap(payload){
   const map=new Map();
   for(const row of dashboardPayloadDetails(payload)){
-    const labels=themeDisplayList(row);
+    const group=dashboardThemeGroupOf(row);
     const views=dramaViewsOf(row);
-    if(!labels.length||!(views>0))continue;
+    if(!group||!(views>0))continue;
     const account=accountOf(row);
-    for(const label of labels){
-      const name=String(label||"").trim();
-      if(!name)continue;
-      const key=name.toLowerCase();
-      const item=map.get(key)||{name,views:0,dramas:0,accounts:new Set()};
-      item.views+=views;
-      item.dramas+=1;
-      if(account)item.accounts.add(account);
-      map.set(key,item);
-    }
+    const item=map.get(group.key)||{key:group.key,name:group.name,labels:group.labels,views:0,dramas:0,accounts:new Set()};
+    item.views+=views;
+    item.dramas+=1;
+    if(account)item.accounts.add(account);
+    map.set(group.key,item);
   }
   return map;
 }
@@ -1907,11 +1908,12 @@ function dashboardThemeGrowthItems(days,payloads,currentPayload,limit=5){
   if(!baseline||!currentMap.size)return [];
   const beforeMap=dashboardThemeViewMap(baseline);
   return Array.from(currentMap.values()).map(item=>{
-    const before=beforeMap.get(String(item.name||"").toLowerCase());
+    const before=beforeMap.get(item.key||String(item.name||"").toLowerCase());
     const beforeViews=before?Number(before.views||0):0;
     const views=Number(item.views||0);
     return {
       name:item.name,
+      labels:item.labels,
       views,
       beforeViews,
       diff:Math.max(0,views-beforeViews),
