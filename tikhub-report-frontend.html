@@ -1359,7 +1359,10 @@ const THEME_CN_MAP={
   "Pregnancy":"孕育",
   "Secret Identity":"隐藏身份"
 };
-const themeLabelCache=new Map([...Object.entries(THEME_CN_MAP),...Object.entries(readJsonStore("thr_theme_translation_cache"))]);
+const THEME_CN_ALIAS_MAP={
+  "西斯芒斯":"悬疑"
+};
+const themeLabelCache=new Map([...Object.entries(readJsonStore("thr_theme_translation_cache")),...Object.entries(THEME_CN_MAP)]);
 let themeHydrateRun=0;
 let themeHydrating=false;
 function cleanThemeLabel(value){
@@ -1370,6 +1373,10 @@ function cleanThemeLabel(value){
   if(!text||/^\d+$/.test(text)||/^ID\s*\d+/i.test(text))return "";
   if(/[{}[\]":]/.test(text)||/^tag[A-Z_]/.test(text))return "";
   return text.slice(0,60);
+}
+function normalizeThemeLabel(value){
+  const clean=cleanThemeLabel(value);
+  return THEME_CN_ALIAS_MAP[clean]||clean;
 }
 function collectThemeLabels(value,out){
   out=out||[];
@@ -1413,7 +1420,7 @@ function collectThemeLabels(value,out){
 function uniqThemeLabels(labels){
   const seen=new Set(), out=[];
   for(const label of labels){
-    const clean=cleanThemeLabel(label);
+    const clean=normalizeThemeLabel(label);
     if(!clean)continue;
     const key=clean.toLowerCase();
     if(seen.has(key))continue;
@@ -1432,8 +1439,8 @@ function themeSourceLabelsOf(row){
 }
 function themeDisplayList(row){
   return themeSourceLabelsOf(row).map(label=>{
-    if(CJK_RE.test(label))return label;
-    return themeLabelCache.get(label)||themeLabelCache.get(label.replace(/\//g,"/"))||label;
+    const text=CJK_RE.test(label)?label:(themeLabelCache.get(label)||themeLabelCache.get(label.replace(/\//g,"/"))||label);
+    return normalizeThemeLabel(text);
   }).filter(Boolean);
 }
 function dashboardThemeGroupOf(row){
