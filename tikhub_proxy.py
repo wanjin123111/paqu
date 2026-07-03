@@ -2451,9 +2451,9 @@ class Handler(BaseHTTPRequestHandler):
             "count": count,
             "offset": cursor,
             "cursor": cursor,
-            "sort_type": body.get("sort_type", 0),
-            "publish_time": body.get("publish_time", 0),
-            "filter_duration": body.get("filter_duration", 0),
+            "sort_type": str(body.get("sort_type", "0") or "0"),
+            "publish_time": str(body.get("publish_time", "0") or "0"),
+            "filter_duration": str(body.get("filter_duration", "0") or "0"),
         }
         try:
             data = _send_tikhub_post(DOUYIN_SEARCH_ENDPOINT, payload, "Douyin video search endpoint")
