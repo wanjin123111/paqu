@@ -2135,7 +2135,8 @@ $ProgressPreference = "SilentlyContinue"
 $OutputEncoding = [System.Text.UTF8Encoding]::new()
 $ua = %s
 $referer = %s
-$downloadDir = Join-Path $PSScriptRoot %s
+$baseDir = if ($env:TIKHUB_DOWNLOAD_BASE_DIR) { $env:TIKHUB_DOWNLOAD_BASE_DIR } else { $PSScriptRoot }
+$downloadDir = Join-Path $baseDir %s
 $itemsJson = @'
 %s
 '@
@@ -2213,6 +2214,7 @@ def _wrap_powershell_downloader_cmd(script_bytes):
     wrapper = """@echo off
 setlocal
 set "SCRIPT_PATH=%~f0"
+set "TIKHUB_DOWNLOAD_BASE_DIR=%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $lines=Get-Content -LiteralPath $env:SCRIPT_PATH -Encoding UTF8; $idx=[Array]::IndexOf($lines,'__POWERSHELL__'); if($idx -lt 0){throw 'script marker not found'}; $temp=Join-Path $env:TEMP ('tikhub_downloader_' + [guid]::NewGuid().ToString('N') + '.ps1'); $lines[($idx+1)..($lines.Count-1)] | Set-Content -LiteralPath $temp -Encoding UTF8; & powershell -NoProfile -ExecutionPolicy Bypass -File $temp; $code=$LASTEXITCODE; Remove-Item -LiteralPath $temp -ErrorAction SilentlyContinue; exit $code"
 if errorlevel 1 (
   echo.
