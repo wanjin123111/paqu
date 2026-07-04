@@ -1174,6 +1174,128 @@ def _send_tiktok_public_page(url, referer=None):
         return resp.read().decode("utf-8", "replace")
 
 
+def _send_tiktok_public_json(path, params, referer=None):
+    query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
+    url = TIKTOK_HOST + path + ("?" + query if query else "")
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": referer or (TIKTOK_HOST + "/search?" + urllib.parse.urlencode({"q": params.get("keyword", "")})),
+        "User-Agent": DEFAULT_UA,
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 6) as resp:
+            text = resp.read().decode("utf-8", "replace")
+            return json.loads(text) if text else {}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")[:240]
+        raise TikHubError("public TikTok web search failed with HTTP %s: %s" % (exc.code, body), exc.code)
+    except Exception as exc:
+        raise TikHubError("public TikTok web search request failed: %s" % exc)
+
+
+def _tiktok_web_search_params(keyword, count, cursor):
+    base = {
+        "aid": "1988",
+        "app_name": "tiktok_web",
+        "app_language": TIKTOK_LANGUAGE,
+        "browser_language": "zh-CN",
+        "browser_name": "Mozilla",
+        "browser_online": "true",
+        "browser_platform": "Win32",
+        "browser_version": DEFAULT_UA,
+        "channel": "tiktok_web",
+        "cookie_enabled": "true",
+        "count": str(count),
+        "device_platform": "web_pc",
+        "focus_state": "true",
+        "from_page": "search",
+        "is_fullscreen": "false",
+        "is_page_visible": "true",
+        "keyword": keyword,
+        "language": TIKTOK_LANGUAGE,
+        "offset": str(cursor),
+        "priority_region": "",
+        "region": TIKTOK_REGION,
+        "screen_height": "1080",
+        "screen_width": "1920",
+        "tz_name": "Asia/Shanghai",
+    }
+    with_cursor = dict(base)
+    with_cursor["cursor"] = str(cursor)
+    return [base, with_cursor]
+
+
+def _collect_video_items(obj, depth=0):
+    if depth > 9 or obj is None:
+        return []
+    if isinstance(obj, list):
+        videos = []
+        for item in obj:
+            if _looks_like_video(item):
+                videos.append(item)
+            else:
+                videos.extend(_collect_video_items(item, depth + 1))
+        return videos
+    if isinstance(obj, dict):
+        for key in ("item", "aweme", "aweme_info", "awemeInfo", "item_info", "itemInfo"):
+            item = obj.get(key)
+            if _looks_like_video(item):
+                return [item]
+        videos = []
+        for value in obj.values():
+            videos.extend(_collect_video_items(value, depth + 1))
+        return videos
+    return []
+
+
+def _dedupe_videos(videos, limit):
+    out, seen = [], set()
+    for video in videos:
+        video_id = _get_video_id(video)
+        key = video_id or json.dumps(video, ensure_ascii=False, sort_keys=True)[:200]
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(video)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _video_batch_from_search_payload(data, count):
+    batch = _find_video_list(data)
+    if not batch and isinstance(data, dict):
+        item_module = data.get("ItemModule") or data.get("itemModule")
+        if isinstance(item_module, dict):
+            batch = [item for item in item_module.values() if _looks_like_video(item)]
+    if not batch:
+        batch = _collect_video_items(data)
+    return _dedupe_videos(batch, count)
+
+
+def _fetch_public_tiktok_search_api(keyword, count, cursor, started=None):
+    if _discovery_runtime_exceeded(started):
+        raise TikHubError("discovery runtime limit reached")
+    last_error = None
+    endpoints = ("/api/search/general/full/", "/api/search/item/full/")
+    for endpoint in endpoints:
+        for params in _tiktok_web_search_params(keyword, count, cursor):
+            try:
+                data = _send_tiktok_public_json(endpoint, params)
+                batch = _video_batch_from_search_payload(data, count)
+                if batch:
+                    return data, batch, "public_tiktok_web_search:" + endpoint
+                last_error = TikHubError("public TikTok web search returned no videos from %s" % endpoint)
+            except TikHubError as exc:
+                last_error = exc
+                if exc.status in (401, 403):
+                    break
+                continue
+    raise last_error or TikHubError("public TikTok web search returned no videos")
+
+
 def _script_json_from_html(page):
     payloads = []
     for script_id in ("__UNIVERSAL_DATA_FOR_REHYDRATION__", "SIGI_STATE"):
@@ -1204,11 +1326,7 @@ def _fetch_public_tiktok_search_page(keyword, count, started=None):
     except Exception as exc:
         raise TikHubError("public TikTok search page failed: %s" % exc)
     for payload in _script_json_from_html(page):
-        batch = _find_video_list(payload)
-        if not batch and isinstance(payload, dict):
-            item_module = payload.get("ItemModule") or payload.get("itemModule")
-            if isinstance(item_module, dict):
-                batch = [item for item in item_module.values() if _looks_like_video(item)]
+        batch = _video_batch_from_search_payload(payload, count)
         if batch:
             return {"data": batch[:count], "has_more": False}, batch[:count], "public_tiktok_search_page"
     raise TikHubError("public TikTok search page returned no visible video data")
@@ -1277,10 +1395,14 @@ def _discover_search_videos(keyword, max_items, started):
         except TikHubError as exc:
             errors.append("TikHub search unavailable: %s" % exc)
             try:
-                data, batch, endpoint = _fetch_public_tiktok_search_page(keyword, min(30, max_items - len(items)), started)
-            except TikHubError as public_exc:
-                errors.append(str(public_exc))
-                break
+                data, batch, endpoint = _fetch_public_tiktok_search_api(keyword, min(30, max_items - len(items)), cursor, started)
+            except TikHubError as api_exc:
+                errors.append(str(api_exc))
+                try:
+                    data, batch, endpoint = _fetch_public_tiktok_search_page(keyword, min(30, max_items - len(items)), started)
+                except TikHubError as public_exc:
+                    errors.append(str(public_exc))
+                    break
         for video in batch:
             video_id = _get_video_id(video)
             key = video_id or json.dumps(video, ensure_ascii=False, sort_keys=True)[:200]
