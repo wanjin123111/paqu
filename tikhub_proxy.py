@@ -3321,13 +3321,19 @@ class Handler(BaseHTTPRequestHandler):
             self._run_scheduled_endpoint(qs)
         elif parsed.path == "/schedule-status":
             job = dict(LAST_JOB)
+            accounts, source = _configured_schedule_accounts()
             if not self._schedule_secret_matches(qs):
                 job = {
                     "running": bool(LAST_JOB.get("running")),
                     "started_at": LAST_JOB.get("started_at"),
                     "finished_at": LAST_JOB.get("finished_at"),
                 }
-            self._send_json(200, {"ok": True, "job": job})
+            self._send_json(200, {
+                "ok": True,
+                "job": job,
+                "schedule_account_count": len(accounts),
+                "schedule_account_source": source or "empty",
+            })
         elif parsed.path == "/schedule-accounts":
             self._schedule_accounts_endpoint(qs)
         elif parsed.path == "/discover-accounts":

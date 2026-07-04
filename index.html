@@ -871,6 +871,8 @@ let dashboardHistoryPayloads=[];
 let dashboardHistoryRun=0;
 let dashboardHistoryReady=false;
 let dashboardHistoryLoading=false;
+let scheduleAccountCount=null;
+let scheduleAccountSource="";
 const DASHBOARD_CACHE_MAX_AGE=7*24*60*60*1000;
 const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v2";
 const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v2";
@@ -2351,6 +2353,38 @@ function bindMonitorSearchControls(){
   });
   applyMonitorSearchDom();
 }
+function updateScheduleAccountState(payload){
+  if(!payload)return;
+  const raw=payload.schedule_account_count!=null?payload.schedule_account_count:payload.count;
+  if(raw!=null){
+    const count=toInt(raw);
+    if(count>=0)scheduleAccountCount=count;
+  }
+  if(payload.schedule_account_source)scheduleAccountSource=String(payload.schedule_account_source||"");
+}
+async function refreshScheduleAccountState(opts){
+  try{
+    const data=await backendFetchJson("/schedule-status",{}, opts&&opts.requireSecret?{requireSecret:true}:{sendSecret:false});
+    updateScheduleAccountState(data);
+    return data;
+  }catch(_){
+    return null;
+  }
+}
+function dashboardReportAccountCount(current){
+  return toInt(current&&current.accountCount)||rows.length||0;
+}
+function dashboardMonitorPoolCount(current){
+  const reportCount=dashboardReportAccountCount(current);
+  return scheduleAccountCount==null?reportCount:Math.max(toInt(scheduleAccountCount),reportCount);
+}
+function dashboardMonitorPoolSub(current){
+  const reportCount=dashboardReportAccountCount(current);
+  const poolCount=dashboardMonitorPoolCount(current);
+  if(poolCount>reportCount)return "监控池 "+fmt(poolCount)+" 个 · "+fmt(poolCount-reportCount)+" 个待下次报表";
+  if(scheduleAccountSource)return "监控池 "+fmt(poolCount)+" 个 · 已纳入本次报表";
+  return "账号汇总记录";
+}
 function renderMonitorDashboard(current){
   const box=$("monitorDashboardCard");
   const page=$("monitorPage");
@@ -2367,6 +2401,8 @@ function renderMonitorDashboard(current){
   const items=monitorAccountItems();
   const totalFans=items.reduce((sum,item)=>sum+Number(item.followers||0),0);
   const totalViews=items.reduce((sum,item)=>sum+Number(item.views||0),0);
+  const reportAccountCount=items.length||dashboardReportAccountCount(current);
+  const monitorPoolCount=dashboardMonitorPoolCount(current);
   const maxFans=Math.max(1,...items.map(item=>Number(item.followers||0)));
   const rowsHtml=items.map(item=>{
     const pct=Math.max(3,Math.min(100,Number(item.followers||0)/maxFans*100));
@@ -2385,10 +2421,10 @@ function renderMonitorDashboard(current){
   box.innerHTML=`<div class="monitor-dashboard-inner">
     <div class="monitor-dashboard-head"><h2 class="monitor-dashboard-title">当前监控账号看板</h2><div class="monitor-dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
     <div class="monitor-summary-grid">
-      <div class="monitor-summary-box is-dark"><div class="monitor-summary-label">监控账号</div><div class="monitor-summary-value">${fmt(items.length||current.accountCount||0)}个</div></div>
+      <div class="monitor-summary-box is-dark"><div class="monitor-summary-label">本次报表账号</div><div class="monitor-summary-value">${fmt(reportAccountCount)}个</div></div>
       <div class="monitor-summary-box"><div class="monitor-summary-label">总粉丝</div><div class="monitor-summary-value">${fmtPlay(totalFans)}</div></div>
       <div class="monitor-summary-box"><div class="monitor-summary-label">累计观看</div><div class="monitor-summary-value">${fmtPlay(totalViews)}</div></div>
-      <div class="monitor-summary-box"><div class="monitor-summary-label">排序</div><div class="monitor-summary-value">粉丝量</div></div>
+      <div class="monitor-summary-box"><div class="monitor-summary-label">监控池</div><div class="monitor-summary-value">${fmt(monitorPoolCount)}个</div></div>
     </div>
     <div class="monitor-searchbar"><label class="search-field"><span>搜索账号</span><input id="monitorSearchInput" type="search" value="${esc(monitorSearchText)}" placeholder="昵称 / @账号 / 最高观看短剧" autocomplete="off" aria-label="搜索监控账号"></label><span class="search-status" id="monitorSearchStatus"></span></div>
     <div class="monitor-grid">${rowsHtml||'<div class="monitor-empty">暂无监控账号数据</div>'}<div class="monitor-empty" id="monitorSearchEmpty" hidden>没有匹配的账号。</div></div>
@@ -2430,6 +2466,8 @@ function renderDashboard(){
   const monthGrowthItems=dashboardMonthlyGrowthItems(30,comparablePayloads,currentPayload,10);
   const monthThemeGrowth=dashboardThemeGrowthItems(30,comparablePayloads,currentPayload,12);
   const topThemes=current.topThemes||[];
+  const reportAccountCount=dashboardReportAccountCount(current);
+  const monitorPoolSub=dashboardMonitorPoolSub(current);
   box.style.display="block";
   box.innerHTML=`<div class="dashboard-inner">
     <div class="dashboard-head"><h2 class="dashboard-title">短剧运营数据分析可视化看板｜近10次数据分析</h2><div class="dashboard-stamp">${esc(reportTimeLabel(current.generated_at)||"最新数据")}</div></div>
@@ -2442,7 +2480,7 @@ function renderDashboard(){
       <div class="dash-panel dash-donut"><div class="dash-panel-title">本期热门题材占比分析</div>${dashboardDonutHtml(topThemes,0,"题材<br>占比","题材")}</div>
       <div class="dash-panel dash-area theme-growth-panel"><div class="dash-panel-heading"><div class="dash-title-stack"><div class="dash-panel-title compact">本月题材播放增长</div><div class="dash-panel-sub">按题材汇总当前播放量 - 历史播放量</div></div><div class="dash-panel-meta">按增长排序</div></div>${dashboardThemeGrowthPanelHtml(monthThemeGrowth,"本月")}</div>
       <div class="dash-side">
-        <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">监控账号：${fmt(current.accountCount)}</div><div class="dash-stat-sub">账号汇总记录</div></div></div>
+        <div class="dash-stat"><div class="dash-stat-icon">A</div><div><div class="dash-stat-title">本次报表账号：${fmt(reportAccountCount)}</div><div class="dash-stat-sub">${esc(monitorPoolSub)}</div></div></div>
         <div class="dash-stat"><div class="dash-stat-icon">N</div><div><div class="dash-stat-title">本周新增短剧：${fmt(weeklyDramaGrowth.diff)}部</div><div class="dash-stat-sub">${esc(weeklyDramaSub)}</div></div></div>
         <div class="dash-stat"><div class="dash-stat-icon">G</div><div><div class="dash-stat-title">${esc(accountGrowthTitle)}</div><div class="dash-stat-sub">${esc(accountGrowthSub)}</div></div></div>
       </div>
@@ -3116,11 +3154,13 @@ async function addDiscoveredAccount(account){
   discoverySetStatus("正在加入 @"+account+"...");
   try{
     const payload=await backendPostJson("/discover-accounts",{accounts:[account]}, {}, {requireSecret:true});
+    updateScheduleAccountState(payload);
     const added=(payload.added||[]).map(String);
     for(const item of discoveredAccounts){
       if(String(item.account||"").toLowerCase()===account.toLowerCase())item.already_monitored=true;
     }
     renderResultTable();
+    renderDashboard();
     discoverySetStatus(added.length?("已加入 @"+account):("@"+account+" 已在监控池"), true);
     toast(added.length?"已加入监控池":"账号已在监控池");
   }catch(e){
@@ -3136,11 +3176,13 @@ async function addAllDiscoveredAccounts(){
   discoverySetStatus("正在加入 "+fmt(accounts.length)+" 个候选账号...");
   try{
     const payload=await backendPostJson("/discover-accounts",{accounts}, {}, {requireSecret:true});
+    updateScheduleAccountState(payload);
     const requested=new Set(accounts.map(item=>item.toLowerCase()));
     for(const item of discoveredAccounts){
       if(requested.has(String(item.account||"").toLowerCase()))item.already_monitored=true;
     }
     renderResultTable();
+    renderDashboard();
     discoveryBusy=false;
     updateDiscoveryControls();
     discoverySetStatus("已加入 "+fmt((payload.added||[]).length)+" 个账号", true);
@@ -3325,6 +3367,7 @@ function loadBackendPayload(payload,opts){
 }
 async function loadBackendLatest(){
   backendSetStatus("正在加载最新结果…");
+  await refreshScheduleAccountState();
   let payload=null;
   try{
     payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
@@ -3515,6 +3558,7 @@ async function refreshPublicDashboardQuiet(){
 async function pollBackendJob(){
   for(let i=0;i<180;i++){
     const data=await backendFetchJson("/schedule-status",{}, {requireSecret:true});
+    updateScheduleAccountState(data);
     const job=data.job||{};
     if(job.running){
       const started=job.started_at?(" · "+job.started_at):"";
