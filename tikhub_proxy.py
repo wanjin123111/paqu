@@ -35,6 +35,7 @@ PUBLIC_REPORTS_DIR = os.path.join(ROOT, "public_reports")
 DRAMA_DETAIL_CACHE_FILE = os.path.join(REPORTS_DIR, "drama_detail_cache.json")
 DRAMA_EPISODE_HISTORY_FILE = os.path.join(REPORTS_DIR, "drama_episode_history.json")
 SCHEDULE_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "schedule_accounts.json")
+DISCOVERED_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "discovered_accounts.json")
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
 ALLOW_HEADERS = "Authorization, Content-Type, Accept, X-Schedule-Secret"
@@ -110,6 +111,13 @@ SCHEDULE_EPISODE_HISTORY_DELAY_MS = _env_int("SCHEDULE_EPISODE_HISTORY_DELAY_MS"
 DRAMA_EPISODE_HISTORY_MAX_POINTS = _env_int("DRAMA_EPISODE_HISTORY_MAX_POINTS", 160, 20, 1000)
 DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS = _env_int("DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS", 75, 35, 365)
 DRAMA_EPISODE_HISTORY_DEDUP_SECONDS = _env_int("DRAMA_EPISODE_HISTORY_DEDUP_SECONDS", 1800, 60, 86400)
+DISCOVERY_KEYWORDS = os.environ.get("DISCOVERY_KEYWORDS", "short drama,mini drama,tiktok drama,drama series,shorts drama,reel short,vertical drama")
+DISCOVERY_MAX_KEYWORDS = _env_int("DISCOVERY_MAX_KEYWORDS", 6, 1, 50)
+DISCOVERY_MAX_VIDEOS_PER_KEYWORD = _env_int("DISCOVERY_MAX_VIDEOS_PER_KEYWORD", 25, 1, 200)
+DISCOVERY_MAX_CANDIDATES = _env_int("DISCOVERY_MAX_CANDIDATES", 60, 1, 500)
+DISCOVERY_MIN_FOLLOWERS = _env_int("DISCOVERY_MIN_FOLLOWERS", 0, 0, 1000000000)
+DISCOVERY_MIN_DRAMAS = _env_int("DISCOVERY_MIN_DRAMAS", 0, 0, 100000)
+DISCOVERY_SEARCH_PAGES = _env_int("DISCOVERY_SEARCH_PAGES", 2, 1, 10)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
 
@@ -134,6 +142,15 @@ SINGLE_VIDEO_EP_CANDIDATES = [
     "/api/v1/tiktok/app/v3/fetch_one_video",
     "/api/v1/tiktok/app/v3/fetch_one_video_v2",
     "/api/v1/tiktok/app/v3/fetch_one_video_v3",
+]
+SEARCH_VIDEO_EP_CANDIDATES = [
+    "/api/v1/tiktok/app/v3/fetch_search_video",
+    "/api/v1/tiktok/app/v3/fetch_search_video_v2",
+    "/api/v1/tiktok/app/v3/fetch_search_general",
+    "/api/v1/tiktok/web/fetch_search_video",
+    "/api/v1/tiktok/web/fetch_search_item",
+    "/api/v1/tiktok/web/fetch_search_general",
+    "/api/v1/tiktok/web/fetch_search",
 ]
 PLAY_KEYS = ("play_count", "playCount", "play_cnt")
 DESC_KEYS = ("desc", "title", "content", "aweme_title", "text")
@@ -176,6 +193,8 @@ AVATAR_KEYS = (
 )
 VCOUNT_KEYS = ("videoCount", "aweme_count", "video_count")
 SECUID_KEYS = ("secUid", "sec_uid", "sec_user_id", "secUserId")
+AUTHOR_CONTAINER_KEYS = ("author", "authorInfo", "author_info", "user", "userInfo", "user_info", "creator", "owner")
+AUTHOR_UNIQUE_KEYS = ("uniqueId", "unique_id", "uniqueID", "authorUniqueId", "author_unique_id", "nicknameId", "nickname_id")
 SUMMARY_COLUMNS = ["截图名称", "账号", "昵称", "粉丝", "点赞", "短剧数", "总集数", "累计观看",
                    "单剧均观看", "最高观看短剧", "最高观看短剧中文名", "最高观看", "主页链接"]
 DRAMA_COLUMNS = ["Account / 账号", "Nickname / 昵称", "Screenshot Name / 截图名称", "Rank in Account / 账号内排序",
@@ -1034,6 +1053,293 @@ def _write_schedule_account_pool(accounts):
         json.dump(payload, handle, ensure_ascii=False, indent=2)
     os.replace(tmp, SCHEDULE_ACCOUNTS_FILE)
     return payload
+
+
+def _append_schedule_accounts(accounts):
+    current, _source = _configured_schedule_accounts()
+    merged = list(current)
+    seen = {item.lower() for item in merged}
+    added = []
+    for uid in _parse_accounts("\n".join(str(item) for item in (accounts or []))):
+        key = uid.lower()
+        if key and key not in seen:
+            seen.add(key)
+            merged.append(uid)
+            added.append(uid)
+    saved = _write_schedule_account_pool(merged)
+    return {"saved": saved, "added": added}
+
+
+def _parse_discovery_keywords(text):
+    values = []
+    raw = text if text not in (None, "") else DISCOVERY_KEYWORDS
+    if isinstance(raw, list):
+        parts = raw
+    else:
+        parts = re.split(r"[\n,;，；]+", str(raw or ""))
+    seen = set()
+    for item in parts:
+        text_item = re.sub(r"\s+", " ", str(item or "")).strip()
+        key = text_item.lower()
+        if text_item and key not in seen:
+            seen.add(key)
+            values.append(text_item)
+        if len(values) >= DISCOVERY_MAX_KEYWORDS:
+            break
+    return values
+
+
+def _read_discovered_accounts():
+    try:
+        with open(DISCOVERED_ACCOUNTS_FILE, "r", encoding="utf-8-sig") as handle:
+            payload = json.load(handle)
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "generated_at": "",
+        "keywords": [],
+        "accounts": [],
+        "count": 0,
+        "errors": [],
+        "runtime_file": "reports/discovered_accounts.json",
+    }
+
+
+def _write_discovered_accounts(payload):
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    payload["runtime_file"] = "reports/discovered_accounts.json"
+    tmp = DISCOVERED_ACCOUNTS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp, DISCOVERED_ACCOUNTS_FILE)
+    return payload
+
+
+def _search_param_sets(keyword, count, cursor):
+    return [
+        {"keyword": keyword, "count": str(count), "cursor": str(cursor), "max_cursor": str(cursor), "region": TIKTOK_REGION},
+        {"keywords": keyword, "count": str(count), "cursor": str(cursor), "max_cursor": str(cursor), "region": TIKTOK_REGION},
+        {"query": keyword, "count": str(count), "cursor": str(cursor), "max_cursor": str(cursor), "region": TIKTOK_REGION},
+        {"keyword": keyword, "count": str(count), "offset": str(cursor), "region": TIKTOK_REGION},
+    ]
+
+
+def _fetch_discovery_search_page(keyword, count, cursor):
+    last_error = None
+    for endpoint in SEARCH_VIDEO_EP_CANDIDATES:
+        for params in _search_param_sets(keyword, count, cursor):
+            try:
+                data = _send_tikhub_get(endpoint, params, "TikHub search video endpoint")
+                batch = _find_video_list(data)
+                if batch:
+                    return data, batch, endpoint
+                last_error = TikHubError("search endpoint returned no videos")
+            except TikHubError as exc:
+                last_error = exc
+                if exc.status in (401, 402, 403):
+                    raise
+                if exc.status in (400, 404, 422):
+                    continue
+                continue
+    raise last_error or TikHubError("No TikHub search endpoint worked")
+
+
+def _author_container(video):
+    if not isinstance(video, dict):
+        return {}
+    for key in AUTHOR_CONTAINER_KEYS:
+        value = video.get(key)
+        if isinstance(value, dict):
+            return value
+    for key in ("aweme_detail", "awemeDetail", "item", "aweme", "data"):
+        nested = video.get(key)
+        if isinstance(nested, dict):
+            found = _author_container(nested)
+            if found:
+                return found
+    return {}
+
+
+def _extract_account_from_url(obj):
+    text = json.dumps(obj, ensure_ascii=False) if isinstance(obj, (dict, list)) else _to_text(obj)
+    match = re.search(r"tiktok\.com/@([A-Za-z0-9._-]+)", text)
+    return match.group(1) if match else ""
+
+
+def _author_from_video(video):
+    author = _author_container(video)
+    if not author and isinstance(video, dict) and _deep_find(video, AUTHOR_UNIQUE_KEYS) is not None:
+        author = video
+    account = _deep_find(author, AUTHOR_UNIQUE_KEYS) if author else None
+    account = _to_text(account, 80).lstrip("@")
+    if not account:
+        account = _extract_account_from_url(video).lstrip("@")
+    if not account:
+        return None
+    nickname = _to_text(_deep_find(author, NICK_KEYS), 120) or account
+    secuid = _to_text(_deep_find(author, SECUID_KEYS), 160)
+    avatar = _first_profile_image(author)
+    stats = (video.get("authorStats") or video.get("author_stats")) if isinstance(video, dict) else {}
+    if not isinstance(stats, dict):
+        stats = author
+    return {
+        "account": account,
+        "nickname": nickname,
+        "secuid": secuid,
+        "avatar": avatar,
+        "followers_hint": _to_int(_deep_find(stats, FOLLOWER_KEYS)),
+        "hearts_hint": _to_int(_deep_find(stats, HEART_KEYS)),
+        "video_count_hint": _to_int(_deep_find(stats, VCOUNT_KEYS)),
+    }
+
+
+def _discover_search_videos(keyword, max_items, started):
+    items, seen, endpoint, errors = [], set(), "", []
+    cursor = "0"
+    for _page in range(1, DISCOVERY_SEARCH_PAGES + 1):
+        if _runtime_exceeded(started) or len(items) >= max_items:
+            break
+        try:
+            data, batch, endpoint = _fetch_discovery_search_page(keyword, min(30, max_items - len(items)), cursor)
+        except TikHubError as exc:
+            errors.append(str(exc))
+            break
+        for video in batch:
+            video_id = _get_video_id(video)
+            key = video_id or json.dumps(video, ensure_ascii=False, sort_keys=True)[:200]
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(video)
+            if len(items) >= max_items:
+                break
+        has_more, next_cursor = _read_pagination(data)
+        advanced = next_cursor not in (None, "", "0") and str(next_cursor) != str(cursor)
+        if has_more in (False, 0, "0") or not advanced:
+            break
+        cursor = str(next_cursor)
+        time.sleep(SCHEDULE_DELAY_MS / 1000.0)
+    return items, endpoint, errors
+
+
+def _discovery_account_score(item):
+    return max(_to_int(item.get("sample_max_views")), _to_int(item.get("total_views")), _to_int(item.get("followers")))
+
+
+def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_videos_per_keyword):
+    started = time.time()
+    keywords = _parse_discovery_keywords(keywords)
+    max_accounts = max(1, min(int(max_accounts or DISCOVERY_MAX_CANDIDATES), 500))
+    max_videos_per_keyword = max(1, min(int(max_videos_per_keyword or DISCOVERY_MAX_VIDEOS_PER_KEYWORD), 200))
+    min_followers = max(0, int(min_followers or 0))
+    min_dramas = max(0, int(min_dramas or 0))
+    configured_accounts, _source = _configured_schedule_accounts()
+    monitored = {item.lower() for item in configured_accounts}
+    candidates, errors = {}, []
+    for keyword in keywords:
+        if _runtime_exceeded(started):
+            errors.append("runtime limit reached while searching")
+            break
+        videos, endpoint, search_errors = _discover_search_videos(keyword, max_videos_per_keyword, started)
+        for err in search_errors:
+            errors.append({"keyword": keyword, "error": err})
+        for video in videos:
+            author = _author_from_video(video)
+            if not author:
+                continue
+            account = author["account"]
+            key = account.lower()
+            video_id = _get_video_id(video)
+            views = _get_play_count(video)
+            item = candidates.setdefault(key, {
+                "account": account,
+                "nickname": author.get("nickname") or account,
+                "avatar": author.get("avatar") or "",
+                "secuid": author.get("secuid") or "",
+                "followers_hint": author.get("followers_hint") or 0,
+                "hearts_hint": author.get("hearts_hint") or 0,
+                "video_count_hint": author.get("video_count_hint") or 0,
+                "sample_video_count": 0,
+                "sample_views": 0,
+                "sample_max_views": 0,
+                "sample_video_id": "",
+                "sample_video_link": "",
+                "sample_desc": "",
+                "source_keywords": [],
+                "source_endpoint": endpoint,
+            })
+            item["sample_video_count"] += 1
+            item["sample_views"] += views
+            if keyword not in item["source_keywords"]:
+                item["source_keywords"].append(keyword)
+            if views > item.get("sample_max_views", 0):
+                item["sample_max_views"] = views
+                item["sample_video_id"] = video_id
+                item["sample_video_link"] = _video_link_from_item(account, video)
+                item["sample_desc"] = _to_text(_get_desc(video), 160)
+            if author.get("avatar") and not item.get("avatar"):
+                item["avatar"] = author["avatar"]
+    enriched = []
+    raw_candidates = sorted(candidates.values(), key=lambda item: item.get("sample_max_views", 0), reverse=True)
+    for item in raw_candidates[:max_accounts * 2]:
+        if _runtime_exceeded(started):
+            errors.append("runtime limit reached while enriching accounts")
+            break
+        account = item["account"]
+        try:
+            secuid = item.get("secuid") or _resolve_secuid(account)
+            profile = _get_profile(account, secuid)
+            dramas = []
+            try:
+                dramas = _get_tiktok_drama_library(secuid, account) if secuid else []
+            except TikHubError:
+                dramas = []
+            total_views = sum(_to_int(drama.get("views")) for drama in dramas)
+            top_drama = max(dramas, key=lambda drama: _to_int(drama.get("views")), default={})
+            followers = _to_int(profile.get("followers")) or _to_int(item.get("followers_hint"))
+            drama_count = len(dramas)
+            if followers < min_followers or drama_count < min_dramas:
+                continue
+            enriched.append({
+                "account": account,
+                "nickname": profile.get("nickname") or item.get("nickname") or account,
+                "avatar": profile.get("avatar") or item.get("avatar") or "",
+                "followers": followers,
+                "hearts": _to_int(profile.get("hearts")) or _to_int(item.get("hearts_hint")),
+                "video_count": _to_int(profile.get("videoCount")) or _to_int(item.get("video_count_hint")),
+                "dramas": drama_count,
+                "total_views": total_views,
+                "top_drama": top_drama.get("english_title") or top_drama.get("name") or "",
+                "top_drama_views": _to_int(top_drama.get("views")),
+                "sample_video_count": _to_int(item.get("sample_video_count")),
+                "sample_views": _to_int(item.get("sample_views")),
+                "sample_max_views": _to_int(item.get("sample_max_views")),
+                "sample_video_id": item.get("sample_video_id") or "",
+                "sample_video_link": item.get("sample_video_link") or "",
+                "sample_desc": item.get("sample_desc") or "",
+                "source_keywords": item.get("source_keywords") or [],
+                "source_endpoint": item.get("source_endpoint") or "",
+                "profile_url": "https://www.tiktok.com/@" + account,
+                "already_monitored": account.lower() in monitored,
+            })
+        except Exception as exc:
+            errors.append({"account": account, "error": str(exc)})
+    enriched.sort(key=_discovery_account_score, reverse=True)
+    payload = {
+        "ok": True,
+        "generated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
+        "keywords": keywords,
+        "count": len(enriched[:max_accounts]),
+        "accounts": enriched[:max_accounts],
+        "errors": errors[:80],
+        "search_candidates": len(raw_candidates),
+        "monitored_count": len(monitored),
+        "runtime_file": "reports/discovered_accounts.json",
+    }
+    return _write_discovered_accounts(payload)
 
 
 def _resolve_secuid(uid):
@@ -2744,6 +3050,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "job": job})
         elif parsed.path == "/schedule-accounts":
             self._schedule_accounts_endpoint(qs)
+        elif parsed.path == "/discover-accounts":
+            self._discover_accounts_endpoint(qs)
         elif parsed.path == "/drama-link":
             self._resolve_drama_link(qs)
         elif parsed.path == "/reports":
@@ -2760,6 +3068,9 @@ class Handler(BaseHTTPRequestHandler):
         qs = urllib.parse.parse_qs(parsed.query)
         if parsed.path == "/schedule-accounts":
             self._schedule_accounts_endpoint(qs)
+            return
+        if parsed.path == "/discover-accounts":
+            self._discover_accounts_endpoint(qs)
             return
         if parsed.path == "/save":
             self._save_file()
@@ -3029,6 +3340,63 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
             self._send_json(200, {"ok": True, "url": link, "target": target})
+
+    def _discover_accounts_endpoint(self, qs):
+        if not self._require_schedule_secret(qs):
+            return
+        if self.command == "GET":
+            should_run = str(qs.get("run", ["0"])[0]).lower() in ("1", "true", "yes")
+            if not should_run:
+                payload = _read_discovered_accounts()
+                configured_accounts, _source = _configured_schedule_accounts()
+                monitored = {item.lower() for item in configured_accounts}
+                accounts = payload.get("accounts", [])
+                if isinstance(accounts, list):
+                    for item in accounts:
+                        if isinstance(item, dict):
+                            item["already_monitored"] = str(item.get("account", "")).lower() in monitored
+                self._send_json(200, payload)
+                return
+            if not SERVER_API_KEY:
+                self._send_json(503, {"ok": False, "error": "TIKHUB_API_KEY is not configured"})
+                return
+            try:
+                payload = _discover_accounts(
+                    qs.get("keywords", [""])[0],
+                    _to_int(qs.get("limit", [DISCOVERY_MAX_CANDIDATES])[0]) or DISCOVERY_MAX_CANDIDATES,
+                    _to_int(qs.get("min_followers", [DISCOVERY_MIN_FOLLOWERS])[0]),
+                    _to_int(qs.get("min_dramas", [DISCOVERY_MIN_DRAMAS])[0]),
+                    _to_int(qs.get("max_videos", [DISCOVERY_MAX_VIDEOS_PER_KEYWORD])[0]) or DISCOVERY_MAX_VIDEOS_PER_KEYWORD,
+                )
+                self._send_json(200, payload)
+            except Exception as exc:
+                self._send_json(500, {"ok": False, "error": str(exc)})
+            return
+
+        try:
+            ln = int(self.headers.get("Content-Length", 0) or 0)
+            payload = json.loads(self.rfile.read(ln) or b"{}")
+            accounts = payload.get("accounts", payload.get("account", ""))
+            if isinstance(accounts, str):
+                accounts = _parse_accounts(accounts)
+            elif isinstance(accounts, list):
+                accounts = _parse_accounts("\n".join(str(item) for item in accounts))
+            else:
+                accounts = []
+            result = _append_schedule_accounts(accounts)
+            saved = result["saved"]
+            self._send_json(200, {
+                "ok": True,
+                "added": result["added"],
+                "added_count": len(result["added"]),
+                "accounts": saved.get("accounts", []),
+                "count": len(saved.get("accounts", [])),
+                "source": "backend_pool",
+                "updated_at": saved.get("updated_at", ""),
+                "runtime_file": "reports/schedule_accounts.json",
+            })
+        except Exception as exc:
+            self._send_json(500, {"ok": False, "error": str(exc)})
 
     def _schedule_accounts_endpoint(self, qs):
         if not self._require_schedule_secret(qs):

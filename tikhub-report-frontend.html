@@ -172,6 +172,16 @@
   .detail-count{font-size:12px;color:var(--ink-faint)}
   .detail-pager{display:none;align-items:center;gap:8px;flex-wrap:wrap}
   .detail-pager.show{display:flex}
+  .discover-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;grid-column:1/-1;width:100%}
+  .discover-toolbar[hidden]{display:none}
+  .discover-toolbar .search-field{width:min(440px,100%);max-width:440px}
+  .discover-mini{display:flex;align-items:center;gap:6px;border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--ink-soft)}
+  .discover-mini input{width:74px;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;text-align:right}
+  .discover-status{font-size:12px;color:var(--ink-faint)}
+  .discover-account{display:flex;align-items:center;gap:9px;min-width:170px}
+  .discover-avatar{width:34px;height:34px;border-radius:50%;object-fit:cover;background:#eef2ff;border:1px solid var(--line)}
+  .discover-action{display:flex;align-items:center;gap:8px}
+  .discover-badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;background:#f0fdf4;color:#15803d;font-size:11px}
   #resultCard.detail-view .result-viewbar{display:grid;grid-template-columns:auto minmax(280px,1fr) minmax(500px,auto);align-items:center;gap:10px 12px}
   #resultCard.detail-view #detailSearchBox{grid-column:2;grid-row:1;flex:none;min-width:0}
   #resultCard.detail-view #detailSearchBox .search-field{width:100%;max-width:420px}
@@ -706,6 +716,7 @@ shortdramatime"></textarea>
         <div class="result-tabs" role="tablist" aria-label="报表视图">
           <button class="tab-btn active" id="summaryTabBtn" type="button" data-view="summary">账号汇总</button>
           <button class="tab-btn" id="detailTabBtn" type="button" data-view="detail">账号明细</button>
+          <button class="tab-btn" id="discoverTabBtn" type="button" data-view="discover">发现账号</button>
         </div>
         <div class="report-search" id="summarySearchBox">
           <label class="search-field"><span>搜索账号</span><input id="summarySearchInput" type="search" placeholder="昵称 / @账号 / 最高观看短剧" autocomplete="off" aria-label="搜索账号"></label>
@@ -738,6 +749,15 @@ shortdramatime"></textarea>
               <button class="mini-btn" id="detailPageNextBtn" type="button">下一页</button>
             </div>
           </div>
+        </div>
+        <div class="discover-toolbar" id="discoverToolbar" hidden>
+          <label class="search-field"><span>发现关键词</span><input id="discoverKeywordsInput" type="search" placeholder="short drama, mini drama, vertical drama" autocomplete="off" aria-label="发现账号关键词"></label>
+          <label class="discover-mini"><span>候选</span><input id="discoverLimitInput" type="number" min="1" max="200" step="1" value="40"><span>个</span></label>
+          <label class="discover-mini"><span>最低粉丝</span><input id="discoverMinFollowersInput" type="text" value="0"></label>
+          <button class="mini-btn" id="discoverLoadBtn" type="button">读取结果</button>
+          <button class="mini-btn" id="discoverRunBtn" type="button">开始发现</button>
+          <button class="mini-btn" id="discoverAddAllBtn" type="button">加入全部候选</button>
+          <span class="discover-status" id="discoverStatus"></span>
         </div>
       </div>
       <div class="table-scroll">
@@ -812,6 +832,7 @@ const DRAMA_LINK_FIELDS=["短剧链接","Drama Link / 短剧链接","Drama URL /
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","日增播放","时长","题材","简介","短剧链接"];
+const DISCOVERY_COLUMNS=["候选账号","粉丝","短剧数","短剧播放","样本最高播放","来源关键词","状态","操作"];
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
 
@@ -860,6 +881,9 @@ let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7
 let monitorSearchText=store.get("thr_monitor_search")||"";
 let summarySearchText=store.get("thr_summary_search")||"";
 let detailSearchText=store.get("thr_detail_search")||"";
+let discoveredAccounts=[];
+let discoveryBusy=false;
+let discoveryGeneratedAt="";
 const DETAIL_ALL_ACCOUNTS_VALUE="__all__";
 let detailAccountIndex=-1;
 let detailAccountKey="";
@@ -2786,16 +2810,24 @@ function updateDetailControls(list){
 function renderResultTable(){
   const card=$("resultCard");
   const tb=$("resultTable").querySelector("tbody");
-  card.style.display=(rows.length||dramaRows.length)?"block":"none";
+  card.style.display=(rows.length||dramaRows.length||discoveredAccounts.length||resultView==="discover")?"block":"none";
   card.classList.toggle("detail-view",resultView==="detail");
   card.classList.toggle("summary-view",resultView==="summary");
+  card.classList.toggle("discover-view",resultView==="discover");
   $("summaryTabBtn").classList.toggle("active",resultView==="summary");
   $("detailTabBtn").classList.toggle("active",resultView==="detail");
+  $("discoverTabBtn").classList.toggle("active",resultView==="discover");
+  $("sortGroup").hidden=resultView==="discover";
   updateSortControls();
   updateGrowthFilterControls();
+  updateDiscoveryControls();
   updateReportSearchControls(0,resultView==="summary"?rows.length:dramaRows.length);
   tb.innerHTML="";
   const list=updateDetailControls(detailAccounts());
+  if(resultView==="discover"){
+    renderDiscoveryTable();
+    return;
+  }
   if(resultView==="detail"){
     setHeader(DRAMA_DETAIL_COLUMNS);
     const current=list[detailAccountIndex];
@@ -2988,6 +3020,203 @@ async function backendPostJson(path, body, params, opts){
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
   return data;
+}
+function discoverySetStatus(text, ok){
+  const el=$("discoverStatus");
+  if(!el)return;
+  el.textContent=text||"";
+  el.style.color=ok?"var(--ok)":"var(--ink-faint)";
+}
+function discoveryKeywords(){
+  const el=$("discoverKeywordsInput");
+  return (el&&el.value?el.value.trim():"") || store.get("thr_discover_keywords") || "short drama, mini drama, vertical drama";
+}
+function discoveryLimit(){
+  const el=$("discoverLimitInput");
+  return Math.max(1,Math.min(200,toInt(el&&el.value)||40));
+}
+function discoveryMinFollowers(){
+  const el=$("discoverMinFollowersInput");
+  return parseGrowthNumber(el&&el.value?el.value:"0");
+}
+function updateDiscoveryControls(){
+  const toolbar=$("discoverToolbar");
+  if(toolbar)toolbar.hidden=resultView!=="discover";
+  const input=$("discoverKeywordsInput"), limit=$("discoverLimitInput"), min=$("discoverMinFollowersInput");
+  if(input&&document.activeElement!==input)input.value=store.get("thr_discover_keywords")||"short drama, mini drama, vertical drama";
+  if(limit&&document.activeElement!==limit)limit.value=store.get("thr_discover_limit")||"40";
+  if(min&&document.activeElement!==min)min.value=store.get("thr_discover_min_followers")||"0";
+  const runBtn=$("discoverRunBtn"), loadBtn=$("discoverLoadBtn"), addAllBtn=$("discoverAddAllBtn");
+  if(runBtn)runBtn.disabled=discoveryBusy;
+  if(loadBtn)loadBtn.disabled=discoveryBusy;
+  if(addAllBtn)addAllBtn.disabled=discoveryBusy||!discoveredAccounts.some(item=>item&&!item.already_monitored&&item.account);
+  if(resultView==="discover"){
+    const time=reportTimeLabel(discoveryGeneratedAt)||"";
+    discoverySetStatus(discoveryBusy?"正在发现账号...":(discoveredAccounts.length?("候选 "+fmt(discoveredAccounts.length)+" 个"+(time?" · "+time:"")):"需要任务密码后开始发现"), !!discoveredAccounts.length);
+  }
+}
+function loadDiscoveryPayload(payload){
+  discoveredAccounts=Array.isArray(payload&&payload.accounts)?payload.accounts:[];
+  discoveryGeneratedAt=(payload&&payload.generated_at)||"";
+  renderResultTable();
+}
+async function loadDiscoveryLatest(){
+  discoverySetStatus("正在读取发现结果...");
+  const payload=await backendFetchJson("/discover-accounts",{}, {requireSecret:true});
+  loadDiscoveryPayload(payload);
+}
+async function runDiscovery(){
+  if(discoveryBusy)return;
+  discoveryBusy=true;
+  const keywords=discoveryKeywords();
+  const limit=discoveryLimit();
+  const minFollowers=discoveryMinFollowers();
+  store.set("thr_discover_keywords",keywords);
+  store.set("thr_discover_limit",String(limit));
+  store.set("thr_discover_min_followers",($("discoverMinFollowersInput")&&$("discoverMinFollowersInput").value)||"0");
+  discoverySetStatus("正在搜索短剧视频并筛作者...");
+  renderResultTable();
+  let finalStatus="", finalOk=false;
+  try{
+    const payload=await backendFetchJson("/discover-accounts",{
+      run:"1",
+      keywords,
+      limit:String(limit),
+      min_followers:String(minFollowers),
+    }, {requireSecret:true});
+    loadDiscoveryPayload(payload);
+    finalStatus="发现完成 · 候选 "+fmt(discoveredAccounts.length)+" 个";
+    finalOk=true;
+  }catch(e){
+    finalStatus="发现失败: "+(e.message||e);
+    toast("发现失败:"+(e.message||e));
+  }finally{
+    discoveryBusy=false;
+    updateDiscoveryControls();
+    if(finalStatus)discoverySetStatus(finalStatus, finalOk);
+  }
+}
+async function addDiscoveredAccount(account){
+  account=String(account||"").trim().replace(/^@+/,"");
+  if(!account)return;
+  discoverySetStatus("正在加入 @"+account+"...");
+  try{
+    const payload=await backendPostJson("/discover-accounts",{accounts:[account]}, {}, {requireSecret:true});
+    const added=(payload.added||[]).map(String);
+    for(const item of discoveredAccounts){
+      if(String(item.account||"").toLowerCase()===account.toLowerCase())item.already_monitored=true;
+    }
+    renderResultTable();
+    discoverySetStatus(added.length?("已加入 @"+account):("@"+account+" 已在监控池"), true);
+    toast(added.length?"已加入监控池":"账号已在监控池");
+  }catch(e){
+    discoverySetStatus("加入失败: "+(e.message||e), false);
+    toast("加入失败:"+(e.message||e));
+  }
+}
+async function addAllDiscoveredAccounts(){
+  const accounts=discoveredAccounts.filter(item=>item&&!item.already_monitored&&item.account).map(item=>String(item.account).trim().replace(/^@+/,"")).filter(Boolean);
+  if(!accounts.length){discoverySetStatus("候选账号都已经在监控池", true);return;}
+  discoveryBusy=true;
+  updateDiscoveryControls();
+  discoverySetStatus("正在加入 "+fmt(accounts.length)+" 个候选账号...");
+  try{
+    const payload=await backendPostJson("/discover-accounts",{accounts}, {}, {requireSecret:true});
+    const requested=new Set(accounts.map(item=>item.toLowerCase()));
+    for(const item of discoveredAccounts){
+      if(requested.has(String(item.account||"").toLowerCase()))item.already_monitored=true;
+    }
+    renderResultTable();
+    discoveryBusy=false;
+    updateDiscoveryControls();
+    discoverySetStatus("已加入 "+fmt((payload.added||[]).length)+" 个账号", true);
+    toast("已同步到监控池");
+  }catch(e){
+    discoveryBusy=false;
+    updateDiscoveryControls();
+    discoverySetStatus("加入失败: "+(e.message||e), false);
+    toast("加入失败:"+(e.message||e));
+  }
+}
+function appendDiscoveryCell(tr,c,row){
+  const td=document.createElement("td");
+  if(c==="候选账号"){
+    td.className="account-cell";
+    const wrap=document.createElement("div");
+    wrap.className="discover-account";
+    const img=document.createElement("img");
+    img.className="discover-avatar";
+    img.alt="";
+    img.loading="lazy";
+    img.src=row.avatar||"";
+    img.onerror=()=>{img.style.visibility="hidden";};
+    const meta=document.createElement("div");
+    const nick=document.createElement("div");
+    nick.className="account-nick";
+    nick.textContent=row.nickname||row.account||"";
+    const a=document.createElement("a");
+    a.className="account-id";
+    a.href=row.profile_url||("https://www.tiktok.com/@"+(row.account||""));
+    a.target="_blank";
+    a.rel="noopener";
+    a.textContent=row.account?("@"+row.account):"";
+    meta.appendChild(nick);
+    if(row.account)meta.appendChild(a);
+    wrap.appendChild(img);
+    wrap.appendChild(meta);
+    td.appendChild(wrap);
+  }else if(c==="粉丝"){td.className="num";td.textContent=fmtPlay(row.followers);}
+  else if(c==="短剧数"){td.className="num";td.textContent=fmtCountUnit(row.dramas,"部");}
+  else if(c==="短剧播放"){td.className="num";td.textContent=fmtPlay(row.total_views);}
+  else if(c==="样本最高播放"){
+    td.className="num";
+    if(row.sample_video_link){
+      const a=document.createElement("a");
+      a.href=row.sample_video_link;
+      a.target="_blank";
+      a.rel="noopener";
+      a.textContent=fmtPlay(row.sample_max_views);
+      td.appendChild(a);
+    }else td.textContent=fmtPlay(row.sample_max_views);
+  }else if(c==="来源关键词"){td.className="detail-text";td.textContent=(row.source_keywords||[]).join(" / ");}
+  else if(c==="状态"){
+    if(row.already_monitored){
+      const badge=document.createElement("span");
+      badge.className="discover-badge";
+      badge.textContent="已监控";
+      td.appendChild(badge);
+    }else td.textContent="候选";
+  }else if(c==="操作"){
+    td.className="discover-action";
+    const btn=document.createElement("button");
+    btn.className="mini-btn";
+    btn.type="button";
+    btn.textContent=row.already_monitored?"已加入":"加入监控";
+    btn.disabled=!!row.already_monitored;
+    btn.addEventListener("click",()=>addDiscoveredAccount(row.account));
+    td.appendChild(btn);
+  }
+  tr.appendChild(td);
+}
+function renderDiscoveryTable(){
+  const tb=$("resultTable").querySelector("tbody");
+  setHeader(DISCOVERY_COLUMNS);
+  if(!discoveredAccounts.length){
+    const tr=document.createElement("tr");
+    const td=document.createElement("td");
+    td.colSpan=DISCOVERY_COLUMNS.length;
+    td.className="detail-text";
+    td.textContent=discoveryBusy?"正在搜索公开短剧视频...":"暂无候选账号。填写任务密码后点“开始发现”。";
+    tr.appendChild(td);
+    tb.appendChild(tr);
+    return;
+  }
+  const list=[...discoveredAccounts].sort((a,b)=>Math.max(toInt(b.sample_max_views),toInt(b.total_views),toInt(b.followers))-Math.max(toInt(a.sample_max_views),toInt(a.total_views),toInt(a.followers)));
+  for(const row of list){
+    const tr=document.createElement("tr");
+    for(const c of DISCOVERY_COLUMNS)appendDiscoveryCell(tr,c,row);
+    tb.appendChild(tr);
+  }
 }
 async function fetchJsonUrl(url,opts){
   opts=opts||{};
@@ -3588,8 +3817,16 @@ function init(){
   setPublicPageView("dashboard");
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
+  $("discoverTabBtn").addEventListener("click",()=>{resultView="discover";renderResultTable();if(!discoveredAccounts.length)loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));});
   $("sortHotBtn").addEventListener("click",()=>setResultSort("hot"));
   $("sortLatestBtn").addEventListener("click",()=>setResultSort("latest"));
+  $("discoverLoadBtn").addEventListener("click",()=>loadDiscoveryLatest().catch(e=>{discoverySetStatus("读取失败: "+(e.message||e),false);toast("读取失败:"+(e.message||e));}));
+  $("discoverRunBtn").addEventListener("click",()=>runDiscovery());
+  $("discoverAddAllBtn").addEventListener("click",()=>addAllDiscoveredAccounts());
+  ["discoverKeywordsInput","discoverLimitInput","discoverMinFollowersInput"].forEach(id=>{
+    const el=$(id);
+    if(el)el.addEventListener("keydown",e=>{if(e.key==="Enter")runDiscovery();});
+  });
   const growthApply=$("growthApplyBtn"), growthClear=$("growthClearBtn"), growthDays=$("growthDaysInput"), growthMin=$("growthMinInput");
   if(growthApply)growthApply.addEventListener("click",()=>applyGrowthFilter());
   if(growthClear)growthClear.addEventListener("click",()=>clearGrowthFilter());
