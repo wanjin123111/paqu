@@ -751,7 +751,7 @@ shortdramatime"></textarea>
           </div>
         </div>
         <div class="discover-toolbar" id="discoverToolbar" hidden>
-          <label class="search-field"><span>发现关键词</span><input id="discoverKeywordsInput" type="search" placeholder="short drama, mini drama, vertical drama" autocomplete="off" aria-label="发现账号关键词"></label>
+          <label class="search-field"><span>发现关键词</span><input id="discoverKeywordsInput" type="search" placeholder="短剧, 短剧推荐, 小短剧, mini drama" autocomplete="off" aria-label="发现账号关键词"></label>
           <label class="discover-mini"><span>候选</span><input id="discoverLimitInput" type="number" min="1" max="200" step="1" value="40"><span>个</span></label>
           <label class="discover-mini"><span>最低粉丝</span><input id="discoverMinFollowersInput" type="text" value="0"></label>
           <button class="mini-btn" id="discoverLoadBtn" type="button">读取结果</button>
@@ -833,6 +833,8 @@ const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","�
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","日增播放","时长","题材","简介","短剧链接"];
 const DISCOVERY_COLUMNS=["候选账号","粉丝","短剧数","短剧播放","样本最高播放","来源关键词","状态","操作"];
+const DEFAULT_DISCOVERY_KEYWORDS="短剧, 短剧推荐, 小短剧, 微短剧, mini drama, short drama, vertical drama";
+const LEGACY_DISCOVERY_KEYWORDS="short drama, mini drama, vertical drama";
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
 
@@ -3039,9 +3041,14 @@ function discoverySetStatus(text, ok){
   el.textContent=text||"";
   el.style.color=ok?"var(--ok)":"var(--ink-faint)";
 }
+function storedDiscoveryKeywords(){
+  const saved=(store.get("thr_discover_keywords")||"").trim();
+  return (!saved||saved===LEGACY_DISCOVERY_KEYWORDS)?DEFAULT_DISCOVERY_KEYWORDS:saved;
+}
 function discoveryKeywords(){
   const el=$("discoverKeywordsInput");
-  return (el&&el.value?el.value.trim():"") || store.get("thr_discover_keywords") || "short drama, mini drama, vertical drama";
+  const value=el&&el.value?el.value.trim():"";
+  return (!value||value===LEGACY_DISCOVERY_KEYWORDS)?storedDiscoveryKeywords():value;
 }
 function discoveryLimit(){
   const el=$("discoverLimitInput");
@@ -3055,7 +3062,7 @@ function updateDiscoveryControls(){
   const toolbar=$("discoverToolbar");
   if(toolbar)toolbar.hidden=resultView!=="discover";
   const input=$("discoverKeywordsInput"), limit=$("discoverLimitInput"), min=$("discoverMinFollowersInput");
-  if(input&&document.activeElement!==input)input.value=store.get("thr_discover_keywords")||"short drama, mini drama, vertical drama";
+  if(input&&document.activeElement!==input)input.value=storedDiscoveryKeywords();
   if(limit&&document.activeElement!==limit)limit.value=store.get("thr_discover_limit")||"40";
   if(min&&document.activeElement!==min)min.value=store.get("thr_discover_min_followers")||"0";
   const runBtn=$("discoverRunBtn"), loadBtn=$("discoverLoadBtn"), addAllBtn=$("discoverAddAllBtn");
@@ -3072,6 +3079,12 @@ function loadDiscoveryPayload(payload, shouldRender=true){
   discoveryGeneratedAt=(payload&&payload.generated_at)||"";
   discoveryEmptyMessage=(!discoveredAccounts.length&&discoveryGeneratedAt)?"上次发现没有候选账号。可以换关键词或降低最低粉丝后重试。":"";
   if(shouldRender)renderResultTable();
+}
+function discoveryErrorSummary(payload){
+  const errors=Array.isArray(payload&&payload.errors)?payload.errors:[];
+  const texts=errors.map(item=>typeof item==="string"?item:((item&&item.error)||"")).filter(Boolean);
+  if(!texts.length)return "";
+  return "后端返回："+texts.slice(0,2).join("；");
 }
 async function loadDiscoveryLatest(){
   discoverySetStatus("正在读取发现结果...");
@@ -3102,7 +3115,8 @@ async function runDiscovery(){
     if(!discoveredAccounts.length){
       const errors=Array.isArray(payload&&payload.errors)?payload.errors:[];
       const hitLimit=errors.some(item=>String(typeof item==="string"?item:(item&&item.error)||"").includes("runtime limit"));
-      discoveryEmptyMessage=hitLimit?"发现已到时间上限，本次没有候选账号。可以减少关键词或候选数量后重试。":"本次没有发现候选账号。TikHub 搜索接口可能没有返回可用的短剧作者。";
+      const detail=discoveryErrorSummary(payload);
+      discoveryEmptyMessage=hitLimit?"发现已到时间上限，本次没有候选账号。可以减少关键词或候选数量后重试。":("本次没有发现候选账号。TikHub 搜索接口可能没有返回可用的短剧作者。"+(detail?" "+detail:""));
     }
     finalStatus="发现完成 · 候选 "+fmt(discoveredAccounts.length)+" 个";
     finalOk=true;
