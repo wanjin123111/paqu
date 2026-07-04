@@ -884,6 +884,7 @@ let detailSearchText=store.get("thr_detail_search")||"";
 let discoveredAccounts=[];
 let discoveryBusy=false;
 let discoveryGeneratedAt="";
+let discoveryEmptyMessage="";
 const DETAIL_ALL_ACCOUNTS_VALUE="__all__";
 let detailAccountIndex=-1;
 let detailAccountKey="";
@@ -2998,7 +2999,18 @@ async function backendFetchJson(path, params, opts){
     if(opts.headerSecret){}else params.secret=secret;
   }
   const headers=(opts.headerSecret&&secret)?{"X-Schedule-Secret":secret}:{};
-  const r=await fetch(backendUrl(path,params),{headers,cache:"no-store"});
+  let timer=null;
+  const controller=(opts.timeoutMs&&window.AbortController)?new AbortController():null;
+  if(controller)timer=window.setTimeout(()=>controller.abort(),opts.timeoutMs);
+  let r;
+  try{
+    r=await fetch(backendUrl(path,params),{headers,cache:"no-store",signal:controller?controller.signal:undefined});
+  }catch(e){
+    if(e&&e.name==="AbortError")throw new Error("请求超时，请减少候选数量或稍后再试");
+    throw e;
+  }finally{
+    if(timer)window.clearTimeout(timer);
+  }
   const text=await r.text();
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
@@ -3052,13 +3064,14 @@ function updateDiscoveryControls(){
   if(addAllBtn)addAllBtn.disabled=discoveryBusy||!discoveredAccounts.some(item=>item&&!item.already_monitored&&item.account);
   if(resultView==="discover"){
     const time=reportTimeLabel(discoveryGeneratedAt)||"";
-    discoverySetStatus(discoveryBusy?"正在发现账号...":(discoveredAccounts.length?("候选 "+fmt(discoveredAccounts.length)+" 个"+(time?" · "+time:"")):"需要任务密码后开始发现"), !!discoveredAccounts.length);
+    discoverySetStatus(discoveryBusy?"正在发现账号，通常 1 分钟内结束...":(discoveredAccounts.length?("候选 "+fmt(discoveredAccounts.length)+" 个"+(time?" · "+time:"")):"需要任务密码后开始发现"), !!discoveredAccounts.length);
   }
 }
-function loadDiscoveryPayload(payload){
+function loadDiscoveryPayload(payload, shouldRender=true){
   discoveredAccounts=Array.isArray(payload&&payload.accounts)?payload.accounts:[];
   discoveryGeneratedAt=(payload&&payload.generated_at)||"";
-  renderResultTable();
+  discoveryEmptyMessage=(!discoveredAccounts.length&&discoveryGeneratedAt)?"上次发现没有候选账号。可以换关键词或降低最低粉丝后重试。":"";
+  if(shouldRender)renderResultTable();
 }
 async function loadDiscoveryLatest(){
   discoverySetStatus("正在读取发现结果...");
@@ -3075,6 +3088,7 @@ async function runDiscovery(){
   store.set("thr_discover_limit",String(limit));
   store.set("thr_discover_min_followers",($("discoverMinFollowersInput")&&$("discoverMinFollowersInput").value)||"0");
   discoverySetStatus("正在搜索短剧视频并筛作者...");
+  discoveryEmptyMessage="";
   renderResultTable();
   let finalStatus="", finalOk=false;
   try{
@@ -3083,16 +3097,22 @@ async function runDiscovery(){
       keywords,
       limit:String(limit),
       min_followers:String(minFollowers),
-    }, {requireSecret:true});
-    loadDiscoveryPayload(payload);
+    }, {requireSecret:true, timeoutMs:95000});
+    loadDiscoveryPayload(payload, false);
+    if(!discoveredAccounts.length){
+      const errors=Array.isArray(payload&&payload.errors)?payload.errors:[];
+      const hitLimit=errors.some(item=>String(typeof item==="string"?item:(item&&item.error)||"").includes("runtime limit"));
+      discoveryEmptyMessage=hitLimit?"发现已到时间上限，本次没有候选账号。可以减少关键词或候选数量后重试。":"本次没有发现候选账号。TikHub 搜索接口可能没有返回可用的短剧作者。";
+    }
     finalStatus="发现完成 · 候选 "+fmt(discoveredAccounts.length)+" 个";
     finalOk=true;
   }catch(e){
     finalStatus="发现失败: "+(e.message||e);
+    discoveryEmptyMessage="发现请求失败："+(e.message||e);
     toast("发现失败:"+(e.message||e));
   }finally{
     discoveryBusy=false;
-    updateDiscoveryControls();
+    renderResultTable();
     if(finalStatus)discoverySetStatus(finalStatus, finalOk);
   }
 }
@@ -3206,7 +3226,7 @@ function renderDiscoveryTable(){
     const td=document.createElement("td");
     td.colSpan=DISCOVERY_COLUMNS.length;
     td.className="detail-text";
-    td.textContent=discoveryBusy?"正在搜索公开短剧视频...":"暂无候选账号。填写任务密码后点“开始发现”。";
+    td.textContent=discoveryBusy?"正在搜索公开短剧视频，通常 1 分钟内结束...":(discoveryEmptyMessage||"暂无候选账号。填写任务密码后点“开始发现”。");
     tr.appendChild(td);
     tb.appendChild(tr);
     return;

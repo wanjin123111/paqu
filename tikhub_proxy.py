@@ -118,6 +118,8 @@ DISCOVERY_MAX_CANDIDATES = _env_int("DISCOVERY_MAX_CANDIDATES", 60, 1, 500)
 DISCOVERY_MIN_FOLLOWERS = _env_int("DISCOVERY_MIN_FOLLOWERS", 0, 0, 1000000000)
 DISCOVERY_MIN_DRAMAS = _env_int("DISCOVERY_MIN_DRAMAS", 0, 0, 100000)
 DISCOVERY_SEARCH_PAGES = _env_int("DISCOVERY_SEARCH_PAGES", 2, 1, 10)
+DISCOVERY_SEARCH_TIMEOUT_SECONDS = _env_int("DISCOVERY_SEARCH_TIMEOUT_SECONDS", 6, 2, 30)
+DISCOVERY_MAX_RUNTIME_SECONDS = _env_int("DISCOVERY_MAX_RUNTIME_SECONDS", 75, 15, 600)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
 
@@ -257,7 +259,7 @@ class TikHubError(Exception):
         self.status = status
 
 
-def _send_tikhub_get(path, params, label):
+def _send_tikhub_get(path, params, label, timeout=90, retries=None):
     if not SERVER_API_KEY:
         raise TikHubError("TIKHUB_API_KEY is not configured on Render")
     query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
@@ -268,22 +270,23 @@ def _send_tikhub_get(path, params, label):
         "User-Agent": DEFAULT_UA,
     }
     last_error = None
-    for attempt in range(1, SCHEDULE_RETRIES + 1):
+    attempts = SCHEDULE_RETRIES if retries is None else max(1, int(retries))
+    for attempt in range(1, attempts + 1):
         try:
             req = urllib.request.Request(url, headers=headers, method="GET")
-            with urllib.request.urlopen(req, timeout=90) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 text = resp.read().decode("utf-8", "replace")
                 return json.loads(text) if text else None
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")[:500]
             last_error = TikHubError("%s failed with HTTP %s: %s" % (label, exc.code, body), exc.code)
-            if exc.code in (429, 500, 502, 503, 504) and attempt < SCHEDULE_RETRIES:
+            if exc.code in (429, 500, 502, 503, 504) and attempt < attempts:
                 time.sleep(max(0.5, SCHEDULE_DELAY_MS / 1000.0) * attempt)
                 continue
             raise last_error
         except Exception as exc:
             last_error = TikHubError("%s request failed: %s" % (label, exc))
-            if attempt < SCHEDULE_RETRIES:
+            if attempt < attempts:
                 time.sleep(max(0.5, SCHEDULE_DELAY_MS / 1000.0) * attempt)
                 continue
             raise last_error
@@ -1127,12 +1130,24 @@ def _search_param_sets(keyword, count, cursor):
     ]
 
 
-def _fetch_discovery_search_page(keyword, count, cursor):
+def _discovery_runtime_exceeded(started):
+    return bool(started) and time.time() - started > DISCOVERY_MAX_RUNTIME_SECONDS
+
+
+def _fetch_discovery_search_page(keyword, count, cursor, started=None):
     last_error = None
     for endpoint in SEARCH_VIDEO_EP_CANDIDATES:
         for params in _search_param_sets(keyword, count, cursor):
+            if _discovery_runtime_exceeded(started):
+                raise TikHubError("discovery runtime limit reached")
             try:
-                data = _send_tikhub_get(endpoint, params, "TikHub search video endpoint")
+                data = _send_tikhub_get(
+                    endpoint,
+                    params,
+                    "TikHub search video endpoint",
+                    timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS,
+                    retries=1,
+                )
                 batch = _find_video_list(data)
                 if batch:
                     return data, batch, endpoint
@@ -1200,10 +1215,10 @@ def _discover_search_videos(keyword, max_items, started):
     items, seen, endpoint, errors = [], set(), "", []
     cursor = "0"
     for _page in range(1, DISCOVERY_SEARCH_PAGES + 1):
-        if _runtime_exceeded(started) or len(items) >= max_items:
+        if _discovery_runtime_exceeded(started) or len(items) >= max_items:
             break
         try:
-            data, batch, endpoint = _fetch_discovery_search_page(keyword, min(30, max_items - len(items)), cursor)
+            data, batch, endpoint = _fetch_discovery_search_page(keyword, min(30, max_items - len(items)), cursor, started)
         except TikHubError as exc:
             errors.append(str(exc))
             break
@@ -1240,7 +1255,7 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
     monitored = {item.lower() for item in configured_accounts}
     candidates, errors = {}, []
     for keyword in keywords:
-        if _runtime_exceeded(started):
+        if _discovery_runtime_exceeded(started):
             errors.append("runtime limit reached while searching")
             break
         videos, endpoint, search_errors = _discover_search_videos(keyword, max_videos_per_keyword, started)
@@ -1285,7 +1300,7 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
     enriched = []
     raw_candidates = sorted(candidates.values(), key=lambda item: item.get("sample_max_views", 0), reverse=True)
     for item in raw_candidates[:max_accounts * 2]:
-        if _runtime_exceeded(started):
+        if _discovery_runtime_exceeded(started):
             errors.append("runtime limit reached while enriching accounts")
             break
         account = item["account"]
@@ -1337,6 +1352,8 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
         "errors": errors[:80],
         "search_candidates": len(raw_candidates),
         "monitored_count": len(monitored),
+        "runtime_seconds": round(time.time() - started, 2),
+        "runtime_limit_seconds": DISCOVERY_MAX_RUNTIME_SECONDS,
         "runtime_file": "reports/discovered_accounts.json",
     }
     return _write_discovered_accounts(payload)
