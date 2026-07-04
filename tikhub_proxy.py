@@ -35,6 +35,7 @@ PUBLIC_REPORTS_DIR = os.path.join(ROOT, "public_reports")
 DRAMA_DETAIL_CACHE_FILE = os.path.join(REPORTS_DIR, "drama_detail_cache.json")
 DRAMA_EPISODE_HISTORY_FILE = os.path.join(REPORTS_DIR, "drama_episode_history.json")
 SCHEDULE_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "schedule_accounts.json")
+SCHEDULE_ACCOUNTS_SEED_FILE = os.path.join(ROOT, "schedule_accounts.seed.json")
 DISCOVERED_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "discovered_accounts.json")
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
@@ -1042,12 +1043,44 @@ def _schedule_account_pool():
     return {"accounts": accounts, "updated_at": updated_at, "source": "file" if accounts else ""}
 
 
+def _schedule_account_seed():
+    try:
+        with open(SCHEDULE_ACCOUNTS_SEED_FILE, "r", encoding="utf-8-sig") as handle:
+            payload = json.load(handle)
+    except Exception:
+        payload = None
+    accounts = payload.get("accounts", payload) if isinstance(payload, dict) else payload
+    if isinstance(accounts, list):
+        accounts = _parse_accounts("\n".join(str(item) for item in accounts))
+    else:
+        accounts = _parse_accounts(accounts)
+    return accounts
+
+
+def _merge_accounts(*groups):
+    merged, seen = [], set()
+    for group in groups:
+        for uid in _parse_accounts("\n".join(str(item) for item in (group or []))):
+            key = uid.lower()
+            if key and key not in seen:
+                seen.add(key)
+                merged.append(uid)
+    return merged
+
+
 def _configured_schedule_accounts():
     pool = _schedule_account_pool()
-    if pool["accounts"]:
-        return pool["accounts"], "backend_pool"
     env_accounts = _parse_accounts(SCHEDULE_ACCOUNTS)
-    return env_accounts, "SCHEDULE_ACCOUNTS" if env_accounts else ""
+    seed_accounts = _schedule_account_seed()
+    accounts = _merge_accounts(env_accounts, seed_accounts, pool["accounts"])
+    sources = []
+    if env_accounts:
+        sources.append("SCHEDULE_ACCOUNTS")
+    if seed_accounts:
+        sources.append("seed")
+    if pool["accounts"]:
+        sources.append("backend_pool")
+    return accounts, "+".join(sources)
 
 
 def _write_schedule_account_pool(accounts):
