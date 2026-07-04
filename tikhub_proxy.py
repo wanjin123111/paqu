@@ -1162,6 +1162,58 @@ def _fetch_discovery_search_page(keyword, count, cursor, started=None):
     raise last_error or TikHubError("No TikHub search endpoint worked")
 
 
+def _send_tiktok_public_page(url, referer=None):
+    headers = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": referer or (TIKTOK_HOST + "/"),
+        "User-Agent": DEFAULT_UA,
+    }
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 6) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def _script_json_from_html(page):
+    payloads = []
+    for script_id in ("__UNIVERSAL_DATA_FOR_REHYDRATION__", "SIGI_STATE"):
+        pattern = r'<script[^>]+id=["\']%s["\'][^>]*>(.*?)</script>' % re.escape(script_id)
+        for match in re.finditer(pattern, page or "", flags=re.S | re.I):
+            text = html.unescape(match.group(1) or "").strip()
+            if not text:
+                continue
+            try:
+                payloads.append(json.loads(text))
+            except Exception:
+                continue
+    for match in re.finditer(r'window\[[\'"]SIGI_STATE[\'"]\]\s*=\s*({.*?});?\s*</script>', page or "", flags=re.S):
+        try:
+            payloads.append(json.loads(html.unescape(match.group(1)).strip()))
+        except Exception:
+            continue
+    return payloads
+
+
+def _fetch_public_tiktok_search_page(keyword, count, started=None):
+    if _discovery_runtime_exceeded(started):
+        raise TikHubError("discovery runtime limit reached")
+    query = urllib.parse.urlencode({"q": keyword})
+    url = TIKTOK_HOST + "/search?" + query
+    try:
+        page = _send_tiktok_public_page(url)
+    except Exception as exc:
+        raise TikHubError("public TikTok search page failed: %s" % exc)
+    for payload in _script_json_from_html(page):
+        batch = _find_video_list(payload)
+        if not batch and isinstance(payload, dict):
+            item_module = payload.get("ItemModule") or payload.get("itemModule")
+            if isinstance(item_module, dict):
+                batch = [item for item in item_module.values() if _looks_like_video(item)]
+        if batch:
+            return {"data": batch[:count], "has_more": False}, batch[:count], "public_tiktok_search_page"
+    raise TikHubError("public TikTok search page returned no visible video data")
+
+
 def _author_container(video):
     if not isinstance(video, dict):
         return {}
@@ -1218,10 +1270,17 @@ def _discover_search_videos(keyword, max_items, started):
         if _discovery_runtime_exceeded(started) or len(items) >= max_items:
             break
         try:
-            data, batch, endpoint = _fetch_discovery_search_page(keyword, min(30, max_items - len(items)), cursor, started)
+            if SERVER_API_KEY:
+                data, batch, endpoint = _fetch_discovery_search_page(keyword, min(30, max_items - len(items)), cursor, started)
+            else:
+                raise TikHubError("TikHub search skipped: TIKHUB_API_KEY is not configured")
         except TikHubError as exc:
-            errors.append(str(exc))
-            break
+            errors.append("TikHub search unavailable: %s" % exc)
+            try:
+                data, batch, endpoint = _fetch_public_tiktok_search_page(keyword, min(30, max_items - len(items)), started)
+            except TikHubError as public_exc:
+                errors.append(str(public_exc))
+                break
         for video in batch:
             video_id = _get_video_id(video)
             key = video_id or json.dumps(video, ensure_ascii=False, sort_keys=True)[:200]
@@ -1304,44 +1363,52 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
             errors.append("runtime limit reached while enriching accounts")
             break
         account = item["account"]
+        profile = {}
+        dramas = []
+        secuid = item.get("secuid") or ""
+        enrich_error = ""
         try:
-            secuid = item.get("secuid") or _resolve_secuid(account)
-            profile = _get_profile(account, secuid)
-            dramas = []
-            try:
-                dramas = _get_tiktok_drama_library(secuid, account) if secuid else []
-            except TikHubError:
-                dramas = []
-            total_views = sum(_to_int(drama.get("views")) for drama in dramas)
-            top_drama = max(dramas, key=lambda drama: _to_int(drama.get("views")), default={})
-            followers = _to_int(profile.get("followers")) or _to_int(item.get("followers_hint"))
-            drama_count = len(dramas)
-            if followers < min_followers or drama_count < min_dramas:
-                continue
-            enriched.append({
-                "account": account,
-                "nickname": profile.get("nickname") or item.get("nickname") or account,
-                "avatar": profile.get("avatar") or item.get("avatar") or "",
-                "followers": followers,
-                "hearts": _to_int(profile.get("hearts")) or _to_int(item.get("hearts_hint")),
-                "video_count": _to_int(profile.get("videoCount")) or _to_int(item.get("video_count_hint")),
-                "dramas": drama_count,
-                "total_views": total_views,
-                "top_drama": top_drama.get("english_title") or top_drama.get("name") or "",
-                "top_drama_views": _to_int(top_drama.get("views")),
-                "sample_video_count": _to_int(item.get("sample_video_count")),
-                "sample_views": _to_int(item.get("sample_views")),
-                "sample_max_views": _to_int(item.get("sample_max_views")),
-                "sample_video_id": item.get("sample_video_id") or "",
-                "sample_video_link": item.get("sample_video_link") or "",
-                "sample_desc": item.get("sample_desc") or "",
-                "source_keywords": item.get("source_keywords") or [],
-                "source_endpoint": item.get("source_endpoint") or "",
-                "profile_url": "https://www.tiktok.com/@" + account,
-                "already_monitored": account.lower() in monitored,
-            })
+            if SERVER_API_KEY:
+                if not secuid:
+                    secuid = _resolve_secuid(account)
+                if secuid:
+                    profile = _get_profile(account, secuid)
+                    try:
+                        dramas = _get_tiktok_drama_library(secuid, account)
+                    except TikHubError:
+                        dramas = []
         except Exception as exc:
-            errors.append({"account": account, "error": str(exc)})
+            enrich_error = str(exc)
+            errors.append({"account": account, "stage": "enrich", "error": enrich_error})
+        total_views = sum(_to_int(drama.get("views")) for drama in dramas) or _to_int(item.get("sample_views"))
+        top_drama = max(dramas, key=lambda drama: _to_int(drama.get("views")), default={})
+        followers = _to_int(profile.get("followers")) or _to_int(item.get("followers_hint"))
+        drama_count = len(dramas)
+        if followers < min_followers or drama_count < min_dramas:
+            continue
+        enriched.append({
+            "account": account,
+            "nickname": profile.get("nickname") or item.get("nickname") or account,
+            "avatar": profile.get("avatar") or item.get("avatar") or "",
+            "followers": followers,
+            "hearts": _to_int(profile.get("hearts")) or _to_int(item.get("hearts_hint")),
+            "video_count": _to_int(profile.get("videoCount")) or _to_int(item.get("video_count_hint")),
+            "dramas": drama_count,
+            "total_views": total_views,
+            "top_drama": top_drama.get("english_title") or top_drama.get("name") or "",
+            "top_drama_views": _to_int(top_drama.get("views")),
+            "sample_video_count": _to_int(item.get("sample_video_count")),
+            "sample_views": _to_int(item.get("sample_views")),
+            "sample_max_views": _to_int(item.get("sample_max_views")),
+            "sample_video_id": item.get("sample_video_id") or "",
+            "sample_video_link": item.get("sample_video_link") or "",
+            "sample_desc": item.get("sample_desc") or "",
+            "source_keywords": item.get("source_keywords") or [],
+            "source_endpoint": item.get("source_endpoint") or "",
+            "profile_url": "https://www.tiktok.com/@" + account,
+            "already_monitored": account.lower() in monitored,
+            "enrich_error": enrich_error,
+        })
     enriched.sort(key=_discovery_account_score, reverse=True)
     payload = {
         "ok": True,
@@ -3373,9 +3440,6 @@ class Handler(BaseHTTPRequestHandler):
                         if isinstance(item, dict):
                             item["already_monitored"] = str(item.get("account", "")).lower() in monitored
                 self._send_json(200, payload)
-                return
-            if not SERVER_API_KEY:
-                self._send_json(503, {"ok": False, "error": "TIKHUB_API_KEY is not configured"})
                 return
             try:
                 payload = _discover_accounts(
