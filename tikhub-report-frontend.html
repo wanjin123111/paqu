@@ -849,8 +849,9 @@ let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7
 let monitorSearchText=store.get("thr_monitor_search")||"";
 let summarySearchText=store.get("thr_summary_search")||"";
 let detailSearchText=store.get("thr_detail_search")||"";
-let detailAccountIndex=0;
-let detailAccountKey=store.get("thr_detail_account")||"";
+const DETAIL_ALL_ACCOUNTS_VALUE="__all__";
+let detailAccountIndex=-1;
+let detailAccountKey="";
 const DETAIL_PAGE_SIZE=7;
 let detailPage=1;
 let currentReportSource="latest";
@@ -2688,8 +2689,16 @@ function detailAccounts(){
   return out;
 }
 function setDetailAccountSelection(list,index){
+  if(index===DETAIL_ALL_ACCOUNTS_VALUE||Number(index)<0){
+    detailAccountIndex=-1;
+    detailAccountKey="";
+    store.del("thr_detail_account");
+    return null;
+  }
   if(!list.length){
-    detailAccountIndex=0;
+    detailAccountIndex=-1;
+    detailAccountKey="";
+    store.del("thr_detail_account");
     return null;
   }
   const safeIndex=Math.max(0,Math.min(Number(index)||0,list.length-1));
@@ -2701,7 +2710,12 @@ function setDetailAccountSelection(list,index){
 }
 function syncDetailAccountSelection(list){
   if(!list.length){
-    detailAccountIndex=0;
+    detailAccountIndex=-1;
+    detailAccountKey="";
+    return null;
+  }
+  if(!detailAccountKey){
+    detailAccountIndex=-1;
     return null;
   }
   if(detailAccountKey){
@@ -2711,10 +2725,10 @@ function syncDetailAccountSelection(list){
       return list[idx];
     }
   }
-  const idx=detailAccountIndex<list.length?detailAccountIndex:0;
-  if(!detailAccountKey)return setDetailAccountSelection(list,idx);
-  detailAccountIndex=idx;
-  return list[idx];
+  detailAccountIndex=-1;
+  detailAccountKey="";
+  store.del("thr_detail_account");
+  return null;
 }
 function resetDetailPage(){
   detailPage=1;
@@ -2740,6 +2754,10 @@ function updateDetailControls(list){
   nav.classList.toggle("show",resultView==="detail");
   if(resultView!=="detail")return list;
   sel.innerHTML="";
+  const allOpt=document.createElement("option");
+  allOpt.value=DETAIL_ALL_ACCOUNTS_VALUE;
+  allOpt.textContent="全部账号 · "+fmt(dramaRows.length)+" 部短剧";
+  sel.appendChild(allOpt);
   list.forEach((item,i)=>{
     const opt=document.createElement("option");
     opt.value=String(i);
@@ -2748,9 +2766,9 @@ function updateDetailControls(list){
     sel.appendChild(opt);
   });
   const current=syncDetailAccountSelection(list);
-  sel.value=String(detailAccountIndex);
-  const total=current?dramaRows.filter(row=>accountOf(row)===current.account).length:0;
-  count.textContent=hasSearch(detailSearchText)?("全账号搜索 · "+fmt(filterDetailSearch(dramaRows).length)+" 部短剧"):(current?("第 "+(detailAccountIndex+1)+"/"+list.length+" 个账号 · "+total+" 部短剧"):"暂无账号明细");
+  sel.value=current?String(detailAccountIndex):DETAIL_ALL_ACCOUNTS_VALUE;
+  const total=current?dramaRows.filter(row=>accountOf(row)===current.account).length:dramaRows.length;
+  count.textContent=hasSearch(detailSearchText)?("全账号搜索 · "+fmt(filterDetailSearch(dramaRows).length)+" 部短剧"):(current?("第 "+(detailAccountIndex+1)+"/"+list.length+" 个账号 · "+total+" 部短剧"):("全部账号 · "+fmt(total)+" 部短剧"));
   updateDetailPager(total);
   return list;
 }
@@ -3585,23 +3603,24 @@ function init(){
   }
   updateSortControls();
   $("detailAccountSelect").addEventListener("change",()=>{
-    setDetailAccountSelection(detailAccounts(),Number($("detailAccountSelect").value)||0);
+    const value=$("detailAccountSelect").value;
+    setDetailAccountSelection(detailAccounts(),value===DETAIL_ALL_ACCOUNTS_VALUE?DETAIL_ALL_ACCOUNTS_VALUE:Number(value)||0);
     resetDetailPage();
     renderResultTable();
   });
   $("detailPrevBtn").addEventListener("click",()=>{
     const list=detailAccounts();
     if(!list.length)return;
-    syncDetailAccountSelection(list);
-    setDetailAccountSelection(list,(detailAccountIndex+list.length-1)%list.length);
+    const current=syncDetailAccountSelection(list);
+    setDetailAccountSelection(list,current?(detailAccountIndex+list.length-1)%list.length:list.length-1);
     resetDetailPage();
     renderResultTable();
   });
   $("detailNextBtn").addEventListener("click",()=>{
     const list=detailAccounts();
     if(!list.length)return;
-    syncDetailAccountSelection(list);
-    setDetailAccountSelection(list,(detailAccountIndex+1)%list.length);
+    const current=syncDetailAccountSelection(list);
+    setDetailAccountSelection(list,current?(detailAccountIndex+1)%list.length:0);
     resetDetailPage();
     renderResultTable();
   });
