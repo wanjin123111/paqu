@@ -128,6 +128,7 @@ DISCOVERY_MIN_DRAMAS = _env_int("DISCOVERY_MIN_DRAMAS", 0, 0, 100000)
 DISCOVERY_SEARCH_PAGES = _env_int("DISCOVERY_SEARCH_PAGES", 2, 1, 10)
 DISCOVERY_SEARCH_TIMEOUT_SECONDS = _env_int("DISCOVERY_SEARCH_TIMEOUT_SECONDS", 6, 2, 30)
 DISCOVERY_MAX_RUNTIME_SECONDS = _env_int("DISCOVERY_MAX_RUNTIME_SECONDS", 75, 15, 600)
+DISCOVERY_ENRICH_RESERVE_SECONDS = _env_int("DISCOVERY_ENRICH_RESERVE_SECONDS", 35, 5, 300)
 DISCOVERY_SEARCH_MODE = os.environ.get("DISCOVERY_SEARCH_MODE", "app_v3").strip().lower() or "app_v3"
 DISCOVERY_ENABLE_PUBLIC_TIKTOK = _env_bool("DISCOVERY_ENABLE_PUBLIC_TIKTOK", False)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -1156,6 +1157,12 @@ def _discovery_runtime_exceeded(started):
     return bool(started) and time.time() - started > DISCOVERY_MAX_RUNTIME_SECONDS
 
 
+def _discovery_remaining_seconds(started):
+    if not started:
+        return DISCOVERY_MAX_RUNTIME_SECONDS
+    return max(0, DISCOVERY_MAX_RUNTIME_SECONDS - (time.time() - started))
+
+
 def _fetch_discovery_search_page(keyword, count, cursor, started=None):
     if _discovery_runtime_exceeded(started):
         raise TikHubError("discovery runtime limit reached")
@@ -1446,6 +1453,10 @@ def _discover_search_videos(keyword, max_items, started):
     return items, endpoint, errors
 
 
+def _discovery_raw_account_score(item):
+    return max(_to_int(item.get("sample_max_views")), _to_int(item.get("sample_views")), _to_int(item.get("followers_hint")))
+
+
 def _discovery_account_score(item):
     return max(_to_int(item.get("sample_max_views")), _to_int(item.get("total_views")), _to_int(item.get("followers")))
 
@@ -1460,6 +1471,7 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
     configured_accounts, _source = _configured_schedule_accounts()
     monitored = {item.lower() for item in configured_accounts}
     candidates, errors = {}, []
+    raw_candidate_target = min(500, max(max_accounts * 4, max_accounts + 40))
     for keyword in keywords:
         if _discovery_runtime_exceeded(started):
             errors.append(_discovery_error(
@@ -1467,6 +1479,22 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
                 "discover",
                 "runtime limit reached while searching",
                 hint="减少关键词、候选数量或搜索视频上限后重试。",
+            ))
+            break
+        if candidates and _discovery_remaining_seconds(started) <= DISCOVERY_ENRICH_RESERVE_SECONDS:
+            errors.append(_discovery_error(
+                "runtime",
+                "discover",
+                "search stopped early to reserve time for account enrichment",
+                hint="已保留时间补全候选账号资料；想覆盖更多关键词可以降低搜索视频数或分批搜索。",
+            ))
+            break
+        if len(candidates) >= raw_candidate_target:
+            errors.append(_discovery_error(
+                "search",
+                "candidate-budget",
+                "raw candidate target reached",
+                hint="已找到足够原始候选，优先补全播放量较高的账号以避免请求超时。",
             ))
             break
         videos, endpoint, search_errors = _discover_search_videos(keyword, max_videos_per_keyword, started)
@@ -1514,7 +1542,7 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
             if author.get("avatar") and not item.get("avatar"):
                 item["avatar"] = author["avatar"]
     enriched = []
-    raw_candidates = sorted(candidates.values(), key=lambda item: item.get("sample_max_views", 0), reverse=True)
+    raw_candidates = sorted(candidates.values(), key=_discovery_raw_account_score, reverse=True)
     for item in raw_candidates[:max_accounts * 2]:
         if _discovery_runtime_exceeded(started):
             errors.append(_discovery_error(
