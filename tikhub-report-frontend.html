@@ -754,6 +754,7 @@ shortdramatime"></textarea>
           <label class="search-field"><span>发现关键词</span><input id="discoverKeywordsInput" type="search" placeholder="短剧, 短剧推荐, 小短剧, mini drama" autocomplete="off" aria-label="发现账号关键词"></label>
           <label class="discover-mini"><span>候选</span><input id="discoverLimitInput" type="number" min="1" max="200" step="1" value="40"><span>个</span></label>
           <label class="discover-mini"><span>最低粉丝</span><input id="discoverMinFollowersInput" type="text" value="0"></label>
+          <label class="discover-mini"><span>搜索视频</span><input id="discoverMaxVideosInput" type="number" min="1" max="200" step="1" value="50"><span>条/词</span></label>
           <button class="mini-btn" id="discoverLoadBtn" type="button">读取结果</button>
           <button class="mini-btn" id="discoverRunBtn" type="button">开始发现</button>
           <button class="mini-btn" id="discoverAddAllBtn" type="button">加入全部候选</button>
@@ -3058,13 +3059,18 @@ function discoveryMinFollowers(){
   const el=$("discoverMinFollowersInput");
   return parseGrowthNumber(el&&el.value?el.value:"0");
 }
+function discoveryMaxVideos(){
+  const el=$("discoverMaxVideosInput");
+  return Math.max(1,Math.min(200,toInt(el&&el.value)||50));
+}
 function updateDiscoveryControls(){
   const toolbar=$("discoverToolbar");
   if(toolbar)toolbar.hidden=resultView!=="discover";
-  const input=$("discoverKeywordsInput"), limit=$("discoverLimitInput"), min=$("discoverMinFollowersInput");
+  const input=$("discoverKeywordsInput"), limit=$("discoverLimitInput"), min=$("discoverMinFollowersInput"), maxVideos=$("discoverMaxVideosInput");
   if(input&&document.activeElement!==input)input.value=storedDiscoveryKeywords();
   if(limit&&document.activeElement!==limit)limit.value=store.get("thr_discover_limit")||"40";
   if(min&&document.activeElement!==min)min.value=store.get("thr_discover_min_followers")||"0";
+  if(maxVideos&&document.activeElement!==maxVideos)maxVideos.value=store.get("thr_discover_max_videos")||"50";
   const runBtn=$("discoverRunBtn"), loadBtn=$("discoverLoadBtn"), addAllBtn=$("discoverAddAllBtn");
   if(runBtn)runBtn.disabled=discoveryBusy;
   if(loadBtn)loadBtn.disabled=discoveryBusy;
@@ -3082,7 +3088,14 @@ function loadDiscoveryPayload(payload, shouldRender=true){
 }
 function discoveryErrorSummary(payload){
   const errors=Array.isArray(payload&&payload.errors)?payload.errors:[];
-  const texts=errors.map(item=>typeof item==="string"?item:((item&&item.error)||"")).filter(Boolean);
+  const texts=errors.map(item=>{
+    if(typeof item==="string")return item;
+    if(!item)return "";
+    const source=item.source?("["+item.source+"] "):"";
+    const msg=item.message||item.error||"";
+    const hint=item.hint?(" "+item.hint):"";
+    return source+msg+hint;
+  }).filter(Boolean);
   if(!texts.length)return "";
   return "后端返回："+texts.slice(0,2).join("；");
 }
@@ -3097,9 +3110,11 @@ async function runDiscovery(){
   const keywords=discoveryKeywords();
   const limit=discoveryLimit();
   const minFollowers=discoveryMinFollowers();
+  const maxVideos=discoveryMaxVideos();
   store.set("thr_discover_keywords",keywords);
   store.set("thr_discover_limit",String(limit));
   store.set("thr_discover_min_followers",($("discoverMinFollowersInput")&&$("discoverMinFollowersInput").value)||"0");
+  store.set("thr_discover_max_videos",String(maxVideos));
   discoverySetStatus("正在搜索短剧视频并筛作者...");
   discoveryEmptyMessage="";
   renderResultTable();
@@ -3110,11 +3125,12 @@ async function runDiscovery(){
       keywords,
       limit:String(limit),
       min_followers:String(minFollowers),
+      max_videos:String(maxVideos),
     }, {requireSecret:true, timeoutMs:95000});
     loadDiscoveryPayload(payload, false);
     if(!discoveredAccounts.length){
       const errors=Array.isArray(payload&&payload.errors)?payload.errors:[];
-      const hitLimit=errors.some(item=>String(typeof item==="string"?item:(item&&item.error)||"").includes("runtime limit"));
+      const hitLimit=errors.some(item=>String(typeof item==="string"?item:(item&&item.message)||(item&&item.error)||"").includes("runtime limit"));
       const detail=discoveryErrorSummary(payload);
       discoveryEmptyMessage=hitLimit?"发现已到时间上限，本次没有候选账号。可以减少关键词或候选数量后重试。":("本次没有发现候选账号。TikHub 搜索接口可能没有返回可用的短剧作者。"+(detail?" "+detail:""));
     }
@@ -3200,8 +3216,8 @@ function appendDiscoveryCell(tr,c,row){
     wrap.appendChild(meta);
     td.appendChild(wrap);
   }else if(c==="粉丝"){td.className="num";td.textContent=fmtPlay(row.followers);}
-  else if(c==="短剧数"){td.className="num";td.textContent=fmtCountUnit(row.dramas,"部");}
-  else if(c==="短剧播放"){td.className="num";td.textContent=fmtPlay(row.total_views);}
+  else if(c==="短剧数"){td.className="num";td.textContent=fmtCountUnit(toInt(row.dramas)||toInt(row.sample_video_count),"部");}
+  else if(c==="短剧播放"){td.className="num";td.textContent=fmtPlay(toInt(row.total_views)||toInt(row.sample_views));}
   else if(c==="样本最高播放"){
     td.className="num";
     if(row.sample_video_link){
@@ -3857,7 +3873,7 @@ function init(){
   $("discoverLoadBtn").addEventListener("click",()=>loadDiscoveryLatest().catch(e=>{discoverySetStatus("读取失败: "+(e.message||e),false);toast("读取失败:"+(e.message||e));}));
   $("discoverRunBtn").addEventListener("click",()=>runDiscovery());
   $("discoverAddAllBtn").addEventListener("click",()=>addAllDiscoveredAccounts());
-  ["discoverKeywordsInput","discoverLimitInput","discoverMinFollowersInput"].forEach(id=>{
+  ["discoverKeywordsInput","discoverLimitInput","discoverMinFollowersInput","discoverMaxVideosInput"].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener("keydown",e=>{if(e.key==="Enter")runDiscovery();});
   });

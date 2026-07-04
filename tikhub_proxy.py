@@ -120,6 +120,8 @@ DISCOVERY_MIN_DRAMAS = _env_int("DISCOVERY_MIN_DRAMAS", 0, 0, 100000)
 DISCOVERY_SEARCH_PAGES = _env_int("DISCOVERY_SEARCH_PAGES", 2, 1, 10)
 DISCOVERY_SEARCH_TIMEOUT_SECONDS = _env_int("DISCOVERY_SEARCH_TIMEOUT_SECONDS", 6, 2, 30)
 DISCOVERY_MAX_RUNTIME_SECONDS = _env_int("DISCOVERY_MAX_RUNTIME_SECONDS", 75, 15, 600)
+DISCOVERY_SEARCH_MODE = os.environ.get("DISCOVERY_SEARCH_MODE", "app_v3").strip().lower() or "app_v3"
+DISCOVERY_ENABLE_PUBLIC_TIKTOK = _env_bool("DISCOVERY_ENABLE_PUBLIC_TIKTOK", False)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
 
@@ -145,15 +147,10 @@ SINGLE_VIDEO_EP_CANDIDATES = [
     "/api/v1/tiktok/app/v3/fetch_one_video_v2",
     "/api/v1/tiktok/app/v3/fetch_one_video_v3",
 ]
-SEARCH_VIDEO_EP_CANDIDATES = [
-    "/api/v1/tiktok/app/v3/fetch_search_video",
-    "/api/v1/tiktok/app/v3/fetch_search_video_v2",
-    "/api/v1/tiktok/app/v3/fetch_search_general",
-    "/api/v1/tiktok/web/fetch_search_video",
-    "/api/v1/tiktok/web/fetch_search_item",
-    "/api/v1/tiktok/web/fetch_search_general",
-    "/api/v1/tiktok/web/fetch_search",
-]
+DISCOVERY_SEARCH_ENDPOINTS = {
+    "app_v3": "/api/v1/tiktok/app/v3/fetch_video_search_result",
+    "web": "/api/v1/tiktok/web/fetch_search_video",
+}
 PLAY_KEYS = ("play_count", "playCount", "play_cnt")
 DESC_KEYS = ("desc", "title", "content", "aweme_title", "text")
 ID_KEYS = ("aweme_id", "awemeId", "id", "item_id", "itemId")
@@ -991,7 +988,7 @@ def _read_pagination(data):
         for key in ("has_more", "hasMore", "hasMorePosts", "has_more_posts"):
             if key in item:
                 has_more = item[key]
-        for key in ("max_cursor", "cursor", "maxCursor", "next_cursor"):
+        for key in ("max_cursor", "cursor", "maxCursor", "next_cursor", "nextCursor", "offset", "next_offset", "nextOffset"):
             if item.get(key) not in (None, ""):
                 cursor = item[key]
     return has_more, cursor
@@ -1121,13 +1118,30 @@ def _write_discovered_accounts(payload):
     return payload
 
 
-def _search_param_sets(keyword, count, cursor):
-    return [
-        {"keyword": keyword, "count": str(count), "cursor": str(cursor), "max_cursor": str(cursor), "region": TIKTOK_REGION},
-        {"keywords": keyword, "count": str(count), "cursor": str(cursor), "max_cursor": str(cursor), "region": TIKTOK_REGION},
-        {"query": keyword, "count": str(count), "cursor": str(cursor), "max_cursor": str(cursor), "region": TIKTOK_REGION},
-        {"keyword": keyword, "count": str(count), "offset": str(cursor), "region": TIKTOK_REGION},
-    ]
+def _discovery_error(layer, source, message, status=None, hint=""):
+    item = {"layer": layer, "source": source, "message": str(message)}
+    if status:
+        item["status_code"] = status
+    if hint:
+        item["hint"] = hint
+    return item
+
+
+def _search_params(keyword, count, cursor):
+    if DISCOVERY_SEARCH_MODE == "web":
+        return {
+            "keyword": keyword,
+            "count": str(count),
+            "offset": str(cursor or "0"),
+        }
+    return {
+        "keyword": keyword,
+        "offset": str(cursor or "0"),
+        "count": str(count),
+        "sort_type": "0",
+        "publish_time": "0",
+        "region": TIKTOK_REGION,
+    }
 
 
 def _discovery_runtime_exceeded(started):
@@ -1135,31 +1149,20 @@ def _discovery_runtime_exceeded(started):
 
 
 def _fetch_discovery_search_page(keyword, count, cursor, started=None):
-    last_error = None
-    for endpoint in SEARCH_VIDEO_EP_CANDIDATES:
-        for params in _search_param_sets(keyword, count, cursor):
-            if _discovery_runtime_exceeded(started):
-                raise TikHubError("discovery runtime limit reached")
-            try:
-                data = _send_tikhub_get(
-                    endpoint,
-                    params,
-                    "TikHub search video endpoint",
-                    timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS,
-                    retries=1,
-                )
-                batch = _find_video_list(data)
-                if batch:
-                    return data, batch, endpoint
-                last_error = TikHubError("search endpoint returned no videos")
-            except TikHubError as exc:
-                last_error = exc
-                if exc.status in (401, 402, 403):
-                    raise
-                if exc.status in (400, 404, 422):
-                    continue
-                continue
-    raise last_error or TikHubError("No TikHub search endpoint worked")
+    if _discovery_runtime_exceeded(started):
+        raise TikHubError("discovery runtime limit reached")
+    endpoint = DISCOVERY_SEARCH_ENDPOINTS.get(DISCOVERY_SEARCH_MODE) or DISCOVERY_SEARCH_ENDPOINTS["app_v3"]
+    data = _send_tikhub_get(
+        endpoint,
+        _search_params(keyword, count, cursor),
+        "TikHub documented video search endpoint",
+        timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS,
+        retries=1,
+    )
+    batch = _video_batch_from_search_payload(data, count)
+    if batch:
+        return data, batch, endpoint
+    raise TikHubError("TikHub documented video search endpoint returned no parseable video items")
 
 
 def _send_tiktok_public_page(url, referer=None):
@@ -1393,15 +1396,29 @@ def _discover_search_videos(keyword, max_items, started):
             else:
                 raise TikHubError("TikHub search skipped: TIKHUB_API_KEY is not configured")
         except TikHubError as exc:
-            errors.append("TikHub search unavailable: %s" % exc)
+            errors.append(_discovery_error(
+                "api",
+                "tikhub:%s" % (DISCOVERY_SEARCH_MODE or "app_v3"),
+                exc,
+                getattr(exc, "status", None),
+                "检查 TIKHUB_API_KEY、余额、权限，以及 TikHub 文档中的搜索视频接口。",
+            ))
+            if not DISCOVERY_ENABLE_PUBLIC_TIKTOK:
+                errors.append(_discovery_error(
+                    "browser",
+                    "public-tiktok",
+                    "Public TikTok web fallback is disabled.",
+                    hint="Render 免费服务抓 TikTok 搜索页经常 403；如确需兜底，请显式设置 DISCOVERY_ENABLE_PUBLIC_TIKTOK=1。",
+                ))
+                break
             try:
                 data, batch, endpoint = _fetch_public_tiktok_search_api(keyword, min(30, max_items - len(items)), cursor, started)
             except TikHubError as api_exc:
-                errors.append(str(api_exc))
+                errors.append(_discovery_error("browser", "public-tiktok-api", api_exc, getattr(api_exc, "status", None)))
                 try:
                     data, batch, endpoint = _fetch_public_tiktok_search_page(keyword, min(30, max_items - len(items)), started)
                 except TikHubError as public_exc:
-                    errors.append(str(public_exc))
+                    errors.append(_discovery_error("browser", "public-tiktok-page", public_exc, getattr(public_exc, "status", None)))
                     break
         for video in batch:
             video_id = _get_video_id(video)
@@ -1437,11 +1454,21 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
     candidates, errors = {}, []
     for keyword in keywords:
         if _discovery_runtime_exceeded(started):
-            errors.append("runtime limit reached while searching")
+            errors.append(_discovery_error(
+                "runtime",
+                "discover",
+                "runtime limit reached while searching",
+                hint="减少关键词、候选数量或搜索视频上限后重试。",
+            ))
             break
         videos, endpoint, search_errors = _discover_search_videos(keyword, max_videos_per_keyword, started)
         for err in search_errors:
-            errors.append({"keyword": keyword, "error": err})
+            if isinstance(err, dict):
+                item = dict(err)
+                item["keyword"] = keyword
+                errors.append(item)
+            else:
+                errors.append(_discovery_error("search", endpoint or "unknown", err, hint="搜索接口没有返回可用视频作者。"))
         for video in videos:
             author = _author_from_video(video)
             if not author:
@@ -1482,7 +1509,12 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
     raw_candidates = sorted(candidates.values(), key=lambda item: item.get("sample_max_views", 0), reverse=True)
     for item in raw_candidates[:max_accounts * 2]:
         if _discovery_runtime_exceeded(started):
-            errors.append("runtime limit reached while enriching accounts")
+            errors.append(_discovery_error(
+                "runtime",
+                "discover",
+                "runtime limit reached while enriching accounts",
+                hint="候选账号已部分返回，可以减少候选数量后重试以补全粉丝和短剧库数据。",
+            ))
             break
         account = item["account"]
         profile = {}
@@ -1501,7 +1533,13 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
                         dramas = []
         except Exception as exc:
             enrich_error = str(exc)
-            errors.append({"account": account, "stage": "enrich", "error": enrich_error})
+            errors.append(_discovery_error(
+                "enrich",
+                "tikhub:profile_or_drama",
+                enrich_error,
+                getattr(exc, "status", None),
+                "账号来自搜索结果，但资料或短剧库补全失败；候选仍可加入监控池。",
+            ) | {"account": account})
         total_views = sum(_to_int(drama.get("views")) for drama in dramas) or _to_int(item.get("sample_views"))
         top_drama = max(dramas, key=lambda drama: _to_int(drama.get("views")), default={})
         followers = _to_int(profile.get("followers")) or _to_int(item.get("followers_hint"))
