@@ -835,8 +835,26 @@ const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","�
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","日增播放","时长","题材","简介","短剧链接"];
 const DISCOVERY_COLUMNS=["候选账号","粉丝","短剧数","短剧播放","样本最高播放","来源关键词","状态","操作"];
-const DEFAULT_DISCOVERY_KEYWORDS="短剧, 短剧推荐, 小短剧, 微短剧, mini drama, short drama, vertical drama";
-const LEGACY_DISCOVERY_KEYWORDS="short drama, mini drama, vertical drama";
+const DEFAULT_DISCOVERY_KEYWORDS=[
+  "short drama","shortdrama","mini drama","minidrama","micro drama","microdrama",
+  "vertical drama","verticaldrama","vertical series","drama series","drama clips",
+  "mobile drama","vertical minidrama","short drama episode","mini drama episode",
+  "billionaire drama","ceo drama","revenge drama","romance drama","werewolf drama",
+  "reelshort","dramabox","shortmax","goodshort","netshort","yuzu drama","pinedrama","duanju",
+  "短剧","短剧推荐","小短剧","微短剧","霸总短剧","甜宠短剧","复仇短剧"
+].join(", ");
+function normalizeDiscoveryKeywordString(value){
+  return String(value||"").split(",").map(v=>v.trim()).filter(Boolean).join(", ").toLowerCase();
+}
+const LEGACY_DISCOVERY_KEYWORDS=new Set([
+  "short drama, mini drama, vertical drama",
+  "短剧, 短剧推荐, 小短剧, 微短剧, mini drama, short drama, vertical drama",
+  "短剧, 短剧推荐, 小短剧, 微短剧, mini drama, short drama, vertical drama, tiktok drama",
+  "短剧, 短剧推荐, 小短剧, 微短剧, mini drama, short drama, vertical drama, tiktok drama, drama series"
+].map(normalizeDiscoveryKeywordString));
+function isLegacyDiscoveryKeywords(value){
+  return LEGACY_DISCOVERY_KEYWORDS.has(normalizeDiscoveryKeywordString(value));
+}
 const NUM_COLS=new Set(["粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看"]);
 const VIEW_COLS=new Set(["累计观看","单剧均观看","最高观看"]);
 
@@ -2982,12 +3000,12 @@ function discoverySetStatus(text, ok){
 }
 function storedDiscoveryKeywords(){
   const saved=(store.get("thr_discover_keywords")||"").trim();
-  return (!saved||saved===LEGACY_DISCOVERY_KEYWORDS)?DEFAULT_DISCOVERY_KEYWORDS:saved;
+  return (!saved||isLegacyDiscoveryKeywords(saved))?DEFAULT_DISCOVERY_KEYWORDS:saved;
 }
 function discoveryKeywords(){
   const el=$("discoverKeywordsInput");
   const value=el&&el.value?el.value.trim():"";
-  return (!value||value===LEGACY_DISCOVERY_KEYWORDS)?storedDiscoveryKeywords():value;
+  return (!value||isLegacyDiscoveryKeywords(value))?storedDiscoveryKeywords():value;
 }
 function discoveryLimit(){
   const el=$("discoverLimitInput");

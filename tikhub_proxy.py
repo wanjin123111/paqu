@@ -111,8 +111,16 @@ SCHEDULE_EPISODE_HISTORY_DELAY_MS = _env_int("SCHEDULE_EPISODE_HISTORY_DELAY_MS"
 DRAMA_EPISODE_HISTORY_MAX_POINTS = _env_int("DRAMA_EPISODE_HISTORY_MAX_POINTS", 160, 20, 1000)
 DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS = _env_int("DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS", 75, 35, 365)
 DRAMA_EPISODE_HISTORY_DEDUP_SECONDS = _env_int("DRAMA_EPISODE_HISTORY_DEDUP_SECONDS", 1800, 60, 86400)
-DISCOVERY_KEYWORDS = os.environ.get("DISCOVERY_KEYWORDS", "短剧,短剧推荐,小短剧,微短剧,mini drama,short drama,vertical drama,tiktok drama")
-DISCOVERY_MAX_KEYWORDS = _env_int("DISCOVERY_MAX_KEYWORDS", 8, 1, 50)
+DISCOVERY_DEFAULT_KEYWORDS = ",".join([
+    "short drama", "shortdrama", "mini drama", "minidrama", "micro drama", "microdrama",
+    "vertical drama", "verticaldrama", "vertical series", "drama series", "drama clips",
+    "mobile drama", "vertical minidrama", "short drama episode", "mini drama episode",
+    "billionaire drama", "ceo drama", "revenge drama", "romance drama", "werewolf drama",
+    "reelshort", "dramabox", "shortmax", "goodshort", "netshort", "yuzu drama", "pinedrama", "duanju",
+    "短剧", "短剧推荐", "小短剧", "微短剧", "霸总短剧", "甜宠短剧", "复仇短剧",
+])
+DISCOVERY_KEYWORDS = os.environ.get("DISCOVERY_KEYWORDS", DISCOVERY_DEFAULT_KEYWORDS)
+DISCOVERY_MAX_KEYWORDS = _env_int("DISCOVERY_MAX_KEYWORDS", 35, 1, 50)
 DISCOVERY_MAX_VIDEOS_PER_KEYWORD = _env_int("DISCOVERY_MAX_VIDEOS_PER_KEYWORD", 25, 1, 200)
 DISCOVERY_MAX_CANDIDATES = _env_int("DISCOVERY_MAX_CANDIDATES", 60, 1, 500)
 DISCOVERY_MIN_FOLLOWERS = _env_int("DISCOVERY_MIN_FOLLOWERS", 0, 0, 1000000000)
