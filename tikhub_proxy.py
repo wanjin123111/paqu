@@ -134,6 +134,10 @@ DISCOVERY_SEARCH_MODE = os.environ.get("DISCOVERY_SEARCH_MODE", "app_v3").strip(
 DISCOVERY_ENABLE_PUBLIC_TIKTOK = _env_bool("DISCOVERY_ENABLE_PUBLIC_TIKTOK", False)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+SUPABASE_ENABLED = _env_bool("SUPABASE_ENABLED", True)
+SUPABASE_BATCH_SIZE = _env_int("SUPABASE_BATCH_SIZE", 100, 1, 500)
 
 DEFAULT_ENDPOINTS = {
     "profile": "/api/v1/tiktok/app/v3/handler_user_profile",
@@ -2554,15 +2558,251 @@ def _write_text_file(name, content):
     return path
 
 
+def _supabase_project_url():
+    url = SUPABASE_URL.strip().rstrip("/")
+    if url.endswith("/rest/v1"):
+        url = url[:-len("/rest/v1")].rstrip("/")
+    return url
+
+
+def _supabase_configured():
+    return bool(_supabase_project_url() and SUPABASE_SERVICE_KEY)
+
+
+def _supabase_request(method, path, payload=None, prefer="", timeout=45):
+    base_url = _supabase_project_url()
+    if not base_url or not SUPABASE_SERVICE_KEY:
+        raise RuntimeError("SUPABASE_URL or SUPABASE_SERVICE_KEY is not configured")
+    url = base_url + "/rest/v1" + path
+    body = None
+    headers = {
+        "Accept": "application/json",
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
+        "User-Agent": DEFAULT_UA,
+    }
+    if payload is not None:
+        body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    if prefer:
+        headers["Prefer"] = prefer
+    try:
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            text = resp.read().decode("utf-8", "replace")
+            return json.loads(text) if text else None
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:800]
+        raise RuntimeError("Supabase %s %s failed with HTTP %s: %s" % (method, path, exc.code, detail))
+
+
+def _supabase_timestamp(value, fallback_now=False):
+    epoch = _publish_epoch(value)
+    if epoch is not None:
+        return datetime.datetime.fromtimestamp(epoch, BEIJING_TZ).isoformat(timespec="seconds")
+    if fallback_now:
+        return datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds")
+    return None
+
+
+def _supabase_upsert(table, rows, on_conflict):
+    clean_rows = [row for row in (rows or []) if isinstance(row, dict) and row]
+    if not clean_rows:
+        return 0
+    path = "/" + urllib.parse.quote(table, safe="")
+    if on_conflict:
+        path += "?on_conflict=" + urllib.parse.quote(on_conflict, safe=",")
+    prefer = "resolution=merge-duplicates,return=minimal"
+    written = 0
+    for index in range(0, len(clean_rows), SUPABASE_BATCH_SIZE):
+        batch = clean_rows[index:index + SUPABASE_BATCH_SIZE]
+        _supabase_request("POST", path, batch, prefer=prefer)
+        written += len(batch)
+    return written
+
+
+def _summary_account(row):
+    account = _to_text(row.get("账号") or row.get("Account / 账号"), 100).strip().lstrip("@")
+    return account
+
+
+def _supabase_account_rows(summary_rows, generated_at):
+    rows = {}
+    for row in summary_rows or []:
+        if not isinstance(row, dict):
+            continue
+        account = _summary_account(row)
+        if not account:
+            continue
+        rows[account.lower()] = {
+            "account": account,
+            "nickname": _to_text(row.get("昵称"), 160),
+            "avatar": _to_text(row.get("头像"), 500),
+            "profile_url": _to_text(row.get("主页链接"), 500),
+            "last_seen_at": generated_at,
+        }
+    return list(rows.values())
+
+
+def _supabase_account_snapshot_rows(run_id, summary_rows):
+    rows = []
+    for row in summary_rows or []:
+        if not isinstance(row, dict):
+            continue
+        account = _summary_account(row)
+        if not account:
+            continue
+        rows.append({
+            "run_id": run_id,
+            "account": account,
+            "followers": _to_int(row.get("粉丝")),
+            "hearts": _to_int(row.get("点赞")),
+            "video_count": _to_int(row.get("总集数")),
+            "drama_count": _to_int(row.get("短剧数")),
+            "total_views": _to_int(row.get("累计观看")),
+            "top_drama": _to_text(row.get("最高观看短剧"), 220),
+            "top_drama_views": _to_int(row.get("最高观看")),
+            "raw": row,
+        })
+    return rows
+
+
+def _supabase_drama_key(row):
+    account = _summary_account(row)
+    if not account:
+        return ""
+    drama_id = _clean_drama_id(row.get("Drama ID / 短剧ID"))
+    if drama_id:
+        return "%s|id:%s" % (account.lower(), drama_id)
+    title = _to_text(
+        row.get("English Title / 英文剧名") or row.get("短剧名") or row.get("Chinese Title / 中文剧名"),
+        220,
+    )
+    if not title:
+        return ""
+    stable = "%s|%s|%s" % (
+        account.lower(),
+        _title_key(title) or title.lower(),
+        _to_text(row.get("Rank in Account / 账号内排序"), 30),
+    )
+    return "%s|auto:%s" % (account.lower(), uuid.uuid5(uuid.NAMESPACE_URL, stable).hex[:16])
+
+
+def _supabase_drama_rows(drama_rows, generated_at):
+    rows = {}
+    for row in drama_rows or []:
+        if not isinstance(row, dict):
+            continue
+        account = _summary_account(row)
+        drama_key = _supabase_drama_key(row)
+        if not account or not drama_key:
+            continue
+        english_themes = _to_text(row.get("English Themes / 英文题材"), 500)
+        chinese_themes = _to_text(row.get("Chinese Themes / 中文题材"), 500)
+        rows[drama_key] = {
+            "drama_key": drama_key,
+            "account": account,
+            "drama_id": _clean_drama_id(row.get("Drama ID / 短剧ID")),
+            "english_title": _to_text(row.get("English Title / 英文剧名") or row.get("短剧名"), 300),
+            "chinese_title": _to_text(row.get("Chinese Title / 中文剧名"), 300),
+            "themes": " / ".join(part for part in (english_themes, chinese_themes) if part),
+            "last_seen_at": generated_at,
+        }
+    return list(rows.values())
+
+
+def _supabase_drama_snapshot_rows(run_id, drama_rows):
+    rows = []
+    for row in drama_rows or []:
+        if not isinstance(row, dict):
+            continue
+        account = _summary_account(row)
+        drama_key = _supabase_drama_key(row)
+        if not account or not drama_key:
+            continue
+        rows.append({
+            "run_id": run_id,
+            "drama_key": drama_key,
+            "account": account,
+            "views": _to_int(row.get("Views / 观看数") or row.get("累计观看")),
+            "episodes": _to_int(row.get("Episodes / 集数") or row.get("集数")),
+            "publish_time": _supabase_timestamp(row.get("Publish Time / 发布时间")),
+            "raw": row,
+        })
+    return rows
+
+
+def _supabase_insert_report_run(payload):
+    row = {
+        "generated_at": _supabase_timestamp(payload.get("generated_at"), fallback_now=True),
+        "source": "render",
+        "accounts_count": _to_int(payload.get("accounts")),
+        "dramas_count": _to_int(payload.get("dramas")),
+        "raw": payload,
+    }
+    response = _supabase_request("POST", "/report_runs?select=id", row, prefer="return=representation")
+    if isinstance(response, list) and response:
+        return _to_int(response[0].get("id"))
+    if isinstance(response, dict):
+        return _to_int(response.get("id"))
+    return 0
+
+
+def _save_report_to_supabase(payload):
+    status = {
+        "enabled": bool(SUPABASE_ENABLED),
+        "configured": _supabase_configured(),
+        "ok": False,
+    }
+    if not SUPABASE_ENABLED:
+        status["ok"] = True
+        status["skipped"] = "SUPABASE_ENABLED is off"
+        return status
+    if not _supabase_configured():
+        status["error"] = "SUPABASE_URL or SUPABASE_SERVICE_KEY is not configured"
+        return status
+    try:
+        summary_rows = payload.get("summary") if isinstance(payload, dict) else []
+        drama_rows = payload.get("dramas_detail") if isinstance(payload, dict) else []
+        if not isinstance(summary_rows, list):
+            summary_rows = []
+        if not isinstance(drama_rows, list):
+            drama_rows = []
+        generated_at = _supabase_timestamp(payload.get("generated_at"), fallback_now=True)
+        run_id = _supabase_insert_report_run(payload)
+        if not run_id:
+            raise RuntimeError("Supabase did not return report_runs.id")
+        account_rows = _supabase_account_rows(summary_rows, generated_at)
+        account_snapshot_rows = _supabase_account_snapshot_rows(run_id, summary_rows)
+        drama_table_rows = _supabase_drama_rows(drama_rows, generated_at)
+        drama_snapshot_rows = _supabase_drama_snapshot_rows(run_id, drama_rows)
+        accounts_written = _supabase_upsert("accounts", account_rows, "account")
+        account_snapshots_written = _supabase_upsert("account_snapshots", account_snapshot_rows, "run_id,account")
+        dramas_written = _supabase_upsert("dramas", drama_table_rows, "drama_key")
+        drama_snapshots_written = _supabase_upsert("drama_snapshots", drama_snapshot_rows, "run_id,drama_key")
+        status.update({
+            "ok": True,
+            "run_id": run_id,
+            "accounts": accounts_written,
+            "account_snapshots": account_snapshots_written,
+            "dramas": dramas_written,
+            "drama_snapshots": drama_snapshots_written,
+        })
+    except Exception as exc:
+        status["error"] = str(exc)
+    return status
+
+
 def _write_report_bundle(rows, drama_rows, errors):
-    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    now = datetime.datetime.now(BEIJING_TZ)
+    stamp = now.strftime("%Y%m%d-%H%M%S")
     summary_name = "scheduled_report_%s.csv" % stamp
     drama_name = "scheduled_dramas_%s.csv" % stamp
     json_name = "scheduled_report_%s.json" % stamp
     summary_csv = _csv_blob(SUMMARY_COLUMNS, rows)
     drama_csv = _csv_blob(DRAMA_COLUMNS, drama_rows)
     payload = {
-        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "generated_at": now.isoformat(timespec="seconds"),
         "accounts": len(rows),
         "dramas": len(drama_rows),
         "errors": errors,
@@ -2582,7 +2822,7 @@ def _write_report_bundle(rows, drama_rows, errors):
         "latest_summary": "latest_report.csv",
         "latest_dramas": "latest_dramas.csv",
         "latest_json": "latest_report.json",
-    }
+    }, payload
 
 
 def _run_scheduled_job(accounts):
@@ -2598,7 +2838,8 @@ def _run_scheduled_job(accounts):
         _save_drama_detail_cache()
     except Exception:
         pass
-    files = _write_report_bundle(rows, drama_rows, errors)
+    files, report_payload = _write_report_bundle(rows, drama_rows, errors)
+    supabase = _save_report_to_supabase(report_payload)
     try:
         episode_history = _save_scheduled_episode_history(drama_rows)
     except Exception as exc:
@@ -2610,12 +2851,13 @@ def _run_scheduled_job(accounts):
         }
     return {
         "ok": True,
-        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "generated_at": report_payload.get("generated_at") or datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
         "accounts_requested": len(accounts),
         "accounts_ok": len(rows),
         "accounts_failed": len(errors),
         "dramas": len(drama_rows),
         "files": files,
+        "supabase": supabase,
         "episode_history": episode_history,
         "errors": errors,
     }
