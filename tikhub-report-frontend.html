@@ -453,8 +453,10 @@
   body.public-mode #settingsCard{display:none!important}
   body:not(.admin-mode) .admin-only{display:none!important}
   .backend-admin{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px;align-items:end;margin-bottom:12px}
-  .backend-admin .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
-  .backend-admin .tf:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .report-cloud-admin{display:grid;grid-template-columns:minmax(240px,1fr) auto auto auto minmax(180px,1fr);gap:10px;align-items:end;margin:0 0 14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(180deg,#fff,#fbfcff)}
+  .backend-admin .tf,.report-cloud-admin .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
+  .backend-admin .tf:focus,.report-cloud-admin .tf:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .report-cloud-status{font-size:12px;color:var(--ink-faint);align-self:center;min-width:0}
   .report-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .history-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
   .history-list{margin-top:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
@@ -503,6 +505,7 @@
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:500;opacity:0;pointer-events:none;transition:.22s;z-index:99}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
+  @media (max-width:900px){ .report-cloud-admin{grid-template-columns:1fr;align-items:stretch}.report-cloud-status{align-self:auto} }
   @media (max-width:680px){ .wrap{padding:14px}.topbar{padding:12px 14px}.tagline{display:none}.history-popover{right:-2px;width:calc(100vw - 24px)}.history-item{align-items:flex-start;flex-direction:column}.history-links{justify-content:flex-start} }
   @media (prefers-reduced-motion:reduce){ *{animation-duration:.001ms!important;transition-duration:.001ms!important} }
 </style>
@@ -513,7 +516,7 @@
   <div class="brand">
     <div class="logo">▸</div>
     <div>
-      <div class="wordmark">TikHub<span>短剧报表</span> <span style="font:600 11px ui-monospace,monospace;color:#16a34a;background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:1px 6px;vertical-align:middle">build: App&nbsp;V3 · appv3-6</span></div>
+      <div class="wordmark">TikHub<span>短剧报表</span> <span style="font:600 11px ui-monospace,monospace;color:#16a34a;background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:1px 6px;vertical-align:middle">build: App&nbsp;V3 · appv3-7</span></div>
       <div class="tagline">批量抓账号 → 一键出表</div>
     </div>
   </div>
@@ -529,7 +532,7 @@
                 <label class="fl" for="backendSecret">任务密码 <span class="hint">— SCHEDULE_SECRET</span></label>
                 <input class="tf" id="backendSecret" type="password" value="" autocomplete="off" spellcheck="false" placeholder="输入任务密码后可立即抓取" />
               </div>
-              <button class="mini-btn" id="backendRunBtn" type="button">立即抓取一次</button>
+              <button class="mini-btn" id="backendRunBtn" type="button">云端手动抓取</button>
             </div>
             <div class="history-actions">
               <button class="mini-btn" id="backendLoadBtn" type="button">刷新最新结果</button>
@@ -706,6 +709,16 @@ shortdramatime"></textarea>
     <div class="card" id="resultCard">
     <div class="card-head"><h2>报表</h2><div class="report-head-actions"><button class="mini-btn" id="reportBackTopBtn" type="button">返回监控账号</button></div></div>
     <div class="card-body">
+      <div class="report-cloud-admin admin-only">
+        <div>
+          <label class="fl" for="backendSecretInline">任务密码 <span class="hint">— SCHEDULE_SECRET</span></label>
+          <input class="tf" id="backendSecretInline" type="password" value="" autocomplete="off" spellcheck="false" placeholder="填任务密码后可手动跑云端监控" />
+        </div>
+        <button class="mini-btn" id="reportBackendRunBtn" type="button">云端手动抓取</button>
+        <button class="mini-btn" id="reportBackendLoadBtn" type="button">刷新最新结果</button>
+        <button class="mini-btn" id="reportBackendHistoryBtn" type="button">刷新历史记录</button>
+        <span class="report-cloud-status" id="backendStatusInline">等待手动抓取</span>
+      </div>
       <div class="result-top">
         <div class="result-sum" id="resultSum"></div>
         <div class="exports">
@@ -3016,21 +3029,28 @@ function backendBase(){
   return location.hostname==="paqu-tikhub-proxy.onrender.com" ? "" : "https://paqu-tikhub-proxy.onrender.com";
 }
 function backendSecret(){
-  const el=$("backendSecret");
-  return (el&&el.value?el.value.trim():"") || store.get("thr_backend_secret") || "";
+  for(const id of ["backendSecretInline","backendSecret"]){
+    const el=$(id);
+    if(el&&el.value&&el.value.trim())return el.value.trim();
+  }
+  return store.get("thr_backend_secret") || "";
 }
 function syncBackendSecretInputs(value){
   value=String(value||"").trim();
-  const backend=$("backendSecret");
-  if(backend&&backend.value!==value)backend.value=value;
+  ["backendSecret","backendSecretInline"].forEach(id=>{
+    const el=$(id);
+    if(el&&el.value!==value)el.value=value;
+  });
   if(value)store.set("thr_backend_secret",value);
   else store.del("thr_backend_secret");
 }
 function backendSetStatus(text, ok){
-  const el=$("backendStatus");
-  if(!el)return;
-  el.textContent=text;
-  el.style.color=ok?"var(--ok)":"var(--ink-soft)";
+  ["backendStatus","backendStatusInline"].forEach(id=>{
+    const el=$(id);
+    if(!el)return;
+    el.textContent=text;
+    el.style.color=ok?"var(--ok)":"var(--ink-soft)";
+  });
 }
 function backendUrl(path, params){
   params=Object.assign({}, params||{});
@@ -3909,13 +3929,13 @@ function init(){
   $("accountsInput").addEventListener("input",updateAcctCount);
   $("accountsInput").addEventListener("input",()=>store.set("thr_accounts",$("accountsInput").value));
   if(store.get("thr_accounts")){$("accountsInput").value=store.get("thr_accounts");updateAcctCount();}
-  ["backendSecret"].forEach(id=>{
+  ["backendSecret","backendSecretInline"].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener("input",()=>syncBackendSecretInputs(el.value));
   });
-  $("backendRunBtn").addEventListener("click",()=>runBackendJob(true));
-  $("backendLoadBtn").addEventListener("click",()=>loadBackendLatest().catch(e=>{backendSetStatus("出错:"+(e.message||e));toast("出错:"+(e.message||e));}));
-  $("backendReportsBtn").addEventListener("click",openBackendReports);
+  ["backendRunBtn","reportBackendRunBtn"].forEach(id=>{const el=$(id);if(el)el.addEventListener("click",()=>runBackendJob(true));});
+  ["backendLoadBtn","reportBackendLoadBtn"].forEach(id=>{const el=$(id);if(el)el.addEventListener("click",()=>loadBackendLatest().catch(e=>{backendSetStatus("出错:"+(e.message||e));toast("出错:"+(e.message||e));}));});
+  ["backendReportsBtn","reportBackendHistoryBtn"].forEach(id=>{const el=$(id);if(el)el.addEventListener("click",openBackendReports);});
   const historyMenu=$("historyMenu");
   const historyMenuBtn=$("historyMenuBtn");
   if(historyMenu&&historyMenuBtn){
