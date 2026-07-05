@@ -161,6 +161,14 @@ DISCOVERY_SEARCH_ENDPOINTS = {
     "app_v3": "/api/v1/tiktok/app/v3/fetch_video_search_result",
     "web": "/api/v1/tiktok/web/fetch_search_video",
 }
+DISCOVERY_USER_SEARCH_ENDPOINT = "/api/v1/tiktok/app/v3/fetch_user_search_result"
+DISCOVERY_TOPIC_SEARCH_PHRASES = {
+    "short drama", "shortdrama", "mini drama", "minidrama", "micro drama", "microdrama",
+    "vertical drama", "verticaldrama", "vertical series", "drama series", "drama clips",
+    "mobile drama", "vertical minidrama", "short drama episode", "mini drama episode",
+    "billionaire drama", "ceo drama", "revenge drama", "romance drama", "werewolf drama",
+    "reelshort", "dramabox", "shortmax", "goodshort", "netshort", "yuzu drama", "pinedrama", "duanju",
+}
 PLAY_KEYS = ("play_count", "playCount", "play_cnt")
 DESC_KEYS = ("desc", "title", "content", "aweme_title", "text")
 ID_KEYS = ("aweme_id", "awemeId", "id", "item_id", "itemId")
@@ -300,7 +308,7 @@ def _send_tikhub_get(path, params, label, timeout=90, retries=None):
     raise last_error or TikHubError("%s request failed" % label)
 
 
-def _send_tiktok_get(path, params, label, referer_uid=None):
+def _send_tiktok_get(path, params, label, referer_uid=None, timeout=90, retries=None):
     query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
     url = TIKTOK_HOST + path + ("?" + query if query else "")
     headers = {
@@ -310,22 +318,23 @@ def _send_tiktok_get(path, params, label, referer_uid=None):
         "User-Agent": DEFAULT_UA,
     }
     last_error = None
-    for attempt in range(1, SCHEDULE_RETRIES + 1):
+    attempts = SCHEDULE_RETRIES if retries is None else max(1, int(retries))
+    for attempt in range(1, attempts + 1):
         try:
             req = urllib.request.Request(url, headers=headers, method="GET")
-            with urllib.request.urlopen(req, timeout=90) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 text = resp.read().decode("utf-8", "replace")
                 return json.loads(text) if text else None
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")[:500]
             last_error = TikHubError("%s failed with HTTP %s: %s" % (label, exc.code, body), exc.code)
-            if exc.code in (429, 500, 502, 503, 504) and attempt < SCHEDULE_RETRIES:
+            if exc.code in (429, 500, 502, 503, 504) and attempt < attempts:
                 time.sleep(max(0.5, SCHEDULE_DELAY_MS / 1000.0) * attempt)
                 continue
             raise last_error
         except Exception as exc:
             last_error = TikHubError("%s request failed: %s" % (label, exc))
-            if attempt < SCHEDULE_RETRIES:
+            if attempt < attempts:
                 time.sleep(max(0.5, SCHEDULE_DELAY_MS / 1000.0) * attempt)
                 continue
             raise last_error
@@ -1432,6 +1441,199 @@ def _author_from_video(video):
     }
 
 
+def _normalized_discovery_phrase(text):
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+def _looks_like_account_query(text):
+    value = _to_text(text, 180).strip()
+    if not value or re.search(r"[\n,;锛岋紱]", value):
+        return False
+    lower = value.lower()
+    if "tiktok.com/@" in lower or value.startswith("@"):
+        return True
+    phrase = _normalized_discovery_phrase(value)
+    if not phrase or phrase in DISCOVERY_TOPIC_SEARCH_PHRASES:
+        return False
+    if re.fullmatch(r"[A-Za-z0-9._]{2,80}", value):
+        return True
+    words = phrase.split()
+    return 1 < len(words) <= 4 and len(phrase) <= 80
+
+
+def _account_lookup_candidates(keyword):
+    value = _to_text(keyword, 220).strip()
+    if not value:
+        return []
+    candidates = []
+
+    def add(uid):
+        uid = str(uid or "").strip().strip("/").split("?", 1)[0].lstrip("@")
+        if re.fullmatch(r"[A-Za-z0-9._]{2,80}", uid) and uid.lower() not in {x.lower() for x in candidates}:
+            candidates.append(uid)
+
+    for match in re.finditer(r"(?:https?://)?(?:www\.)?tiktok\.com/@([A-Za-z0-9._-]+)", value, flags=re.I):
+        add(match.group(1))
+    if value.startswith("@"):
+        add(value)
+    if re.fullmatch(r"[A-Za-z0-9._]{2,80}", value):
+        add(value)
+    words = re.findall(r"[A-Za-z0-9]+", value)
+    if words:
+        lower_words = [part.lower() for part in words]
+        add("".join(lower_words))
+        add("_".join(lower_words))
+        add(".".join(lower_words))
+    return candidates[:8]
+
+
+def _user_container_from_search_item(item):
+    if not isinstance(item, dict):
+        return None
+    for key in ("user_info", "userInfo", "user", "author", "authorInfo", "author_info"):
+        value = item.get(key)
+        if isinstance(value, dict) and (
+            _deep_find(value, AUTHOR_UNIQUE_KEYS) is not None or _deep_find(value, SECUID_KEYS) is not None
+        ):
+            return value
+    if any(key in item for key in AUTHOR_UNIQUE_KEYS) or any(key in item for key in SECUID_KEYS):
+        return item
+    return None
+
+
+def _user_from_search_item(item):
+    user = _user_container_from_search_item(item)
+    if not user:
+        return None
+    account = _to_text(_deep_find(user, AUTHOR_UNIQUE_KEYS), 80).lstrip("@")
+    if not account:
+        account = _extract_account_from_url(item).lstrip("@")
+    if not account:
+        return None
+    stats = {}
+    for source in (item, user):
+        if isinstance(source, dict):
+            for key in ("stats", "statistics", "userStats", "user_stats", "authorStats", "author_stats"):
+                value = source.get(key)
+                if isinstance(value, dict):
+                    stats = value
+                    break
+        if stats:
+            break
+    if not stats:
+        stats = item if isinstance(item, dict) else user
+    return {
+        "account": account,
+        "nickname": _to_text(_deep_find(user, NICK_KEYS), 120) or account,
+        "secuid": _to_text(_deep_find(user, SECUID_KEYS), 180),
+        "avatar": _first_profile_image(item) or _first_profile_image(user),
+        "followers_hint": _to_int(_deep_find(stats, FOLLOWER_KEYS)) or _to_int(_deep_find(item, FOLLOWER_KEYS)),
+        "hearts_hint": _to_int(_deep_find(stats, HEART_KEYS)) or _to_int(_deep_find(item, HEART_KEYS)),
+        "video_count_hint": _to_int(_deep_find(stats, VCOUNT_KEYS)) or _to_int(_deep_find(item, VCOUNT_KEYS)),
+    }
+
+
+def _collect_user_search_items(obj, depth=0):
+    if depth > 9 or obj is None:
+        return []
+    if isinstance(obj, list):
+        out = []
+        for item in obj:
+            out.extend(_collect_user_search_items(item, depth + 1))
+        return out
+    if isinstance(obj, dict):
+        if _user_from_search_item(obj):
+            return [obj]
+        out = []
+        for value in obj.values():
+            out.extend(_collect_user_search_items(value, depth + 1))
+        return out
+    return []
+
+
+def _user_batch_from_search_payload(data, count):
+    users, seen = [], set()
+    for item in _collect_user_search_items(data):
+        user = _user_from_search_item(item)
+        if not user:
+            continue
+        key = user["account"].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        users.append(user)
+        if len(users) >= count:
+            break
+    return users
+
+
+def _fetch_discovery_user_search_page(keyword, count, cursor, started=None):
+    if _discovery_runtime_exceeded(started):
+        raise TikHubError("discovery runtime limit reached")
+    data = _send_tikhub_get(
+        DISCOVERY_USER_SEARCH_ENDPOINT,
+        {
+            "keyword": keyword,
+            "offset": str(cursor or "0"),
+            "count": str(count),
+            "source": "search_history",
+        },
+        "TikHub documented user search endpoint",
+        timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS,
+        retries=1,
+    )
+    batch = _user_batch_from_search_payload(data, count)
+    if batch:
+        return data, batch, DISCOVERY_USER_SEARCH_ENDPOINT
+    raise TikHubError("TikHub documented user search endpoint returned no parseable accounts")
+
+
+def _discover_search_users(keyword, max_items, started):
+    items, endpoint, errors = [], DISCOVERY_USER_SEARCH_ENDPOINT, []
+    cursor = "0"
+    try:
+        if SERVER_API_KEY:
+            data, batch, endpoint = _fetch_discovery_user_search_page(keyword, min(30, max_items), cursor, started)
+            items.extend(batch)
+        else:
+            raise TikHubError("TikHub user search skipped: TIKHUB_API_KEY is not configured")
+    except TikHubError as exc:
+        errors.append(_discovery_error(
+            "api",
+            "tikhub:user-search",
+            exc,
+            getattr(exc, "status", None),
+            "如果搜的是账号昵称，建议粘贴 TikTok 主页链接或 @uniqueId。",
+        ))
+    return items[:max_items], endpoint, errors
+
+
+def _discovery_candidate_from_direct_account(keyword, account):
+    secuid = _resolve_secuid(account, timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS, retries=1)
+    if not secuid:
+        return None
+    profile = _get_profile(account, secuid, timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS, retries=1)
+    if not any((profile.get("followers"), profile.get("hearts"), profile.get("videoCount"), profile.get("avatar"))):
+        return None
+    return {
+        "account": account,
+        "nickname": profile.get("nickname") or account,
+        "avatar": profile.get("avatar") or "",
+        "secuid": secuid,
+        "followers_hint": _to_int(profile.get("followers")),
+        "hearts_hint": _to_int(profile.get("hearts")),
+        "video_count_hint": _to_int(profile.get("videoCount")),
+        "sample_video_count": 0,
+        "sample_views": 0,
+        "sample_max_views": 0,
+        "sample_video_id": "",
+        "sample_video_link": "",
+        "sample_desc": "",
+        "source_keywords": [keyword],
+        "source_endpoint": "direct-profile",
+    }
+
+
 def _discover_search_videos(keyword, max_items, started):
     items, seen, endpoint, errors = [], set(), "", []
     cursor = "0"
@@ -1530,7 +1732,71 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
                 hint="已找到足够原始候选，优先补全播放量较高的账号以避免请求超时。",
             ))
             break
-        videos, endpoint, search_errors = _discover_search_videos(keyword, max_videos_per_keyword, started)
+        account_query = _looks_like_account_query(keyword)
+        if account_query:
+            before_accounts = len(candidates)
+            for direct_account in _account_lookup_candidates(keyword):
+                key = direct_account.lower()
+                if key in candidates:
+                    continue
+                try:
+                    direct_item = _discovery_candidate_from_direct_account(keyword, direct_account)
+                except Exception as exc:
+                    errors.append(_discovery_error(
+                        "account_lookup",
+                        "tikhub:profile",
+                        exc,
+                        getattr(exc, "status", None),
+                        "账号直查失败；会继续尝试 TikHub 用户搜索。",
+                    ) | {"keyword": keyword, "account": direct_account})
+                    continue
+                if direct_item:
+                    candidates[key] = direct_item
+            users, user_endpoint, user_errors = _discover_search_users(keyword, min(max_accounts, 10), started)
+            for err in user_errors:
+                if isinstance(err, dict):
+                    item = dict(err)
+                    item["keyword"] = keyword
+                    errors.append(item)
+            for user in users:
+                account = user["account"]
+                key = account.lower()
+                item = candidates.setdefault(key, {
+                    "account": account,
+                    "nickname": user.get("nickname") or account,
+                    "avatar": user.get("avatar") or "",
+                    "secuid": user.get("secuid") or "",
+                    "followers_hint": user.get("followers_hint") or 0,
+                    "hearts_hint": user.get("hearts_hint") or 0,
+                    "video_count_hint": user.get("video_count_hint") or 0,
+                    "sample_video_count": 0,
+                    "sample_views": 0,
+                    "sample_max_views": 0,
+                    "sample_video_id": "",
+                    "sample_video_link": "",
+                    "sample_desc": "",
+                    "source_keywords": [],
+                    "source_endpoint": user_endpoint,
+                })
+                if keyword not in item["source_keywords"]:
+                    item["source_keywords"].append(keyword)
+                if user.get("secuid") and not item.get("secuid"):
+                    item["secuid"] = user["secuid"]
+                if user.get("avatar") and not item.get("avatar"):
+                    item["avatar"] = user["avatar"]
+                item["followers_hint"] = max(_to_int(item.get("followers_hint")), _to_int(user.get("followers_hint")))
+                item["hearts_hint"] = max(_to_int(item.get("hearts_hint")), _to_int(user.get("hearts_hint")))
+                item["video_count_hint"] = max(_to_int(item.get("video_count_hint")), _to_int(user.get("video_count_hint")))
+            if len(candidates) > before_accounts:
+                continue
+            errors.append(_discovery_error(
+                "account_lookup",
+                "direct-or-user-search",
+                "No account candidates matched this account-like query.",
+                hint="账号昵称不一定等于 @uniqueId；请粘贴 TikTok 主页链接或 @账号ID。",
+            ) | {"keyword": keyword})
+        video_limit = min(max_videos_per_keyword, 12) if account_query else max_videos_per_keyword
+        videos, endpoint, search_errors = _discover_search_videos(keyword, video_limit, started)
         for err in search_errors:
             if isinstance(err, dict):
                 item = dict(err)
@@ -1593,11 +1859,19 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
         try:
             if SERVER_API_KEY:
                 if not secuid:
-                    secuid = _resolve_secuid(account)
+                    secuid = _resolve_secuid(account, timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS, retries=1)
                 if secuid:
-                    profile = _get_profile(account, secuid)
+                    profile = _get_profile(account, secuid, timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS, retries=1)
                     try:
-                        dramas = _get_tiktok_drama_library(secuid, account)
+                        dramas = _get_tiktok_drama_library(
+                            secuid,
+                            account,
+                            started=started,
+                            max_pages=3,
+                            timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 8,
+                            retries=1,
+                            include_episode_publish_time=False,
+                        )
                     except TikHubError:
                         dramas = []
         except Exception as exc:
@@ -1612,6 +1886,9 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
         total_views = sum(_to_int(drama.get("views")) for drama in dramas) or _to_int(item.get("sample_views"))
         top_drama = max(dramas, key=lambda drama: _to_int(drama.get("views")), default={})
         followers = _to_int(profile.get("followers")) or _to_int(item.get("followers_hint"))
+        sample_max_views = max(_to_int(item.get("sample_max_views")), _to_int(top_drama.get("views")))
+        sample_views = _to_int(item.get("sample_views")) or total_views
+        profile_url = "https://www.tiktok.com/@" + account
         drama_count = len(dramas)
         if followers < min_followers or drama_count < min_dramas:
             continue
@@ -1627,14 +1904,14 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
             "top_drama": top_drama.get("english_title") or top_drama.get("name") or "",
             "top_drama_views": _to_int(top_drama.get("views")),
             "sample_video_count": _to_int(item.get("sample_video_count")),
-            "sample_views": _to_int(item.get("sample_views")),
-            "sample_max_views": _to_int(item.get("sample_max_views")),
+            "sample_views": sample_views,
+            "sample_max_views": sample_max_views,
             "sample_video_id": item.get("sample_video_id") or "",
-            "sample_video_link": item.get("sample_video_link") or "",
+            "sample_video_link": item.get("sample_video_link") or profile_url,
             "sample_desc": item.get("sample_desc") or "",
             "source_keywords": item.get("source_keywords") or [],
             "source_endpoint": item.get("source_endpoint") or "",
-            "profile_url": "https://www.tiktok.com/@" + account,
+            "profile_url": profile_url,
             "already_monitored": account.lower() in monitored,
             "enrich_error": enrich_error,
         })
@@ -1655,9 +1932,15 @@ def _discover_accounts(keywords, max_accounts, min_followers, min_dramas, max_vi
     return _write_discovered_accounts(payload)
 
 
-def _resolve_secuid(uid):
+def _resolve_secuid(uid, timeout=90, retries=None):
     try:
-        data = _send_tikhub_get(DEFAULT_ENDPOINTS["secuid"], {"username": uid, "unique_id": uid}, "secUid endpoint")
+        data = _send_tikhub_get(
+            DEFAULT_ENDPOINTS["secuid"],
+            {"username": uid, "unique_id": uid},
+            "secUid endpoint",
+            timeout=timeout,
+            retries=retries,
+        )
         found = _deep_find(data, SECUID_KEYS)
         return "" if found is None else str(found)
     except TikHubError as exc:
@@ -1666,14 +1949,14 @@ def _resolve_secuid(uid):
     return ""
 
 
-def _get_profile(uid, secuid):
+def _get_profile(uid, secuid, timeout=90, retries=None):
     profile = {"nickname": uid, "followers": 0, "hearts": 0, "videoCount": 0, "avatar": ""}
     try:
         data = _send_tikhub_get(DEFAULT_ENDPOINTS["profile"], {
             "sec_user_id": secuid,
             "secUid": secuid,
             "unique_id": uid,
-        }, "profile endpoint")
+        }, "profile endpoint", timeout=timeout, retries=retries)
     except TikHubError as exc:
         if exc.status in (401, 402, 403):
             raise
@@ -2010,14 +2293,18 @@ def _get_drama_episode_link(drama_id, uid, started=None, target="play"):
     return fallback
 
 
-def _get_tiktok_drama_library(secuid, uid):
+def _get_tiktok_drama_library(secuid, uid, started=None, max_pages=None, timeout=90, retries=None, include_episode_publish_time=True):
     if not secuid:
         return []
-    started = time.time()
+    local_started = time.time()
     dramas, seen = [], set()
     cursor, prev, stall = "0", None, 0
-    for _page in range(1, SCHEDULE_MAX_PAGES + 1):
-        if _runtime_exceeded(started):
+    page_limit = max_pages or SCHEDULE_MAX_PAGES
+    for _page in range(1, page_limit + 1):
+        if started is not None:
+            if _discovery_runtime_exceeded(started):
+                break
+        elif _runtime_exceeded(local_started):
             break
         data = _send_tiktok_get("/api/drama/user/drama_list/", {
             "secUid": secuid,
@@ -2026,7 +2313,7 @@ def _get_tiktok_drama_library(secuid, uid):
             "region": TIKTOK_REGION,
             "count": str(SCHEDULE_DRAMA_PAGE_SIZE),
             "cursor": str(cursor),
-        }, "TikTok drama library endpoint", uid)
+        }, "TikTok drama library endpoint", uid, timeout=timeout, retries=retries)
         if not isinstance(data, dict):
             break
         status = data.get("statusCode", data.get("status_code"))
@@ -2076,8 +2363,8 @@ def _get_tiktok_drama_library(secuid, uid):
                 "chinese_description": chinese_desc,
                 "description_truncated": "是 / Yes" if len(english_desc) >= 600 or len(chinese_desc) >= 600 else "否 / No",
             })
-            if not detail.get("publish_time") and drama_key:
-                detail["publish_time"] = _get_drama_first_episode_publish_time(drama_key, uid, started)
+            if include_episode_publish_time and not detail.get("publish_time") and drama_key:
+                detail["publish_time"] = _get_drama_first_episode_publish_time(drama_key, uid, started or local_started)
             _remember_drama_detail(uid, drama_key, name, detail)
             dramas.append({
                 "name": (_clean_title(name)[:80].strip() or name[:80] or key),
