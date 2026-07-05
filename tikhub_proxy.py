@@ -138,6 +138,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 SUPABASE_ENABLED = _env_bool("SUPABASE_ENABLED", True)
 SUPABASE_BATCH_SIZE = _env_int("SUPABASE_BATCH_SIZE", 100, 1, 500)
+SUPABASE_USER_AGENT = "paqu-tikhub-proxy/1.0"
 
 DEFAULT_ENDPOINTS = {
     "profile": "/api/v1/tiktok/app/v3/handler_user_profile",
@@ -2569,6 +2570,11 @@ def _supabase_configured():
     return bool(_supabase_project_url() and SUPABASE_SERVICE_KEY)
 
 
+def _supabase_uses_new_api_key():
+    key = SUPABASE_SERVICE_KEY.strip()
+    return key.startswith("sb_secret_") or key.startswith("sb_publishable_")
+
+
 def _supabase_request(method, path, payload=None, prefer="", timeout=45):
     base_url = _supabase_project_url()
     if not base_url or not SUPABASE_SERVICE_KEY:
@@ -2578,9 +2584,10 @@ def _supabase_request(method, path, payload=None, prefer="", timeout=45):
     headers = {
         "Accept": "application/json",
         "apikey": SUPABASE_SERVICE_KEY,
-        "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
-        "User-Agent": DEFAULT_UA,
+        "User-Agent": SUPABASE_USER_AGENT,
     }
+    if not _supabase_uses_new_api_key():
+        headers["Authorization"] = "Bearer " + SUPABASE_SERVICE_KEY
     if payload is not None:
         body = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
         headers["Content-Type"] = "application/json"

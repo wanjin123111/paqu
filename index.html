@@ -516,7 +516,7 @@
   <div class="brand">
     <div class="logo">▸</div>
     <div>
-      <div class="wordmark">TikHub<span>短剧报表</span> <span style="font:600 11px ui-monospace,monospace;color:#16a34a;background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:1px 6px;vertical-align:middle">build: App&nbsp;V3 · appv3-7</span></div>
+      <div class="wordmark">TikHub<span>短剧报表</span> <span style="font:600 11px ui-monospace,monospace;color:#16a34a;background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:1px 6px;vertical-align:middle">build: App&nbsp;V3 · appv3-8</span></div>
       <div class="tagline">批量抓账号 → 一键出表</div>
     </div>
   </div>
@@ -3585,6 +3585,28 @@ async function refreshPublicDashboardQuiet(){
     window.__quietRefresh=false;
   }
 }
+function describeSupabaseStatus(supabase){
+  if(!supabase)return "";
+  if(supabase.ok){
+    if(supabase.skipped)return "Supabase skipped: "+supabase.skipped;
+    const parts=[];
+    if(supabase.run_id)parts.push("run_id "+supabase.run_id);
+    if(supabase.accounts!==undefined)parts.push("accounts "+supabase.accounts);
+    if(supabase.account_snapshots!==undefined)parts.push("account_snapshots "+supabase.account_snapshots);
+    if(supabase.dramas!==undefined)parts.push("dramas "+supabase.dramas);
+    if(supabase.drama_snapshots!==undefined)parts.push("drama_snapshots "+supabase.drama_snapshots);
+    return "Supabase saved"+(parts.length?": "+parts.join(", "):"");
+  }
+  if(supabase.configured===false)return "Supabase not configured: "+(supabase.error||"check SUPABASE_URL and SUPABASE_SERVICE_KEY");
+  return "Supabase save failed: "+(supabase.error||JSON.stringify(supabase));
+}
+function logSupabaseResult(result){
+  const msg=describeSupabaseStatus(result&&result.supabase);
+  if(!msg)return "";
+  const ok=!!(result&&result.supabase&&result.supabase.ok);
+  log(msg, ok?"c-ok":"c-err");
+  return msg;
+}
 async function pollBackendJob(){
   for(let i=0;i<180;i++){
     const data=await backendFetchJson("/schedule-status",{}, {requireSecret:true});
@@ -3598,8 +3620,12 @@ async function pollBackendJob(){
     }
     if(job.error)throw new Error(job.error);
     if(job.result){
+      const supabaseMsg=logSupabaseResult(job.result);
+      const supabaseOk=!!(job.result.supabase&&job.result.supabase.ok);
       backendSetStatus("后端抓取完成,正在加载结果…", true);
-      return loadBackendLatest();
+      const latest=await loadBackendLatest();
+      if(supabaseMsg)backendSetStatus(supabaseMsg+" · result loaded", supabaseOk);
+      return latest;
     }
     backendSetStatus("后端空闲");
     return null;
