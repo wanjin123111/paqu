@@ -181,6 +181,7 @@
   .discover-account{display:flex;align-items:center;gap:9px;min-width:170px}
   .discover-avatar{width:34px;height:34px;border-radius:50%;object-fit:cover;background:#eef2ff;border:1px solid var(--line)}
   .discover-action{display:flex;align-items:center;gap:8px}
+  .discover-action .mini-btn{white-space:nowrap}
   .discover-badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;background:#f0fdf4;color:#15803d;font-size:11px}
   #resultCard.detail-view .result-viewbar{display:grid;grid-template-columns:auto minmax(280px,1fr) minmax(500px,auto);align-items:center;gap:10px 12px}
   #resultCard.detail-view #detailSearchBox{grid-column:2;grid-row:1;flex:none;min-width:0}
@@ -194,6 +195,7 @@
   #resultCard.detail-view .detail-count{white-space:nowrap}
   .mini-btn{border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:500;color:var(--ink);cursor:pointer;display:flex;align-items:center;gap:6px}
   .mini-btn:hover{border-color:var(--accent);color:var(--accent)}
+  a.mini-btn{text-decoration:none}
   .mini-btn:disabled{cursor:not-allowed;opacity:.45;border-color:var(--line-strong);color:var(--ink-faint)}
   .table-scroll{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:560px}
   table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
@@ -3244,6 +3246,14 @@ function appendDiscoveryCell(tr,c,row){
     }else td.textContent="候选";
   }else if(c==="操作"){
     td.className="discover-action";
+    const home=document.createElement("a");
+    home.className="mini-btn";
+    home.href=row.profile_url||("https://www.tiktok.com/@"+(row.account||""));
+    home.target="_blank";
+    home.rel="noopener";
+    home.textContent="看主页";
+    home.setAttribute("aria-label","打开 @"+(row.account||"")+" 的 TikTok 主页");
+    td.appendChild(home);
     const btn=document.createElement("button");
     btn.className="mini-btn";
     btn.type="button";
