@@ -140,6 +140,8 @@ SUPABASE_ENABLED = _env_bool("SUPABASE_ENABLED", True)
 SUPABASE_BATCH_SIZE = _env_int("SUPABASE_BATCH_SIZE", 100, 1, 500)
 SUPABASE_SCHEDULE_ACCOUNTS = _env_bool("SUPABASE_SCHEDULE_ACCOUNTS", True)
 SUPABASE_SCHEDULE_ACCOUNT_CACHE_SECONDS = _env_int("SUPABASE_SCHEDULE_ACCOUNT_CACHE_SECONDS", 60, 0, 3600)
+SUPABASE_REPORT_READ = _env_bool("SUPABASE_REPORT_READ", True)
+SUPABASE_REPORT_HISTORY_LIMIT = _env_int("SUPABASE_REPORT_HISTORY_LIMIT", 30, 1, 200)
 SUPABASE_USER_AGENT = "paqu-tikhub-proxy/1.0"
 SUPABASE_SCHEDULE_ACCOUNT_CACHE = {"expires_at": 0, "accounts": [], "error": ""}
 
@@ -2876,6 +2878,81 @@ def _save_report_to_supabase(payload):
     return status
 
 
+def _supabase_report_read_enabled():
+    return bool(SUPABASE_ENABLED and SUPABASE_REPORT_READ and _supabase_configured())
+
+
+def _supabase_report_payload_from_row(row):
+    if not isinstance(row, dict):
+        raise RuntimeError("Supabase report row is invalid")
+    raw = row.get("raw")
+    if not isinstance(raw, dict):
+        raise RuntimeError("Supabase report raw payload is empty")
+    payload = dict(raw)
+    payload.setdefault("generated_at", row.get("generated_at") or row.get("created_at"))
+    payload.setdefault("accounts", _to_int(row.get("accounts_count")))
+    payload.setdefault("dramas", _to_int(row.get("dramas_count")))
+    payload["storage_source"] = "supabase"
+    payload["supabase_run_id"] = row.get("id")
+    return payload
+
+
+def _supabase_latest_report_payload():
+    if not _supabase_report_read_enabled():
+        raise RuntimeError("Supabase report read is not configured")
+    rows = _supabase_request(
+        "GET",
+        "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at,raw&order=generated_at.desc&limit=1",
+        timeout=20,
+    )
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError("Supabase report_runs is empty")
+    return _supabase_report_payload_from_row(rows[0])
+
+
+def _supabase_report_payload_by_id(run_id):
+    if not _supabase_report_read_enabled():
+        raise RuntimeError("Supabase report read is not configured")
+    run_id = _to_int(run_id)
+    if not run_id:
+        raise RuntimeError("missing Supabase report id")
+    rows = _supabase_request(
+        "GET",
+        "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at,raw&id=eq.%s&limit=1" % run_id,
+        timeout=20,
+    )
+    if not isinstance(rows, list) or not rows:
+        raise RuntimeError("Supabase report not found")
+    return _supabase_report_payload_from_row(rows[0])
+
+
+def _supabase_report_history(limit=None):
+    if not _supabase_report_read_enabled():
+        raise RuntimeError("Supabase report read is not configured")
+    limit = max(1, min(_to_int(limit) or SUPABASE_REPORT_HISTORY_LIMIT, 200))
+    rows = _supabase_request(
+        "GET",
+        "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at&order=generated_at.desc&limit=%s" % limit,
+        timeout=20,
+    )
+    reports = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        run_id = row.get("id")
+        reports.append({
+            "name": "supabase_report_%s.json" % run_id,
+            "title": row.get("generated_at") or row.get("created_at") or ("run " + str(run_id)),
+            "generated_at": row.get("generated_at") or row.get("created_at") or "",
+            "modified": row.get("created_at") or row.get("generated_at") or "",
+            "accounts": _to_int(row.get("accounts_count")),
+            "dramas": _to_int(row.get("dramas_count")),
+            "path": "/supabase/report?id=%s" % urllib.parse.quote(str(run_id)),
+            "source": "supabase",
+        })
+    return reports
+
+
 def _write_report_bundle(rows, drama_rows, errors):
     now = datetime.datetime.now(BEIJING_TZ)
     stamp = now.strftime("%Y%m%d-%H%M%S")
@@ -3985,6 +4062,12 @@ class Handler(BaseHTTPRequestHandler):
             self._discover_accounts_endpoint(qs)
         elif parsed.path == "/drama-link":
             self._resolve_drama_link(qs)
+        elif parsed.path == "/supabase/latest":
+            self._supabase_latest_report_endpoint(qs)
+        elif parsed.path == "/supabase/reports":
+            self._supabase_reports_endpoint(qs)
+        elif parsed.path == "/supabase/report":
+            self._supabase_report_endpoint(qs)
         elif parsed.path == "/reports":
             self._list_reports(qs)
         elif parsed.path.startswith("/reports/"):
@@ -4422,6 +4505,35 @@ class Handler(BaseHTTPRequestHandler):
                 "path": "/reports/" + urllib.parse.quote(name),
             })
         self._send_json(200, {"ok": True, "reports": reports})
+
+    def _supabase_latest_report_endpoint(self, qs):
+        if not self._allow_report_read(qs):
+            return
+        try:
+            self._send_json(200, _supabase_latest_report_payload())
+        except Exception as exc:
+            self._send_json(404, {"ok": False, "error": str(exc), "source": "supabase"})
+
+    def _supabase_reports_endpoint(self, qs):
+        if not self._allow_report_read(qs):
+            return
+        try:
+            limit = _to_int(qs.get("limit", [SUPABASE_REPORT_HISTORY_LIMIT])[0])
+            self._send_json(200, {
+                "ok": True,
+                "reports": _supabase_report_history(limit),
+                "source": "supabase",
+            })
+        except Exception as exc:
+            self._send_json(404, {"ok": False, "error": str(exc), "reports": [], "source": "supabase"})
+
+    def _supabase_report_endpoint(self, qs):
+        if not self._allow_report_read(qs):
+            return
+        try:
+            self._send_json(200, _supabase_report_payload_by_id(qs.get("id", [""])[0]))
+        except Exception as exc:
+            self._send_json(404, {"ok": False, "error": str(exc), "source": "supabase"})
 
     def _serve_report(self, path, qs):
         if not self._allow_report_read(qs):

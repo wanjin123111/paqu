@@ -516,7 +516,7 @@
   <div class="brand">
     <div class="logo">▸</div>
     <div>
-      <div class="wordmark">TikHub<span>短剧报表</span> <span style="font:600 11px ui-monospace,monospace;color:#16a34a;background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:1px 6px;vertical-align:middle">build: App&nbsp;V3 · appv3-9</span></div>
+      <div class="wordmark">TikHub<span>短剧报表</span> <span style="font:600 11px ui-monospace,monospace;color:#16a34a;background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:1px 6px;vertical-align:middle">build: App&nbsp;V3 · appv3-10</span></div>
       <div class="tagline">批量抓账号 → 一键出表</div>
     </div>
   </div>
@@ -3400,13 +3400,21 @@ async function loadBackendLatest(){
   await refreshScheduleAccountState();
   let payload=null;
   try{
-    payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+    try{
+      payload=await backendFetchJson("/supabase/latest",{}, {sendSecret:false});
+    }catch(_){
+      payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+    }
   }catch(firstErr){
     if(backendSecret()){
       try{
         backendSetStatus("后端暂无最新结果，正在重新抓取…");
         await backendFetchJson("/run-scheduled",{wait:"1"}, {requireSecret:true});
-        payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+        try{
+          payload=await backendFetchJson("/supabase/latest",{}, {sendSecret:false});
+        }catch(_){
+          payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+        }
       }catch(_){
         payload=await fetchJsonUrl("public_reports/latest_report.json");
       }
@@ -3476,6 +3484,13 @@ async function loadPublishedHistory(){
   renderHistoryList(items,"历史存档");
   return items;
 }
+async function loadSupabaseHistory(){
+  const data=await backendFetchJson("/supabase/reports",{limit:"30"}, {sendSecret:false});
+  const items=data.reports||[];
+  if(!items.length)throw new Error("empty Supabase history");
+  renderHistoryList(items,"Supabase");
+  return items;
+}
 async function loadRenderHistory(){
   const data=await backendFetchJson("/reports",{}, {sendSecret:false});
   const reports=data.reports||[];
@@ -3517,14 +3532,15 @@ async function loadBackendReports(opts){
     if(rows.length||dramaRows.length)renderDashboard();
   }
   backendSetStatus("正在刷新历史记录…");
-  let published=[], render=[], lastErr=null;
+  let supabase=[], published=[], render=[], lastErr=null;
+  try{supabase=await loadSupabaseHistory();}catch(e){lastErr=e;}
   try{published=await loadPublishedHistory();}catch(e){lastErr=e;}
   try{render=await loadRenderHistory();}catch(e){lastErr=e;}
-  const items=mergeReportHistoryItems(published,render);
+  const items=mergeReportHistoryItems(supabase,published,render);
   reportHistoryItems=items;
   updateGrowthFilterControls();
   if(items.length){
-    renderHistoryList(items,published.length&&render.length?"历史记录":(published.length?"历史存档":"Render 当前记录"));
+    renderHistoryList(items,supabase.length?"Supabase":(published.length&&render.length?"历史记录":(published.length?"历史存档":"Render 当前记录")));
     backendSetStatus("已加载 "+items.length+" 条历史记录", true);
     if(isPublicMode()){
       dashboardHistoryLoading=true;
