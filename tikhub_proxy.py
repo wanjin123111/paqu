@@ -138,7 +138,10 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 SUPABASE_ENABLED = _env_bool("SUPABASE_ENABLED", True)
 SUPABASE_BATCH_SIZE = _env_int("SUPABASE_BATCH_SIZE", 100, 1, 500)
+SUPABASE_SCHEDULE_ACCOUNTS = _env_bool("SUPABASE_SCHEDULE_ACCOUNTS", True)
+SUPABASE_SCHEDULE_ACCOUNT_CACHE_SECONDS = _env_int("SUPABASE_SCHEDULE_ACCOUNT_CACHE_SECONDS", 60, 0, 3600)
 SUPABASE_USER_AGENT = "paqu-tikhub-proxy/1.0"
+SUPABASE_SCHEDULE_ACCOUNT_CACHE = {"expires_at": 0, "accounts": [], "error": ""}
 
 DEFAULT_ENDPOINTS = {
     "profile": "/api/v1/tiktok/app/v3/handler_user_profile",
@@ -1082,11 +1085,81 @@ def _merge_accounts(*groups):
     return merged
 
 
+def _supabase_schedule_accounts(force=False):
+    if not (SUPABASE_ENABLED and SUPABASE_SCHEDULE_ACCOUNTS and _supabase_configured()):
+        return []
+    now = time.time()
+    if (
+        not force
+        and SUPABASE_SCHEDULE_ACCOUNT_CACHE_SECONDS
+        and SUPABASE_SCHEDULE_ACCOUNT_CACHE.get("expires_at", 0) > now
+    ):
+        return list(SUPABASE_SCHEDULE_ACCOUNT_CACHE.get("accounts") or [])
+    try:
+        response = _supabase_request(
+            "GET",
+            "/accounts?select=account&account=not.is.null&order=account.asc&limit=10000",
+            timeout=20,
+        )
+        accounts = []
+        if isinstance(response, list):
+            accounts = [item.get("account") for item in response if isinstance(item, dict)]
+        accounts = _parse_accounts("\n".join(str(item) for item in accounts if item))
+        SUPABASE_SCHEDULE_ACCOUNT_CACHE.update({
+            "accounts": accounts,
+            "error": "",
+            "expires_at": now + SUPABASE_SCHEDULE_ACCOUNT_CACHE_SECONDS,
+        })
+        return accounts
+    except Exception as exc:
+        SUPABASE_SCHEDULE_ACCOUNT_CACHE.update({
+            "error": str(exc),
+            "expires_at": now + min(SUPABASE_SCHEDULE_ACCOUNT_CACHE_SECONDS or 60, 60),
+        })
+        return []
+
+
+def _invalidate_supabase_schedule_account_cache():
+    SUPABASE_SCHEDULE_ACCOUNT_CACHE.update({"expires_at": 0})
+
+
+def _store_schedule_accounts_in_supabase(accounts):
+    status = {
+        "enabled": bool(SUPABASE_ENABLED and SUPABASE_SCHEDULE_ACCOUNTS),
+        "configured": _supabase_configured(),
+        "ok": False,
+    }
+    accounts = _parse_accounts("\n".join(str(item) for item in (accounts or [])))
+    if not status["enabled"]:
+        status.update({"ok": True, "skipped": "SUPABASE_SCHEDULE_ACCOUNTS is off"})
+        return status
+    if not status["configured"]:
+        status["error"] = "SUPABASE_URL or SUPABASE_SERVICE_KEY is not configured"
+        return status
+    if not accounts:
+        status.update({"ok": True, "accounts": 0})
+        return status
+    now_iso = datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds")
+    rows = [{
+        "account": uid,
+        "profile_url": "https://www.tiktok.com/@%s" % uid,
+        "last_seen_at": now_iso,
+    } for uid in accounts]
+    try:
+        written = _supabase_upsert("accounts", rows, "account")
+        _invalidate_supabase_schedule_account_cache()
+        status.update({"ok": True, "accounts": written})
+    except Exception as exc:
+        status["error"] = str(exc)
+    return status
+
+
 def _configured_schedule_accounts():
     pool = _schedule_account_pool()
     env_accounts = _parse_accounts(SCHEDULE_ACCOUNTS)
     seed_accounts = _schedule_account_seed()
-    accounts = _merge_accounts(env_accounts, seed_accounts, pool["accounts"])
+    supabase_accounts = _supabase_schedule_accounts()
+    accounts = _merge_accounts(env_accounts, seed_accounts, pool["accounts"], supabase_accounts)
     sources = []
     if env_accounts:
         sources.append("SCHEDULE_ACCOUNTS")
@@ -1094,6 +1167,8 @@ def _configured_schedule_accounts():
         sources.append("seed")
     if pool["accounts"]:
         sources.append("backend_pool")
+    if supabase_accounts:
+        sources.append("supabase")
     return accounts, "+".join(sources)
 
 
@@ -1123,7 +1198,8 @@ def _append_schedule_accounts(accounts):
             merged.append(uid)
             added.append(uid)
     saved = _write_schedule_account_pool(merged)
-    return {"saved": saved, "added": added}
+    supabase = _store_schedule_accounts_in_supabase(merged)
+    return {"saved": saved, "added": added, "supabase": supabase}
 
 
 def _parse_discovery_keywords(text):
@@ -4244,6 +4320,7 @@ class Handler(BaseHTTPRequestHandler):
                 "accounts": saved.get("accounts", []),
                 "count": len(saved.get("accounts", [])),
                 "source": "backend_pool",
+                "supabase": result.get("supabase"),
                 "updated_at": saved.get("updated_at", ""),
                 "runtime_file": "reports/schedule_accounts.json",
             })
@@ -4256,7 +4333,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "GET":
             pool = _schedule_account_pool()
             accounts, source = _configured_schedule_accounts()
-            updated_at = pool.get("updated_at", "") if source == "backend_pool" else ""
+            updated_at = pool.get("updated_at", "") if "backend_pool" in source else ""
             self._send_json(200, {
                 "ok": True,
                 "accounts": accounts,
@@ -4277,11 +4354,13 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 accounts = []
             saved = _write_schedule_account_pool(accounts)
+            supabase = _store_schedule_accounts_in_supabase(saved["accounts"])
             self._send_json(200, {
                 "ok": True,
                 "accounts": saved["accounts"],
                 "count": len(saved["accounts"]),
                 "source": "backend_pool",
+                "supabase": supabase,
                 "updated_at": saved["updated_at"],
                 "runtime_file": "reports/schedule_accounts.json",
             })
