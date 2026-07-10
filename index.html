@@ -889,6 +889,7 @@ let dashboardHistoryLoading=false;
 let scheduleAccountCount=null;
 let scheduleAccountSource="";
 const DASHBOARD_CACHE_MAX_AGE=7*24*60*60*1000;
+const PUBLIC_REPORT_REFRESH_MS=5*60*1000;
 const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v2";
 const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v2";
 function dashboardCacheGet(key,maxAgeMs){
@@ -910,7 +911,7 @@ function loadCachedDashboardState(){
   if(!payload)return false;
   const history=dashboardCacheGet(DASHBOARD_HISTORY_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE);
   dashboardHistoryPayloads=Array.isArray(history)?history:[];
-  dashboardHistoryLoading=true;
+  dashboardHistoryLoading=false;
   dashboardHistoryReady=true;
   loadBackendPayload(payload,{source:"latest",quiet:true,skipCache:true});
   return true;
@@ -1036,12 +1037,17 @@ function readPagination(data){
 
 /* ---------- HTTP ---------- */
 function applyProxy(url){const p=(cfg.proxy||"").trim();if(!p)return url;return p.includes("{url}")?p.replace("{url}",encodeURIComponent(url)):p+url;}
+function proxyUsesPrivateBackend(){
+  const proxy=(cfg.proxy||"").trim();
+  return !!proxy&&(proxy.startsWith("/")||proxy.includes("paqu-tikhub-proxy.onrender.com"));
+}
 async function apiGet(path,params,label){
   const qs=new URLSearchParams(Object.entries(params).filter(([k,v])=>v!==undefined&&v!=="")).toString();
   const direct=cfg.host.replace(/\/$/,"")+path+(qs?"?"+qs:"");
   const url=applyProxy(direct);
   const headers={"Accept":"application/json"};
   if(state.apiKey)headers.Authorization="Bearer "+state.apiKey;
+  if(proxyUsesPrivateBackend()&&backendSecret())headers["X-Schedule-Secret"]=backendSecret();
   let last=null;
   for(let attempt=1;attempt<=cfg.retries;attempt++){
     let resp;
@@ -1050,6 +1056,7 @@ async function apiGet(path,params,label){
     if(resp.status===200){const t=await resp.text();try{return JSON.parse(t);}catch(_){return null;}}
     let detail="";try{detail=(await resp.text()||"").slice(0,400);}catch(_){}
     if(resp.status===401)throw new ApiError("401:API Key 被拒绝(检查右上角的 Key)。"+(detail?" TikHub 原话:"+detail:""),{fatal:true});
+    if(resp.status===403&&proxyUsesPrivateBackend())throw new ApiError("403:后端代理已锁定，请在后端设置中填写正确的 SCHEDULE_SECRET。",{fatal:true});
     if(resp.status===403)throw new ApiError("403:TikHub 拒绝访问 —— 通常是【邮箱未验证 / 该 Key 权限不足 / 账号被禁用】,与余额无关。"+(detail?" TikHub 原话:"+detail:""),{fatal:true});
     if(resp.status===402)throw new ApiError("402:余额不足(此接口需付费)。请充值。"+(detail?" TikHub 原话:"+detail:""),{fatal:true});
     if(resp.status===404)throw new ApiError("404:接口路径不对 → "+path+"("+label+")。去 docs.tikhub.io 核对后在设置里改。"+(detail?" TikHub 原话:"+detail:""),{fatal:true,notFound:true});
@@ -1340,11 +1347,11 @@ function valueOf(row,keys,fallback){
   for(const k of keys){if(row&&row[k]!=null&&row[k]!=="")return row[k];}
   return fallback==null?"":fallback;
 }
-function accountOf(row){return valueOf(row,["账号","Account / 账号"],"");}
-function nickOf(row){return valueOf(row,["昵称","Nickname / 昵称"],accountOf(row));}
+function accountOf(row){return valueOf(row,["账号","Account / 账号","a"],"");}
+function nickOf(row){return valueOf(row,["昵称","Nickname / 昵称","n"],accountOf(row));}
 function linkOf(row){const acc=accountOf(row);return valueOf(row,["主页链接","Source Profile URL / 来源主页"],acc?("https://www.tiktok.com/@"+acc):"");}
 function avatarOf(row){return avatarUrlFromValue(valueOf(row,AVATAR_KEYS,""));}
-function dramaTitleOf(row){return valueOf(row,["English Title / 英文剧名","短剧名"],"");}
+function dramaTitleOf(row){return valueOf(row,["English Title / 英文剧名","短剧名","en"],"");}
 function cleanDramaId(value){return String(value||"").trim().replace(/^ID\s+/i,"").replace(/[^0-9A-Za-z_-]/g,"");}
 function addrUrlOf(value){if(!value)return "";if(Array.isArray(value)){for(const item of value){if(typeof item==="string"&&/^https?:\/\//i.test(item))return item;}}else if(typeof value==="object"){const urls=value.url_list||value.urlList||value.urls;if(Array.isArray(urls)){for(const url of urls){if(typeof url==="string"&&/^https?:\/\//i.test(url))return url;}}for(const k of["url","uri"]){if(typeof value[k]==="string"&&/^https?:\/\//i.test(value[k]))return value[k];}}return "";}
 function videoPlayUrlOf(item){const video=item&&item.video;if(!video||typeof video!=="object")return "";const containers=[video.play_addr_h264,video.playAddrH264,video.play_addr,video.playAddr,video.play_addr_bytevc1,video.playAddrBytevc1];const bitRates=video.bit_rate||video.bitRate||[];if(Array.isArray(bitRates)){for(const rate of bitRates){if(rate&&typeof rate==="object")containers.push(rate.play_addr||rate.playAddr);}}containers.push(video.download_addr,video.downloadAddr);for(const box of containers){const url=addrUrlOf(box);if(url)return url;}return "";}
@@ -1371,7 +1378,7 @@ const titleTranslationCache=new Map(Object.entries(readJsonStore("thr_title_tran
 let titleHydrateRun=0;
 let titleHydrating=false;
 function chineseTitleOf(row){
-  const direct=valueOf(row,["Chinese Title / 中文剧名","中文剧名"],"");
+  const direct=valueOf(row,["Chinese Title / 中文剧名","中文剧名","cn"],"");
   if(direct)return direct;
   return titleTranslationCache.get(dramaTitleOf(row))||"";
 }
@@ -1498,8 +1505,8 @@ function uniqThemeLabels(labels){
   return out;
 }
 function themeLabelsFromValue(value){return uniqThemeLabels(collectThemeLabels(value,[]));}
-function englishThemeLabelsOf(row){return themeLabelsFromValue(valueOf(row,["English Themes / 英文题材"],""));}
-function chineseThemeLabelsOf(row){return themeLabelsFromValue(valueOf(row,["Chinese Themes / 中文题材"],""));}
+function englishThemeLabelsOf(row){return themeLabelsFromValue(valueOf(row,["English Themes / 英文题材","et"],""));}
+function chineseThemeLabelsOf(row){return themeLabelsFromValue(valueOf(row,["Chinese Themes / 中文题材","ct"],""));}
 function themeSourceLabelsOf(row){
   const cn=chineseThemeLabelsOf(row);
   return cn.length?cn:englishThemeLabelsOf(row);
@@ -1595,17 +1602,17 @@ async function hydrateChineseTitles(targetRows){
     }
   }
 }
-function dramaViewsOf(row){return toInt(valueOf(row,["Views / 观看数","累计观看"],0));}
-function dramaEpisodesOf(row){return toInt(valueOf(row,["Episodes / 集数","集数"],0));}
+function dramaViewsOf(row){return toInt(valueOf(row,["Views / 观看数","累计观看","v"],0));}
+function dramaEpisodesOf(row){return toInt(valueOf(row,["Episodes / 集数","集数","e"],0));}
 function dramaRankOf(row,index){return toInt(valueOf(row,["Rank in Account / 账号内排序"],index+1));}
-function dramaPublishTimeOf(row){return valueOf(row,["Publish Time / 发布时间","发布时间","Published At / 发布时间","Release Time / 发布时间"],"");}
+function dramaPublishTimeOf(row){return valueOf(row,["Publish Time / 发布时间","发布时间","Published At / 发布时间","Release Time / 发布时间","p"],"");}
 function dramaPublishMsOf(row){
   const text=dramaPublishTimeOf(row);
   if(!text)return 0;
   const ms=Date.parse(String(text).replace(" ","T")+"+08:00");
   return Number.isFinite(ms)?ms:0;
 }
-function summaryHotOf(row){return toInt(valueOf(row,[DISPLAY_COLUMNS[5],COLUMNS[7]],0));}
+function summaryHotOf(row){return toInt(valueOf(row,[DISPLAY_COLUMNS[5],COLUMNS[7],"v"],0));}
 function summaryAccountKey(row){return String(accountOf(row)||"").trim().toLowerCase();}
 function parseChineseNumber(text){
   const digits={"\u96f6":0,"\u3007":0,"\u4e00":1,"\u4e8c":2,"\u4e24":2,"\u4e09":3,"\u56db":4,"\u4e94":5,"\u516d":6,"\u4e03":7,"\u516b":8,"\u4e5d":9};
@@ -1643,13 +1650,36 @@ function findGrowthBaselineItem(days){
   if(!candidates.length)return null;
   return (candidates.find(x=>x.ms<=target)||candidates[candidates.length-1]).item;
 }
+function compactDashboardPayload(payload){
+  if(!payload||typeof payload!=="object")return payload;
+  return {
+    generated_at:payload.generated_at||"",
+    accounts:toInt(payload.accounts),
+    dramas:toInt(payload.dramas),
+    storage_source:payload.storage_source||"",
+    supabase_run_id:payload.supabase_run_id||null,
+    summary:(Array.isArray(payload.summary)?payload.summary:[]).map(row=>({
+      a:accountOf(row),n:nickOf(row),d:summaryDramaCountOf(row),
+      e:toInt(valueOf(row,["总集数","Episodes / 总集数","e"],0)),v:summaryHotOf(row)
+    })),
+    dramas_detail:(Array.isArray(payload.dramas_detail)?payload.dramas_detail:[]).map(row=>({
+      a:accountOf(row),n:nickOf(row),id:valueOf(row,["Drama ID / 短剧ID","短剧ID","Drama ID","id"],""),
+      en:dramaTitleOf(row),cn:chineseTitleOf(row),p:dramaPublishTimeOf(row),
+      e:dramaEpisodesOf(row),v:dramaViewsOf(row),
+      et:valueOf(row,["English Themes / 英文题材","et"],""),ct:valueOf(row,["Chinese Themes / 中文题材","ct"],"")
+    }))
+  };
+}
 async function fetchReportPayloadForItem(item){
   const url=(item&& (item.url||item.path))||"";
   if(!url)throw new Error("missing report url");
-  return url.startsWith("http")||url.startsWith("public_reports/")?await fetchJsonUrl(url):await backendFetchJson(url,{}, {sendSecret:false});
+  const payload=url.startsWith("http")||url.startsWith("public_reports/")
+    ?await fetchJsonUrl(url)
+    :await backendFetchJson(url,{compact:"1"}, {sendSecret:false});
+  return compactDashboardPayload(payload);
 }
 function dramaGrowthKey(row){
-  const id=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID","Drama ID"],""));
+  const id=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID","Drama ID","id"],""));
   if(id)return "id:"+id;
   const acc=summaryAccountKey(row);
   const title=String(dramaTitleOf(row)||chineseTitleOf(row)||"").trim().toLowerCase();
@@ -1657,7 +1687,7 @@ function dramaGrowthKey(row){
 }
 function dashboardDramaGrowthKeys(row){
   const keys=[];
-  const id=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID","Drama ID"],""));
+  const id=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID","Drama ID","id"],""));
   if(id)keys.push("id:"+id);
   const acc=summaryAccountKey(row);
   const title=String(dramaTitleOf(row)||chineseTitleOf(row)||"").trim().toLowerCase();
@@ -1824,8 +1854,8 @@ function dashboardSnapshotFromPayload(payload){
   const details=Array.isArray(payload&&payload.dramas_detail)?payload.dramas_detail:[];
   const totalViews=summary.length?summary.reduce((sum,row)=>sum+summaryHotOf(row),0):details.reduce((sum,row)=>sum+dramaViewsOf(row),0);
   const accountCount=summary.length||new Set(details.map(accountOf).filter(Boolean)).size;
-  const dramaCount=details.length||summary.reduce((sum,row)=>sum+toInt(valueOf(row,["短剧数","Dramas / 短剧数"],0)),0);
-  const episodeCount=details.reduce((sum,row)=>sum+dramaEpisodesOf(row),0)||summary.reduce((sum,row)=>sum+toInt(valueOf(row,["总集数","Episodes / 总集数"],0)),0);
+  const dramaCount=details.length||summary.reduce((sum,row)=>sum+summaryDramaCountOf(row),0);
+  const episodeCount=details.reduce((sum,row)=>sum+dramaEpisodesOf(row),0)||summary.reduce((sum,row)=>sum+toInt(valueOf(row,["总集数","Episodes / 总集数","e"],0)),0);
   const dramaViews=details.reduce((sum,row)=>sum+dramaViewsOf(row),0);
   const avgDramaViews=dramaCount?Math.round((dramaViews||totalViews)/dramaCount):0;
   const topAccounts=[...summary].sort((a,b)=>summaryHotOf(b)-summaryHotOf(a)).slice(0,5).map(row=>({name:nickOf(row)||accountOf(row),account:accountOf(row),views:summaryHotOf(row)}));
@@ -1874,7 +1904,7 @@ function dashboardDelta(current,previous,key){
   return {diff,rate,hasPrevious:!!previous&&before>0};
 }
 function summaryDramaCountOf(row){
-  return toInt(valueOf(row,["短剧数","Dramas / 短剧数"],0));
+  return toInt(valueOf(row,["短剧数","Dramas / 短剧数","d"],0));
 }
 function dashboardAccountDramaMap(payload){
   const map=new Map();
@@ -2972,7 +3002,8 @@ function exportXLSX(){
 
 /* ---------- 公开云端报表 ---------- */
 function backendBase(){
-  return location.hostname==="paqu-tikhub-proxy.onrender.com" ? "" : "https://paqu-tikhub-proxy.onrender.com";
+  const localHosts=new Set(["localhost","127.0.0.1","::1"]);
+  return location.hostname==="paqu-tikhub-proxy.onrender.com"||localHosts.has(location.hostname) ? "" : "https://paqu-tikhub-proxy.onrender.com";
 }
 function backendSecret(){
   for(const id of ["backendSecretInline","backendSecret"]){
@@ -3002,22 +3033,19 @@ function backendUrl(path, params){
   params=Object.assign({}, params||{});
   if(String(path||"").startsWith("/reports"))params._=String(Date.now());
   const qs=new URLSearchParams(params).toString();
-  return backendBase()+path+(qs?"?"+qs:"");
+  return backendBase()+path+(qs?(String(path).includes("?")?"&":"?")+qs:"");
 }
 function sameOriginBackendUrl(path, params){
   params=Object.assign({}, params||{});
   const qs=new URLSearchParams(params).toString();
-  return path+(qs?"?"+qs:"");
+  return path+(qs?(String(path).includes("?")?"&":"?")+qs:"");
 }
 async function backendFetchJson(path, params, opts){
   params=Object.assign({}, params||{});
   opts=opts||{};
   const secret=backendSecret();
   if(opts.requireSecret&&!secret)throw new Error("missing SCHEDULE_SECRET");
-  if(secret&&opts.sendSecret!==false){
-    if(opts.headerSecret){}else params.secret=secret;
-  }
-  const headers=(opts.headerSecret&&secret)?{"X-Schedule-Secret":secret}:{};
+  const headers=(secret&&opts.sendSecret!==false)?{"X-Schedule-Secret":secret}:{};
   let timer=null;
   const controller=(opts.timeoutMs&&window.AbortController)?new AbortController():null;
   if(controller)timer=window.setTimeout(()=>controller.abort(),opts.timeoutMs);
@@ -3040,10 +3068,11 @@ async function backendPostJson(path, body, params, opts){
   opts=opts||{};
   const secret=backendSecret();
   if(opts.requireSecret&&!secret)throw new Error("missing SCHEDULE_SECRET");
-  if(secret&&opts.sendSecret!==false)params.secret=secret;
+  const headers={"Content-Type":"application/json"};
+  if(secret&&opts.sendSecret!==false)headers["X-Schedule-Secret"]=secret;
   const r=await fetch((opts.sameOrigin?sameOriginBackendUrl:backendUrl)(path,params),{
     method:"POST",
-    headers:{"Content-Type":"application/json"},
+    headers,
     cache:"no-store",
     body:JSON.stringify(body||{})
   });
@@ -3395,9 +3424,10 @@ function loadBackendPayload(payload,opts){
   if(summary.length&&!opts.quiet)toast("已加载最新结果");
   if(!opts.skipCache)dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,payload);
 }
-async function loadBackendLatest(){
-  backendSetStatus("正在加载最新结果…");
-  await refreshScheduleAccountState();
+async function loadBackendLatest(opts){
+  opts=opts||{};
+  if(!opts.quiet)backendSetStatus("正在加载最新结果…");
+  if(!isPublicMode())await refreshScheduleAccountState();
   let payload=null;
   try{
     try{
@@ -3422,7 +3452,7 @@ async function loadBackendLatest(){
       payload=await fetchJsonUrl("public_reports/latest_report.json");
     }
   }
-  loadBackendPayload(payload);
+  loadBackendPayload(payload,{quiet:opts.quiet});
   return payload;
 }
 function reportStamp(name){
@@ -3515,7 +3545,8 @@ function mergeReportHistoryItems(...lists){
   const seen=new Set(), merged=[];
   for(const list of lists){
     for(const item of (list||[])){
-      const key=String(item.name||item.url||item.path||item.title||"").toLowerCase();
+      const ms=reportItemMs(item);
+      const key=ms?("time:"+Math.round(ms/60000)):String(item.name||item.url||item.path||item.title||"").toLowerCase();
       if(!key||seen.has(key))continue;
       seen.add(key);
       merged.push(item);
@@ -3543,13 +3574,21 @@ async function loadBackendReports(opts){
     renderHistoryList(items,supabase.length?"Supabase":(published.length&&render.length?"历史记录":(published.length?"历史存档":"Render 当前记录")));
     backendSetStatus("已加载 "+items.length+" 条历史记录", true);
     if(isPublicMode()){
-      dashboardHistoryLoading=true;
-      dashboardHistoryReady=!opts.initial;
-      refreshDashboardHistory({quiet:true,initial:opts.initial}).catch(()=>{
+      const shouldRefreshPayloads=!!opts.refreshPayloads||!dashboardHistoryPayloads.length;
+      if(shouldRefreshPayloads){
+        dashboardHistoryLoading=true;
+        dashboardHistoryReady=!opts.initial;
+        await refreshDashboardHistory({quiet:true,initial:opts.initial}).catch(()=>{
+          dashboardHistoryLoading=false;
+          dashboardHistoryReady=true;
+          renderDashboard();
+        });
+      }else{
         dashboardHistoryLoading=false;
         dashboardHistoryReady=true;
         renderDashboard();
-      });
+        renderResultTable();
+      }
     }else{
       await refreshDashboardHistory({quiet});
     }
@@ -3564,23 +3603,32 @@ async function loadBackendReports(opts){
   throw lastErr||new Error("empty history");
 }
 async function loadPublicDashboard(){
-  dashboardHistoryLoading=true;
-  dashboardHistoryReady=false;
-  renderDashboardLoading("正在同步最新数据...");
-  // Public first paint must use the server report, not stale local cache.
+  const cacheReady=loadCachedDashboardState();
+  const cachedMs=cacheReady?currentReportMs():0;
+  if(!cacheReady){
+    dashboardHistoryLoading=true;
+    dashboardHistoryReady=false;
+    renderDashboardLoading("正在同步最新数据...");
+  }
   try{
-    await loadBackendLatest();
+    await loadBackendLatest({quiet:cacheReady});
   }catch(e){
-    dashboardHistoryLoading=false;
-    dashboardHistoryReady=true;
-    backendSetStatus("暂时没有最新结果:"+(e.message||e));
-    renderDashboardLoading("暂时没有最新数据，请稍后刷新");
-    renderHistoryList([], "");
+    if(!cacheReady){
+      dashboardHistoryLoading=false;
+      dashboardHistoryReady=true;
+      backendSetStatus("暂时没有最新结果:"+(e.message||e));
+      renderDashboardLoading("暂时没有最新数据，请稍后刷新");
+      renderHistoryList([], "");
+    }
     return;
   }
-  dashboardHistoryLoading=true;
-  const reportsPromise=loadBackendReports({quiet:true,initial:true});
-  reportsPromise.catch(()=>{
+  const latestChanged=cacheReady&&currentReportMs()>cachedMs+1000;
+  dashboardHistoryLoading=!cacheReady||latestChanged||!dashboardHistoryPayloads.length;
+  await loadBackendReports({
+    quiet:true,
+    initial:!cacheReady,
+    refreshPayloads:!cacheReady||latestChanged||!dashboardHistoryPayloads.length
+  }).catch(()=>{
     dashboardHistoryLoading=false;
     dashboardHistoryReady=true;
     if(rows.length||dramaRows.length)renderDashboard();
@@ -3592,10 +3640,11 @@ async function refreshPublicDashboardQuiet(){
   if(isAdminMode()||document.hidden)return;
   window.__quietRefresh=true;
   try{
-    const latestPromise=loadBackendLatest({quiet:true});
-    const reportsPromise=loadBackendReports({quiet:true});
-    await latestPromise;
-    await reportsPromise;
+    const data=await backendFetchJson("/supabase/reports",{limit:"1"}, {sendSecret:false});
+    const latestMeta=(data.reports||[])[0];
+    if(!latestMeta||reportItemMs(latestMeta)<=currentReportMs()+1000)return;
+    await loadBackendLatest({quiet:true});
+    await loadBackendReports({quiet:true,refreshPayloads:true});
   }catch(_){
   }finally{
     window.__quietRefresh=false;
@@ -3711,7 +3760,9 @@ async function saveToProxy(filename,content,opts){
   opts=opts||{};
   const body={filename:filename,content:content,base64:!!opts.base64,append:!!opts.append};
   if(opts.header)body.header=opts.header;
-  const r=await fetch("/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const headers={"Content-Type":"application/json"};
+  if(backendSecret())headers["X-Schedule-Secret"]=backendSecret();
+  const r=await fetch("/save",{method:"POST",headers,body:JSON.stringify(body)});
   if(!r.ok)throw new Error("存盘失败 HTTP "+r.status+"(代理是否在运行?是否从 localhost 打开?)");
   return r.json();
 }
@@ -3979,7 +4030,7 @@ function init(){
   $("keyModal").addEventListener("click",e=>{if(e.target===$("keyModal"))closeKeyModal();});
   document.addEventListener("keydown",e=>{if(e.key==="Escape")closeKeyModal();});
   setTimeout(loadPublicDashboard,600);
-  if(!isAdminMode())setInterval(refreshPublicDashboardQuiet,60000);
+  if(!isAdminMode())setInterval(refreshPublicDashboardQuiet,PUBLIC_REPORT_REFRESH_MS);
 }
 function updateAcctCount(){$("acctCount").textContent=parseAccounts().length;}
 

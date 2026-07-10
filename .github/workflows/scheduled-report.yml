@@ -18,7 +18,7 @@ jobs:
 
       - name: Trigger Render scheduled scraper
         run: |
-          curl --fail --show-error --silent --max-time 900 \
+          curl --fail --show-error --silent --max-time 3600 \
             -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
             "https://paqu-tikhub-proxy.onrender.com/run-scheduled?wait=1" \
             -o run_result.json
@@ -46,7 +46,7 @@ jobs:
       - name: Publish report history
         run: |
           python3 - <<'PY'
-          import datetime, json, pathlib, shutil
+          import datetime, json, pathlib, re, shutil
 
           out = pathlib.Path("public_reports")
           tmp = pathlib.Path("tmp_reports")
@@ -62,6 +62,8 @@ jobs:
               dt = dt.replace(tzinfo=datetime.timezone.utc)
           beijing_dt = dt.astimezone(datetime.timezone(datetime.timedelta(hours=8)))
           stamp = dt.strftime("%Y%m%d-%H%M%S")
+          retention_days = 30
+          retention_cutoff = beijing_dt - datetime.timedelta(days=retention_days)
 
           json_name = f"scheduled_report_{stamp}.json"
           summary_name = f"scheduled_report_{stamp}.csv"
@@ -77,6 +79,15 @@ jobs:
           if episode_history.exists() and episode_history.stat().st_size:
               shutil.copyfile(episode_history, out / "drama_episode_history.json")
 
+          archive_pattern = re.compile(r"^scheduled_(?:report|dramas)_(\d{8}-\d{6})\.(?:json|csv)$")
+          for path in out.iterdir():
+              match = archive_pattern.match(path.name)
+              if not match or not path.is_file():
+                  continue
+              archived_at = datetime.datetime.strptime(match.group(1), "%Y%m%d-%H%M%S").replace(tzinfo=beijing_dt.tzinfo)
+              if archived_at < retention_cutoff:
+                  path.unlink()
+
           manifest_path = out / "manifest.json"
           if manifest_path.exists():
               manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
@@ -91,9 +102,13 @@ jobs:
               "accounts": payload.get("accounts", 0),
               "dramas": payload.get("dramas", 0),
           }
-          reports = [r for r in manifest.get("reports", []) if r.get("name") != json_name]
+          reports = [
+              r for r in manifest.get("reports", [])
+              if r.get("name") != json_name and (out / str(r.get("name") or "")).is_file()
+          ]
           reports.insert(0, entry)
-          manifest["reports"] = sorted(reports, key=lambda r: r.get("name", ""), reverse=True)[:120]
+          manifest["retention_days"] = retention_days
+          manifest["reports"] = sorted(reports, key=lambda r: r.get("name", ""), reverse=True)
           manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
           PY
 

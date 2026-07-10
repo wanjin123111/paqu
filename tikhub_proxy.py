@@ -110,7 +110,13 @@ SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_DRA
 SCHEDULE_EPISODE_HISTORY_MAX_EPISODES = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_EPISODES", DRAMA_LINK_MAX_EPISODES, 0, 5000)
 SCHEDULE_EPISODE_HISTORY_DELAY_MS = _env_int("SCHEDULE_EPISODE_HISTORY_DELAY_MS", SCHEDULE_DELAY_MS, 0, 60000)
 DRAMA_EPISODE_HISTORY_MAX_POINTS = _env_int("DRAMA_EPISODE_HISTORY_MAX_POINTS", 160, 20, 1000)
-DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS = _env_int("DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS", 75, 35, 365)
+REPORT_RETENTION_DAYS = _env_int("REPORT_RETENTION_DAYS", 30, 1, 30)
+DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS = _env_int(
+    "DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS",
+    REPORT_RETENTION_DAYS,
+    1,
+    REPORT_RETENTION_DAYS,
+)
 DRAMA_EPISODE_HISTORY_DEDUP_SECONDS = _env_int("DRAMA_EPISODE_HISTORY_DEDUP_SECONDS", 1800, 60, 86400)
 DISCOVERY_DEFAULT_KEYWORDS = ",".join([
     "short drama", "shortdrama", "mini drama", "minidrama", "micro drama", "microdrama",
@@ -133,6 +139,7 @@ DISCOVERY_ENRICH_RESERVE_SECONDS = _env_int("DISCOVERY_ENRICH_RESERVE_SECONDS", 
 DISCOVERY_SEARCH_MODE = os.environ.get("DISCOVERY_SEARCH_MODE", "app_v3").strip().lower() or "app_v3"
 DISCOVERY_ENABLE_PUBLIC_TIKTOK = _env_bool("DISCOVERY_ENABLE_PUBLIC_TIKTOK", False)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
+ALLOW_LOOPBACK_PRIVATE_ACCESS = _env_bool("ALLOW_LOOPBACK_PRIVATE_ACCESS", not bool(os.environ.get("RENDER")))
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
@@ -144,6 +151,10 @@ SUPABASE_REPORT_READ = _env_bool("SUPABASE_REPORT_READ", True)
 SUPABASE_REPORT_HISTORY_LIMIT = _env_int("SUPABASE_REPORT_HISTORY_LIMIT", 30, 1, 200)
 SUPABASE_USER_AGENT = "paqu-tikhub-proxy/1.0"
 SUPABASE_SCHEDULE_ACCOUNT_CACHE = {"expires_at": 0, "accounts": [], "error": ""}
+SUPABASE_REPORT_CACHE_MAX_ITEMS = _env_int("SUPABASE_REPORT_CACHE_MAX_ITEMS", 12, 1, 30)
+SUPABASE_LATEST_CACHE_SECONDS = _env_int("SUPABASE_LATEST_CACHE_SECONDS", 120, 0, 3600)
+SUPABASE_REPORT_CACHE = {"latest": None, "latest_expires_at": 0, "by_id": {}}
+SUPABASE_REPORT_CACHE_LOCK = threading.Lock()
 
 DEFAULT_ENDPOINTS = {
     "profile": "/api/v1/tiktok/app/v3/handler_user_profile",
@@ -2637,6 +2648,51 @@ def _write_text_file(name, content):
     return path
 
 
+REPORT_ARCHIVE_RE = re.compile(
+    r"^scheduled_(?:report|dramas)_(\d{8}-\d{6})\.(?:json|csv)$",
+    re.IGNORECASE,
+)
+
+
+def _retention_cutoff(now=None):
+    current = now or datetime.datetime.now(BEIJING_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=BEIJING_TZ)
+    return current.astimezone(BEIJING_TZ) - datetime.timedelta(days=REPORT_RETENTION_DAYS)
+
+
+def _report_archive_datetime(name):
+    match = REPORT_ARCHIVE_RE.match(os.path.basename(str(name or "")))
+    if not match:
+        return None
+    try:
+        return datetime.datetime.strptime(match.group(1), "%Y%m%d-%H%M%S").replace(tzinfo=BEIJING_TZ)
+    except ValueError:
+        return None
+
+
+def _cleanup_runtime_report_files(now=None):
+    status = {"ok": True, "retention_days": REPORT_RETENTION_DAYS, "deleted": []}
+    cutoff = _retention_cutoff(now)
+    if not os.path.isdir(REPORTS_DIR):
+        return status
+    try:
+        for name in os.listdir(REPORTS_DIR):
+            archived_at = _report_archive_datetime(name)
+            if not archived_at or archived_at >= cutoff:
+                continue
+            full = os.path.normpath(os.path.join(REPORTS_DIR, name))
+            if os.path.dirname(full) != os.path.normpath(REPORTS_DIR) or not os.path.isfile(full):
+                continue
+            os.remove(full)
+            status["deleted"].append(name)
+        status["deleted_count"] = len(status["deleted"])
+    except Exception as exc:
+        status["ok"] = False
+        status["error"] = str(exc)
+    return status
+
+
 def _supabase_project_url():
     url = SUPABASE_URL.strip().rstrip("/")
     if url.endswith("/rest/v1"):
@@ -2833,6 +2889,44 @@ def _supabase_insert_report_run(payload):
     return 0
 
 
+def _cache_supabase_report_payload(payload, run_id=None, latest=False):
+    if not isinstance(payload, dict):
+        return
+    clean_run_id = _to_int(run_id or payload.get("supabase_run_id"))
+    with SUPABASE_REPORT_CACHE_LOCK:
+        if clean_run_id:
+            cache = SUPABASE_REPORT_CACHE["by_id"]
+            cache[str(clean_run_id)] = payload
+            while len(cache) > SUPABASE_REPORT_CACHE_MAX_ITEMS:
+                cache.pop(next(iter(cache)))
+        if latest:
+            SUPABASE_REPORT_CACHE["latest"] = payload
+            SUPABASE_REPORT_CACHE["latest_expires_at"] = time.time() + SUPABASE_LATEST_CACHE_SECONDS
+
+
+def _cached_supabase_report_payload(run_id=None, latest=False):
+    with SUPABASE_REPORT_CACHE_LOCK:
+        if latest:
+            if time.time() < SUPABASE_REPORT_CACHE.get("latest_expires_at", 0):
+                return SUPABASE_REPORT_CACHE.get("latest")
+            return None
+        clean_run_id = _to_int(run_id)
+        return SUPABASE_REPORT_CACHE["by_id"].get(str(clean_run_id)) if clean_run_id else None
+
+
+def _drop_supabase_report_cache(run_ids):
+    clean_ids = {str(_to_int(run_id)) for run_id in (run_ids or []) if _to_int(run_id)}
+    if not clean_ids:
+        return
+    with SUPABASE_REPORT_CACHE_LOCK:
+        for run_id in clean_ids:
+            SUPABASE_REPORT_CACHE["by_id"].pop(run_id, None)
+        latest = SUPABASE_REPORT_CACHE.get("latest")
+        if isinstance(latest, dict) and str(_to_int(latest.get("supabase_run_id"))) in clean_ids:
+            SUPABASE_REPORT_CACHE["latest"] = None
+            SUPABASE_REPORT_CACHE["latest_expires_at"] = 0
+
+
 def _save_report_to_supabase(payload):
     status = {
         "enabled": bool(SUPABASE_ENABLED),
@@ -2873,6 +2967,10 @@ def _save_report_to_supabase(payload):
             "dramas": dramas_written,
             "drama_snapshots": drama_snapshots_written,
         })
+        cached_payload = dict(payload)
+        cached_payload["storage_source"] = "supabase"
+        cached_payload["supabase_run_id"] = run_id
+        _cache_supabase_report_payload(cached_payload, run_id=run_id, latest=True)
     except Exception as exc:
         status["error"] = str(exc)
     return status
@@ -2897,9 +2995,62 @@ def _supabase_report_payload_from_row(row):
     return payload
 
 
+def _compact_report_payload(payload):
+    if not isinstance(payload, dict):
+        return payload
+
+    def first(row, keys, default=""):
+        for key in keys:
+            if row.get(key) not in (None, ""):
+                return row.get(key)
+        return default
+
+    summaries = []
+    for row in payload.get("summary") or []:
+        if not isinstance(row, dict):
+            continue
+        summaries.append({
+            "a": first(row, ("账号", "Account / 账号")),
+            "n": first(row, ("昵称", "Nickname / 昵称")),
+            "d": _to_int(first(row, ("短剧数", "Dramas / 短剧数"), 0)),
+            "e": _to_int(first(row, ("总集数", "Episodes / 总集数"), 0)),
+            "v": _to_int(first(row, ("累计观看", "Total Views / 累计观看"), 0)),
+        })
+
+    dramas = []
+    for row in payload.get("dramas_detail") or []:
+        if not isinstance(row, dict):
+            continue
+        dramas.append({
+            "a": first(row, ("账号", "Account / 账号")),
+            "n": first(row, ("昵称", "Nickname / 昵称")),
+            "id": first(row, ("Drama ID / 短剧ID", "短剧ID", "Drama ID")),
+            "en": first(row, ("English Title / 英文剧名", "短剧名")),
+            "cn": first(row, ("Chinese Title / 中文剧名", "中文剧名")),
+            "p": first(row, ("Publish Time / 发布时间", "发布时间")),
+            "e": _to_int(first(row, ("Episodes / 集数", "集数"), 0)),
+            "v": _to_int(first(row, ("Views / 观看数", "累计观看"), 0)),
+            "et": first(row, ("English Themes / 英文题材",)),
+            "ct": first(row, ("Chinese Themes / 中文题材",)),
+        })
+
+    return {
+        "generated_at": payload.get("generated_at") or "",
+        "accounts": _to_int(payload.get("accounts")),
+        "dramas": _to_int(payload.get("dramas")),
+        "storage_source": payload.get("storage_source") or "",
+        "supabase_run_id": payload.get("supabase_run_id"),
+        "summary": summaries,
+        "dramas_detail": dramas,
+    }
+
+
 def _supabase_latest_report_payload():
     if not _supabase_report_read_enabled():
         raise RuntimeError("Supabase report read is not configured")
+    cached = _cached_supabase_report_payload(latest=True)
+    if cached:
+        return cached
     rows = _supabase_request(
         "GET",
         "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at,raw&order=generated_at.desc&limit=1",
@@ -2907,7 +3058,9 @@ def _supabase_latest_report_payload():
     )
     if not isinstance(rows, list) or not rows:
         raise RuntimeError("Supabase report_runs is empty")
-    return _supabase_report_payload_from_row(rows[0])
+    payload = _supabase_report_payload_from_row(rows[0])
+    _cache_supabase_report_payload(payload, run_id=rows[0].get("id"), latest=True)
+    return payload
 
 
 def _supabase_report_payload_by_id(run_id):
@@ -2916,6 +3069,9 @@ def _supabase_report_payload_by_id(run_id):
     run_id = _to_int(run_id)
     if not run_id:
         raise RuntimeError("missing Supabase report id")
+    cached = _cached_supabase_report_payload(run_id=run_id)
+    if cached:
+        return cached
     rows = _supabase_request(
         "GET",
         "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at,raw&id=eq.%s&limit=1" % run_id,
@@ -2923,16 +3079,20 @@ def _supabase_report_payload_by_id(run_id):
     )
     if not isinstance(rows, list) or not rows:
         raise RuntimeError("Supabase report not found")
-    return _supabase_report_payload_from_row(rows[0])
+    payload = _supabase_report_payload_from_row(rows[0])
+    _cache_supabase_report_payload(payload, run_id=run_id)
+    return payload
 
 
 def _supabase_report_history(limit=None):
     if not _supabase_report_read_enabled():
         raise RuntimeError("Supabase report read is not configured")
     limit = max(1, min(_to_int(limit) or SUPABASE_REPORT_HISTORY_LIMIT, 200))
+    cutoff = urllib.parse.quote(_retention_cutoff().isoformat(timespec="seconds"), safe="")
     rows = _supabase_request(
         "GET",
-        "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at&order=generated_at.desc&limit=%s" % limit,
+        "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at"
+        "&generated_at=gte.%s&order=generated_at.desc&limit=%s" % (cutoff, limit),
         timeout=20,
     )
     reports = []
@@ -2951,6 +3111,47 @@ def _supabase_report_history(limit=None):
             "source": "supabase",
         })
     return reports
+
+
+def _cleanup_supabase_report_history(now=None):
+    status = {
+        "enabled": bool(SUPABASE_ENABLED),
+        "configured": _supabase_configured(),
+        "ok": False,
+        "retention_days": REPORT_RETENTION_DAYS,
+        "deleted_runs": 0,
+    }
+    if not SUPABASE_ENABLED:
+        status.update({"ok": True, "skipped": "SUPABASE_ENABLED is off"})
+        return status
+    if not _supabase_configured():
+        status["error"] = "SUPABASE_URL or SUPABASE_SERVICE_KEY is not configured"
+        return status
+    cutoff = urllib.parse.quote(_retention_cutoff(now).isoformat(timespec="seconds"), safe="")
+    try:
+        while True:
+            rows = _supabase_request(
+                "GET",
+                "/report_runs?select=id&generated_at=lt.%s&order=id.asc&limit=%s"
+                % (cutoff, SUPABASE_BATCH_SIZE),
+                timeout=20,
+            )
+            run_ids = [_to_int(row.get("id")) for row in (rows or []) if isinstance(row, dict)]
+            run_ids = [run_id for run_id in run_ids if run_id]
+            if not run_ids:
+                break
+            in_filter = "in.(%s)" % ",".join(str(run_id) for run_id in run_ids)
+            _supabase_request("DELETE", "/account_snapshots?run_id=" + in_filter, prefer="return=minimal")
+            _supabase_request("DELETE", "/drama_snapshots?run_id=" + in_filter, prefer="return=minimal")
+            _supabase_request("DELETE", "/report_runs?id=" + in_filter, prefer="return=minimal")
+            _drop_supabase_report_cache(run_ids)
+            status["deleted_runs"] += len(run_ids)
+            if len(run_ids) < SUPABASE_BATCH_SIZE:
+                break
+        status["ok"] = True
+    except Exception as exc:
+        status["error"] = str(exc)
+    return status
 
 
 def _write_report_bundle(rows, drama_rows, errors):
@@ -2999,7 +3200,9 @@ def _run_scheduled_job(accounts):
     except Exception:
         pass
     files, report_payload = _write_report_bundle(rows, drama_rows, errors)
+    runtime_retention = _cleanup_runtime_report_files()
     supabase = _save_report_to_supabase(report_payload)
+    supabase_retention = _cleanup_supabase_report_history()
     try:
         episode_history = _save_scheduled_episode_history(drama_rows)
     except Exception as exc:
@@ -3018,6 +3221,11 @@ def _run_scheduled_job(accounts):
         "dramas": len(drama_rows),
         "files": files,
         "supabase": supabase,
+        "retention": {
+            "days": REPORT_RETENTION_DAYS,
+            "runtime": runtime_retention,
+            "supabase": supabase_retention,
+        },
         "episode_history": episode_history,
         "errors": errors,
     }
@@ -3100,8 +3308,8 @@ def _read_drama_episode_history():
 
 def _write_drama_episode_history(history):
     items = history.get("items") if isinstance(history, dict) else {}
-    if not isinstance(items, dict) or not items:
-        return
+    if not isinstance(items, dict):
+        items = {}
     os.makedirs(REPORTS_DIR, exist_ok=True)
     tmp = DRAMA_EPISODE_HISTORY_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
@@ -3148,6 +3356,26 @@ def _trim_episode_history_points(points, now_ms):
             kept.append(point)
     kept.sort(key=_episode_point_ms)
     return kept[-DRAMA_EPISODE_HISTORY_MAX_POINTS:]
+
+
+def _prune_episode_history(history, now_ms):
+    items = history.get("items") if isinstance(history, dict) else None
+    if not isinstance(items, dict):
+        return 0
+    deleted = 0
+    for key in list(items):
+        entry = items.get(key)
+        if not isinstance(entry, dict):
+            items.pop(key, None)
+            deleted += 1
+            continue
+        points = _trim_episode_history_points(entry.get("points") or [], now_ms)
+        if not points:
+            items.pop(key, None)
+            deleted += 1
+            continue
+        entry["points"] = points
+    return deleted
 
 
 def _record_episode_history_entries(history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=True):
@@ -3203,8 +3431,9 @@ def _collect_episode_growth_and_record(uid, drama_id, episodes):
     changed = False
     with DRAMA_EPISODE_HISTORY_LOCK:
         history = _read_drama_episode_history()
+        pruned = _prune_episode_history(history, now_ms)
         metrics, changed, _recorded = _record_episode_history_entries(history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=True)
-        if changed:
+        if changed or pruned:
             try:
                 _write_drama_episode_history(history)
             except Exception:
@@ -3880,7 +4109,7 @@ def _save_scheduled_episode_history(drama_rows):
     now_text = datetime.datetime.fromtimestamp(now_ms / 1000.0, BEIJING_TZ).isoformat(timespec="seconds")
     with DRAMA_EPISODE_HISTORY_LOCK:
         history = _read_drama_episode_history()
-        changed = False
+        changed = bool(_prune_episode_history(history, now_ms))
         for uid, drama_id, episodes in fetched:
             _metrics, item_changed, _recorded = _record_episode_history_entries(
                 history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=False
@@ -4073,7 +4302,8 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path.startswith("/reports/"):
             self._serve_report(parsed.path, qs)
         elif "url" in qs:
-            self._proxy("GET", qs["url"][0])
+            if self._require_private_access(qs):
+                self._proxy("GET", qs["url"][0])
         else:
             self._serve_static(parsed.path)
 
@@ -4087,7 +4317,8 @@ class Handler(BaseHTTPRequestHandler):
             self._discover_accounts_endpoint(qs)
             return
         if parsed.path == "/save":
-            self._save_file()
+            if self._require_private_access(qs):
+                self._save_file()
             return
         if parsed.path == "/translate-titles":
             self._translate_titles()
@@ -4096,7 +4327,8 @@ class Handler(BaseHTTPRequestHandler):
         if not target:
             self._send_bytes(400, b'{"error":"missing url param"}', "application/json")
             return
-        self._proxy("POST", target)
+        if self._require_private_access(qs):
+            self._proxy("POST", target)
 
     def _require_schedule_secret(self, qs):
         if not SCHEDULE_SECRET:
@@ -4118,10 +4350,14 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return self._require_schedule_secret(qs)
 
+    def _require_private_access(self, qs):
+        if self._is_local_request():
+            return True
+        return self._require_schedule_secret(qs)
+
     def _is_local_request(self):
         client = (self.client_address[0] if self.client_address else "").lower()
-        host = (self.headers.get("Host") or "").split(":", 1)[0].strip("[]").lower()
-        return client in ("127.0.0.1", "::1", "localhost") or host in ("127.0.0.1", "::1", "localhost")
+        return ALLOW_LOOPBACK_PRIVATE_ACCESS and client in ("127.0.0.1", "::1")
 
     def _send_local_download_unavailable(self):
         body = """<!doctype html>
@@ -4300,6 +4536,15 @@ class Handler(BaseHTTPRequestHandler):
         target = qs.get("target", ["play"])[0] or "play"
         target_norm = str(target or "").strip().lower()
         redirect = str(qs.get("redirect", ["1"])[0]).lower() not in ("0", "false", "no")
+        private_targets = {
+            "", "play", "source", "direct", "media",
+            "zip", "download", "download_zip", "archive",
+            "local_status", "local_download_status",
+            "local", "local_save", "save_local", "local_download",
+            "local_script", "download_script", "ps1",
+        }
+        if target_norm in private_targets and not self._require_private_access(qs):
+            return
         if target_norm in ("local_status", "local_download_status"):
             self._send_local_download_status(qs.get("job_id", [""])[0])
             return
@@ -4353,7 +4598,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-            self._send_json(200, {"ok": True, "url": link, "target": target})
+        self._send_json(200, {"ok": True, "url": link, "target": target})
 
     def _discover_accounts_endpoint(self, qs):
         if not self._require_schedule_secret(qs):
@@ -4531,7 +4776,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self._allow_report_read(qs):
             return
         try:
-            self._send_json(200, _supabase_report_payload_by_id(qs.get("id", [""])[0]))
+            payload = _supabase_report_payload_by_id(qs.get("id", [""])[0])
+            compact = str(qs.get("compact", ["0"])[0]).lower() in ("1", "true", "yes")
+            self._send_json(200, _compact_report_payload(payload) if compact else payload)
         except Exception as exc:
             self._send_json(404, {"ok": False, "error": str(exc), "source": "supabase"})
 

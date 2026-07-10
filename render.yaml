@@ -8,6 +8,8 @@ services:
     envVars:
       - key: ALLOWED_PROXY_HOSTS
         value: api.tikhub.io,api.tikhub.dev
+      - key: ALLOW_LOOPBACK_PRIVATE_ACCESS
+        value: "0"
       - key: TIKHUB_API_KEY
         sync: false
       - key: SCHEDULE_SECRET
@@ -42,3 +44,11 @@ services:
         value: 600
       - key: SCHEDULE_DELAY_MS
         value: 300
+      - key: REPORT_RETENTION_DAYS
+        value: 30
+      - key: DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS
+        value: 30
+      - key: SUPABASE_REPORT_HISTORY_LIMIT
+        value: 30
+      - key: SUPABASE_LATEST_CACHE_SECONDS
+        value: 120
