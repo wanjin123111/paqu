@@ -2016,6 +2016,47 @@ def _get_video_metric(video, keys):
     return _to_int(_deep_find(video, keys))
 
 
+def _drama_reference_from_video(video):
+    info_keys = {
+        "dramaInfo", "drama_info", "shortDramaInfo", "short_drama_info",
+        "seriesInfo", "series_info",
+    }
+    candidates = []
+
+    def collect(obj, depth=0):
+        if depth > 9 or obj is None:
+            return
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if key in info_keys and isinstance(value, dict):
+                    candidates.append(value)
+                if isinstance(value, (dict, list)):
+                    collect(value, depth + 1)
+        elif isinstance(obj, list):
+            for value in obj:
+                collect(value, depth + 1)
+
+    collect(video)
+    for info in candidates:
+        drama_id = _deep_find(info, ("dramaID", "dramaId", "drama_id"))
+        if drama_id is None:
+            direct_id = info.get("id")
+            if not isinstance(direct_id, (dict, list)):
+                drama_id = direct_id
+        clean_id = _clean_drama_id(drama_id)
+        if not clean_id:
+            continue
+        title = _to_text(_deep_find(info, DRAMA_NAME_KEYS), 160)
+        episodes = _to_int(_deep_find(info, DRAMA_COUNT_KEYS))
+        return {
+            "drama_id": clean_id,
+            "drama_title": title,
+            "episode_count": episodes,
+            "source": "video-drama-info",
+        }
+    return {}
+
+
 def _discovery_work_from_video(video, source_query, source_endpoint, fallback_url="", monitored=None):
     if not isinstance(video, dict):
         return None
@@ -2029,6 +2070,7 @@ def _discovery_work_from_video(video, source_query, source_endpoint, fallback_ur
     video_url = _video_link_from_item(account, video) or fallback_url
     if not video_id and not video_url:
         return None
+    drama_ref = _drama_reference_from_video(video)
     return {
         "video_id": video_id,
         "description": _to_text(_get_desc(video), 320),
@@ -2045,6 +2087,9 @@ def _discovery_work_from_video(video, source_query, source_endpoint, fallback_ur
         "source_queries": [source_query] if source_query else [],
         "source_endpoint": source_endpoint or "",
         "already_monitored": bool(account and account.lower() in (monitored or set())),
+        "drama_id": drama_ref.get("drama_id") or "",
+        "drama_title": drama_ref.get("drama_title") or "",
+        "episode_count": _to_int(drama_ref.get("episode_count")),
     }
 
 
@@ -2063,9 +2108,10 @@ def _merge_discovered_work(works, item):
             existing["source_queries"].append(query)
     for field in ("views", "likes", "comments", "shares"):
         existing[field] = max(_to_int(existing.get(field)), _to_int(item.get(field)))
-    for field in ("description", "account", "nickname", "avatar", "publish_time", "video_url", "profile_url", "source_endpoint"):
+    for field in ("description", "account", "nickname", "avatar", "publish_time", "video_url", "profile_url", "source_endpoint", "drama_id", "drama_title"):
         if not existing.get(field) and item.get(field):
             existing[field] = item[field]
+    existing["episode_count"] = max(_to_int(existing.get("episode_count")), _to_int(item.get("episode_count")))
     existing["already_monitored"] = bool(existing.get("already_monitored") or item.get("already_monitored"))
 
 
@@ -2133,6 +2179,72 @@ def _discover_works(queries, limit, max_videos_per_query):
         "runtime_file": "reports/discovered_works.json",
     }
     return _write_discovered_works(payload)
+
+
+def _resolve_drama_reference_for_video(uid, video_id):
+    started = time.time()
+    clean_video_id = _clean_drama_id(video_id)
+    if not clean_video_id:
+        raise TikHubError("missing video_id")
+    video, _endpoint = _fetch_discovery_video_by_id(clean_video_id, started)
+    author = _author_from_video(video) or {}
+    account = _to_text(uid or author.get("account"), 80).strip().lstrip("@")
+    direct = _drama_reference_from_video(video)
+    if direct:
+        direct["account"] = account
+        return direct
+    if not account:
+        return {}
+    secuid = _resolve_secuid(account, timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 6, retries=1)
+    if not secuid:
+        return {}
+    dramas = _get_tiktok_drama_library(
+        secuid,
+        account,
+        started=started,
+        max_pages=4,
+        timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 10,
+        retries=1,
+        include_episode_publish_time=False,
+    )
+    work_title_key = _title_key(_get_desc(video))
+
+    def score(drama):
+        title = drama.get("english_title") or drama.get("name") or ""
+        title_key = _title_key(title)
+        if work_title_key and title_key == work_title_key:
+            return 4
+        if work_title_key and title_key and (work_title_key in title_key or title_key in work_title_key):
+            return 3
+        return 0
+
+    ranked = sorted(dramas, key=lambda drama: (score(drama), _to_int(drama.get("views"))), reverse=True)
+    likely = [drama for drama in ranked if score(drama) > 0]
+    candidates = (likely or ranked)[:8]
+    for drama in candidates:
+        drama_id = _clean_drama_id(drama.get("drama_id"))
+        if not drama_id:
+            continue
+        limit = min(DRAMA_LINK_MAX_EPISODES, max(50, _to_int(drama.get("episodes"))))
+        episode_items = _get_drama_episode_items(drama_id, account, started=started, limit=limit)
+        if any(_clean_drama_id(_get_video_id(item)) == clean_video_id for item in episode_items):
+            return {
+                "account": account,
+                "drama_id": drama_id,
+                "drama_title": drama.get("english_title") or drama.get("name") or "",
+                "episode_count": len(episode_items) or _to_int(drama.get("episodes")),
+                "source": "account-drama-library",
+            }
+    if likely and score(likely[0]) >= 4:
+        drama = likely[0]
+        return {
+            "account": account,
+            "drama_id": _clean_drama_id(drama.get("drama_id")),
+            "drama_title": drama.get("english_title") or drama.get("name") or "",
+            "episode_count": _to_int(drama.get("episodes")),
+            "source": "account-drama-title",
+        }
+    return {}
 
 
 def _discovery_raw_account_score(item):
@@ -5006,6 +5118,7 @@ class Handler(BaseHTTPRequestHandler):
         redirect = str(qs.get("redirect", ["1"])[0]).lower() not in ("0", "false", "no")
         private_targets = {
             "", "play", "source", "direct", "media",
+            "series", "drama", "full_series", "whole_drama",
             "zip", "download", "download_zip", "archive",
             "local_status", "local_download_status",
             "local", "local_save", "save_local", "local_download",
@@ -5028,6 +5141,47 @@ class Handler(BaseHTTPRequestHandler):
                 return
             episode_items = _get_drama_episode_items(drama_id, uid, limit=DRAMA_ZIP_MAX_EPISODES)
             self._send_drama_episode_zip(uid, drama_id, episode_items)
+            return
+        if target_norm in ("series", "drama", "full_series", "whole_drama"):
+            try:
+                reference = {
+                    "account": uid,
+                    "drama_id": _clean_drama_id(drama_id),
+                    "episode_count": 0,
+                    "drama_title": "",
+                    "source": "request",
+                } if drama_id else _resolve_drama_reference_for_video(uid, video_id)
+            except Exception as exc:
+                self._send_json(502, {"ok": False, "error": "无法识别这集所属短剧：%s" % exc})
+                return
+            resolved_drama_id = _clean_drama_id(reference.get("drama_id"))
+            resolved_uid = _to_text(reference.get("account") or uid, 80).strip().lstrip("@")
+            if not resolved_drama_id:
+                self._send_json(404, {"ok": False, "error": "没有识别到这集所属的短剧，可能不是短剧库作品"})
+                return
+            list_url = "/drama-link?" + urllib.parse.urlencode({
+                "uid": resolved_uid,
+                "drama_id": resolved_drama_id,
+                "target": "list",
+                "redirect": "1",
+            })
+            if redirect:
+                self.send_response(302)
+                self.send_header("Location", list_url)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self._send_json(200, {
+                "ok": True,
+                "target": "series",
+                "uid": resolved_uid,
+                "drama_id": resolved_drama_id,
+                "drama_title": reference.get("drama_title") or "",
+                "episode_count": _to_int(reference.get("episode_count")),
+                "source": reference.get("source") or "",
+                "url": list_url,
+            })
             return
         if target_norm in ("list", "episodes", "episode_list", "all"):
             if not drama_id:

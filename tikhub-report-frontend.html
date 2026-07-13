@@ -178,6 +178,7 @@
   .discover-mini{display:flex;align-items:center;gap:6px;border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--ink-soft)}
   .discover-mini input{width:74px;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;text-align:right}
   .discover-mini select{border:0;outline:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+  .discover-secret input{width:150px;text-align:left;font-family:var(--mono)}
   .discover-toolbar [hidden]{display:none!important}
   .discover-status{font-size:12px;color:var(--ink-faint)}
   .discover-account{display:flex;align-items:center;gap:9px;min-width:170px}
@@ -773,6 +774,8 @@ shortdramatime"></textarea>
         <div class="discover-toolbar" id="discoverToolbar" hidden>
           <label class="discover-mini"><span>发现</span><select id="discoverModeSelect" aria-label="选择发现类型"><option value="accounts">账号</option><option value="works">作品</option></select></label>
           <label class="search-field"><span id="discoverQueryLabel">关键词 / @账号 / 链接</span><input id="discoverKeywordsInput" type="search" placeholder="关键词、@账号或 TikTok 主页链接" autocomplete="off" aria-label="发现关键词、账号或 TikTok 链接"></label>
+          <label class="discover-mini discover-secret"><span>后端密码</span><input id="discoverSecretInput" type="password" autocomplete="off" spellcheck="false" placeholder="必填 SCHEDULE_SECRET" aria-label="发现功能后端密码"></label>
+          <button class="mini-btn" id="discoverSecretSaveBtn" type="button">保存密码</button>
           <label class="discover-mini"><span>候选</span><input id="discoverLimitInput" type="number" min="1" max="200" step="1" value="40"><span>个</span></label>
           <label class="discover-mini" id="discoverMinFollowersField" data-account-only><span>最低粉丝</span><input id="discoverMinFollowersInput" type="text" value="0"></label>
           <label class="discover-mini" id="discoverMinDramasField" data-account-only><span>最低短剧</span><input id="discoverMinDramasInput" type="number" min="0" max="100000" step="1" value="0"><span>部</span></label>
@@ -3051,7 +3054,7 @@ function backendBase(){
   return location.hostname==="paqu-tikhub-proxy.onrender.com"||localHosts.has(location.hostname) ? "" : "https://paqu-tikhub-proxy.onrender.com";
 }
 function backendSecret(){
-  for(const id of ["backendSecretInline","backendSecret"]){
+  for(const id of ["discoverSecretInput","backendSecretInline","backendSecret"]){
     const el=$(id);
     if(el&&el.value&&el.value.trim())return el.value.trim();
   }
@@ -3059,12 +3062,29 @@ function backendSecret(){
 }
 function syncBackendSecretInputs(value){
   value=String(value||"").trim();
-  ["backendSecret","backendSecretInline"].forEach(id=>{
+  ["backendSecret","backendSecretInline","discoverSecretInput"].forEach(id=>{
     const el=$(id);
     if(el&&el.value!==value)el.value=value;
   });
   if(value)store.set("thr_backend_secret",value);
   else store.del("thr_backend_secret");
+}
+function saveDiscoverySecret(){
+  const input=$("discoverSecretInput");
+  syncBackendSecretInputs(input&&input.value||"");
+  if(backendSecret()){
+    discoverySetStatus("后端密码已保存在当前浏览器，可以开始发现",true);
+    toast("后端密码已保存");
+  }else{
+    discoverySetStatus("请先填写后端密码（SCHEDULE_SECRET）",false);
+    toast("请先填写后端密码");
+  }
+}
+function backendResponseError(response,data){
+  const raw=(data&&data.error)||("HTTP "+response.status);
+  if(response.status===403)return "后端密码不正确，请重新填写 SCHEDULE_SECRET";
+  if(response.status===503&&/SCHEDULE_SECRET/i.test(raw))return "Render 后端尚未配置 SCHEDULE_SECRET";
+  return raw;
 }
 function backendSetStatus(text, ok){
   ["backendStatus","backendStatusInline"].forEach(id=>{
@@ -3089,7 +3109,7 @@ async function backendFetchJson(path, params, opts){
   params=Object.assign({}, params||{});
   opts=opts||{};
   const secret=backendSecret();
-  if(opts.requireSecret&&!secret)throw new Error("missing SCHEDULE_SECRET");
+  if(opts.requireSecret&&!secret)throw new Error("请先填写并保存后端密码（SCHEDULE_SECRET）");
   const headers=(secret&&opts.sendSecret!==false)?{"X-Schedule-Secret":secret}:{};
   let timer=null;
   const controller=(opts.timeoutMs&&window.AbortController)?new AbortController():null;
@@ -3105,14 +3125,14 @@ async function backendFetchJson(path, params, opts){
   }
   const text=await r.text();
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
-  if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
+  if(!r.ok)throw new Error(backendResponseError(r,data));
   return data;
 }
 async function backendPostJson(path, body, params, opts){
   params=Object.assign({}, params||{});
   opts=opts||{};
   const secret=backendSecret();
-  if(opts.requireSecret&&!secret)throw new Error("missing SCHEDULE_SECRET");
+  if(opts.requireSecret&&!secret)throw new Error("请先填写并保存后端密码（SCHEDULE_SECRET）");
   const headers={"Content-Type":"application/json"};
   if(secret&&opts.sendSecret!==false)headers["X-Schedule-Secret"]=secret;
   const r=await fetch((opts.sameOrigin?sameOriginBackendUrl:backendUrl)(path,params),{
@@ -3123,7 +3143,7 @@ async function backendPostJson(path, body, params, opts){
   });
   const text=await r.text();
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
-  if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
+  if(!r.ok)throw new Error(backendResponseError(r,data));
   return data;
 }
 function discoverySetStatus(text, ok){
@@ -3195,7 +3215,8 @@ function updateDiscoveryControls(){
     const time=reportTimeLabel(discoveryGeneratedAt)||"";
     const items=discoveryResultItems();
     const noun=discoveryMode==="works"?"作品":"候选账号";
-    discoverySetStatus(discoveryBusy?("正在发现"+noun+"，通常 1 分钟内结束..."):(items.length?(noun+" "+fmt(items.length)+" 个"+(time?" · "+time:"")):"需要任务密码后开始发现"), !!items.length);
+    const emptyStatus=backendSecret()?"密码已就绪，可以开始发现":"请先填写并保存后端密码";
+    discoverySetStatus(discoveryBusy?("正在发现"+noun+"，通常 1 分钟内结束..."):(items.length?(noun+" "+fmt(items.length)+" 个"+(time?" · "+time:"")):emptyStatus), !!items.length||!!backendSecret());
   }
 }
 function loadDiscoveryPayload(payload, shouldRender=true){
@@ -3417,6 +3438,30 @@ async function openDiscoveredWorkSource(row){
     toast("播放源打开失败:"+(e.message||e));
   }
 }
+async function openDiscoveredSeries(row){
+  if(!row||(!row.video_id&&!row.drama_id))return;
+  const popup=window.open("about:blank","_blank");
+  if(popup)popup.opener=null;
+  discoverySetStatus("正在识别这集所属短剧并读取全集...");
+  try{
+    const payload=await backendFetchJson("/drama-link",{
+      uid:row.account||"",
+      video_id:row.video_id||"",
+      drama_id:row.drama_id||"",
+      target:"series",
+      redirect:"0",
+    },{requireSecret:true,timeoutMs:95000});
+    if(!payload||!payload.url)throw new Error("没有找到整剧列表");
+    const targetUrl=new URL(payload.url,backendBase()||location.origin).href;
+    if(popup)popup.location.href=targetUrl;
+    else window.open(targetUrl,"_blank","noopener");
+    discoverySetStatus("已打开整剧列表，可下载全部 ZIP 或本机下载脚本",true);
+  }catch(e){
+    if(popup)popup.close();
+    discoverySetStatus("整剧识别失败: "+(e.message||e),false);
+    toast("整剧识别失败:"+(e.message||e));
+  }
+}
 function appendDiscoveryWorkCell(tr,c,row){
   const td=document.createElement("td");
   if(c==="作品"){
@@ -3429,7 +3474,7 @@ function appendDiscoveryWorkCell(tr,c,row){
     if(row.video_id){
       const id=document.createElement("span");
       id.className="discover-work-id";
-      id.textContent="ID "+row.video_id;
+      id.textContent="ID "+row.video_id+(toInt(row.episode_count)?(" · 全剧 "+fmt(row.episode_count)+" 集"):"");
       td.appendChild(id);
     }
   }else if(c==="作者"){
@@ -3449,6 +3494,12 @@ function appendDiscoveryWorkCell(tr,c,row){
   else if(c==="来源"){td.className="detail-text";td.textContent=(row.source_queries||[]).join(" / ");}
   else if(c==="操作"){
     td.className="discover-action";
+    if(row.video_id||row.drama_id){
+      const series=document.createElement("button");
+      series.className="mini-btn";series.type="button";series.textContent="整剧列表/下载";
+      series.addEventListener("click",()=>openDiscoveredSeries(row));
+      td.appendChild(series);
+    }
     if(row.video_url){
       const view=document.createElement("a");
       view.className="mini-btn";view.href=row.video_url;view.target="_blank";view.rel="noopener";view.textContent="看作品";
@@ -3456,7 +3507,7 @@ function appendDiscoveryWorkCell(tr,c,row){
     }
     if(row.video_id){
       const play=document.createElement("button");
-      play.className="mini-btn";play.type="button";play.textContent="播放源";
+      play.className="mini-btn";play.type="button";play.textContent="本集播放";
       play.addEventListener("click",()=>openDiscoveredWorkSource(row));
       td.appendChild(play);
     }
@@ -4144,7 +4195,7 @@ function init(){
   $("accountsInput").addEventListener("input",updateAcctCount);
   $("accountsInput").addEventListener("input",()=>store.set("thr_accounts",$("accountsInput").value));
   if(store.get("thr_accounts")){$("accountsInput").value=store.get("thr_accounts");updateAcctCount();}
-  ["backendSecret","backendSecretInline"].forEach(id=>{
+  ["backendSecret","backendSecretInline","discoverSecretInput"].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener("input",()=>syncBackendSecretInputs(el.value));
   });
@@ -4174,7 +4225,7 @@ function init(){
   setPublicPageView("dashboard");
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
-  $("discoverTabBtn").addEventListener("click",()=>{resultView="discover";renderResultTable();if(!discoveryResultItems().length)loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));});
+  $("discoverTabBtn").addEventListener("click",()=>{resultView="discover";renderResultTable();if(!backendSecret()){discoverySetStatus("请先填写并保存后端密码",false);return;}if(!discoveryResultItems().length)loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));});
   $("sortHotBtn").addEventListener("click",()=>setResultSort("hot"));
   $("sortLatestBtn").addEventListener("click",()=>setResultSort("latest"));
   $("discoverLoadBtn").addEventListener("click",()=>loadDiscoveryLatest().catch(e=>{discoverySetStatus("读取失败: "+(e.message||e),false);toast("读取失败:"+(e.message||e));}));
@@ -4190,8 +4241,10 @@ function init(){
     discoveryEmptyMessage="";
     if(input)input.value=storedDiscoveryKeywords();
     renderResultTable();
-    loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));
+    if(backendSecret())loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));
+    else discoverySetStatus("请先填写并保存后端密码",false);
   });
+  $("discoverSecretSaveBtn").addEventListener("click",saveDiscoverySecret);
   ["discoverKeywordsInput","discoverLimitInput","discoverMinFollowersInput","discoverMinDramasInput","discoverMaxVideosInput"].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener("keydown",e=>{if(e.key==="Enter")runDiscovery();});

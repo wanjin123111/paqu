@@ -131,6 +131,8 @@ class EpisodePageSecurityTests(unittest.TestCase):
         self.assertIn('data-private-action="download"', page)
         self.assertIn('headers:{"X-Schedule-Secret":secret}', page)
         self.assertIn('localStorage.getItem(storageKey)', page)
+        self.assertIn("target=zip", page)
+        self.assertIn("target=local_script", page)
         self.assertNotIn("?secret=", page)
         self.assertNotIn("&secret=", page)
 
@@ -144,6 +146,12 @@ class DiscoveryWorksTests(unittest.TestCase):
             "author": {
                 "unique_id": "demo.author",
                 "nickname": "Demo Author",
+            },
+            "dramaInfo": {
+                "dramaID": "7661844447575266321",
+                "dramaName": "Demo full series",
+                "numVideos": 31,
+                "DramaVideoData": {"episodeNumber": 1},
             },
             "statistics": {
                 "play_count": 12000,
@@ -177,6 +185,8 @@ class DiscoveryWorksTests(unittest.TestCase):
         self.assertEqual(work["views"], 12000)
         self.assertEqual(work["likes"], 800)
         self.assertTrue(work["already_monitored"])
+        self.assertEqual(work["drama_id"], "7661844447575266321")
+        self.assertEqual(work["episode_count"], 31)
 
     def test_discover_works_accepts_tiktok_share_short_link(self):
         share_url = "https://www.tiktok.com/t/ZTFNEj8Hk/"
@@ -210,6 +220,11 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn('<option value="works">作品</option>', page)
             self.assertIn('mode:discoveryMode', page)
             self.assertIn('作品链接或分享短链接', page)
+            self.assertIn('id="discoverSecretInput"', page)
+            self.assertIn('id="discoverSecretSaveBtn"', page)
+            self.assertIn('openDiscoveredSeries', page)
+            self.assertIn('整剧列表/下载', page)
+            self.assertNotIn('throw new Error("missing SCHEDULE_SECRET")', page)
 
     def test_discovery_endpoint_reads_separate_work_results(self):
         handler = object.__new__(proxy.Handler)
@@ -221,6 +236,35 @@ class DiscoveryWorksTests(unittest.TestCase):
         with mock.patch.object(proxy, "_read_discovered_works", return_value=stored):
             handler._discover_accounts_endpoint({"mode": ["works"]})
         self.assertEqual(handler.responses, [(200, stored)])
+
+    def test_series_target_resolves_work_to_full_drama_list(self):
+        handler = object.__new__(proxy.Handler)
+        handler.responses = []
+        handler._require_private_access = mock.Mock(return_value=True)
+        handler._send_json = lambda code, payload: handler.responses.append((code, payload))
+        reference = {
+            "account": "demo.author",
+            "drama_id": "7661844447575266321",
+            "drama_title": "Demo full series",
+            "episode_count": 31,
+            "source": "video-drama-info",
+        }
+        with mock.patch.object(proxy, "_resolve_drama_reference_for_video", return_value=reference) as resolve:
+            handler._resolve_drama_link({
+                "uid": ["demo.author"],
+                "video_id": ["7653132293346692365"],
+                "target": ["series"],
+                "redirect": ["0"],
+            })
+
+        resolve.assert_called_once_with("demo.author", "7653132293346692365")
+        handler._require_private_access.assert_called_once()
+        self.assertEqual(handler.responses[0][0], 200)
+        payload = handler.responses[0][1]
+        self.assertEqual(payload["target"], "series")
+        self.assertEqual(payload["episode_count"], 31)
+        self.assertIn("target=list", payload["url"])
+        self.assertIn("drama_id=7661844447575266321", payload["url"])
 
 
 class RetentionTests(unittest.TestCase):
