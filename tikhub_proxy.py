@@ -4124,7 +4124,8 @@ def _build_drama_local_downloader_script(account, drama_id, episode_items):
                 "error": str(exc),
             })
     stamp = datetime.datetime.now(BEIJING_TZ).strftime("%Y%m%d-%H%M%S")
-    folder_name = _safe_download_name("%s-%s-%s" % (account or "account", _clean_drama_id(drama_id) or "drama", stamp), 120)
+    folder_prefix = _safe_download_name("%s-%s" % (account or "account", _clean_drama_id(drama_id) or "drama"), 100)
+    folder_name = _safe_download_name("%s-%s" % (folder_prefix, stamp), 120)
     payload = json.dumps(items, ensure_ascii=False, indent=2)
     error_payload = json.dumps(errors, ensure_ascii=False, indent=2)
     script = """# TikHub drama local downloader
@@ -4138,7 +4139,10 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new()
 $ua = %s
 $referer = %s
 $baseDir = if ($env:TIKHUB_DOWNLOAD_BASE_DIR) { $env:TIKHUB_DOWNLOAD_BASE_DIR } else { $PSScriptRoot }
-$downloadDir = Join-Path $baseDir %s
+$folderPrefix = %s
+$folderName = %s
+$existingDir = Get-ChildItem -LiteralPath $baseDir -Directory -Filter ($folderPrefix + "-*") -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$downloadDir = if ($null -ne $existingDir) { $existingDir.FullName } else { Join-Path $baseDir $folderName }
 $itemsJson = @'
 %s
 '@
@@ -4169,10 +4173,10 @@ function Receive-FinishedJobs {
 
 foreach ($item in $items) {
   while (($jobs | Where-Object { $_.State -eq "Running" }).Count -ge $maxJobs) {
-    $jobs = Receive-FinishedJobs $jobs
+    $jobs = @(Receive-FinishedJobs $jobs)
     Start-Sleep -Milliseconds 500
   }
-  $jobs += Start-Job -ArgumentList $item.url, $item.file, $downloadDir, $ua, $referer -ScriptBlock {
+  $job = Start-Job -ArgumentList $item.url, $item.file, $downloadDir, $ua, $referer -ScriptBlock {
     param($url, $file, $dir, $ua, $referer)
     $out = Join-Path $dir $file
     if (Test-Path -LiteralPath $out) {
@@ -4185,10 +4189,11 @@ foreach ($item in $items) {
       throw "curl failed: $file"
     }
   }
+  $jobs = @($jobs) + @($job)
 }
 
 while ($jobs.Count -gt 0) {
-  $jobs = Receive-FinishedJobs $jobs
+  $jobs = @(Receive-FinishedJobs $jobs)
   Start-Sleep -Milliseconds 500
 }
 
@@ -4204,6 +4209,7 @@ Read-Host "Press Enter to close"
         _clean_drama_id(drama_id),
         _powershell_single_quoted(DEFAULT_UA),
         _powershell_single_quoted(TIKTOK_HOST + ("/@" + account if account else "/")),
+        _powershell_single_quoted(folder_prefix),
         _powershell_single_quoted(folder_name),
         payload,
         error_payload,

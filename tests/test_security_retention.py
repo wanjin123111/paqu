@@ -137,6 +137,30 @@ class EpisodePageSecurityTests(unittest.TestCase):
         self.assertNotIn("&secret=", page)
 
 
+class LocalDownloaderScriptTests(unittest.TestCase):
+    def test_job_collection_stays_an_array_after_finished_jobs_are_removed(self):
+        summary = {
+            "video_id": "123",
+            "episode_no": 1,
+            "title": "Episode 1",
+        }
+        with mock.patch.object(proxy, "_drama_episode_summary", return_value=summary), \
+                mock.patch.object(proxy, "_episode_direct_play_url", return_value="https://media.example/1.mp4"):
+            script_bytes, count, errors = proxy._build_drama_local_downloader_script(
+                "demo", "drama-1", [{"aweme_id": "123"}]
+            )
+
+        script = script_bytes.decode("utf-8-sig")
+        self.assertEqual(count, 1)
+        self.assertEqual(errors, [])
+        self.assertIn("$jobs = @(Receive-FinishedJobs $jobs)", script)
+        self.assertIn("$job = Start-Job", script)
+        self.assertIn("$jobs = @($jobs) + @($job)", script)
+        self.assertIn('$folderPrefix + "-*"', script)
+        self.assertIn("$existingDir.FullName", script)
+        self.assertNotIn("$jobs += Start-Job", script)
+
+
 class DiscoveryWorksTests(unittest.TestCase):
     def sample_video(self):
         return {
