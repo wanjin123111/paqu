@@ -1,4 +1,9 @@
 __pycache__/
 reports/
+downloads/
 *.pyc
 *.log
+.env
+.env.*
+!.env.example
+*.zip
