@@ -65,6 +65,75 @@ class PrivateAccessTests(unittest.TestCase):
         handler._require_private_access.assert_called_once()
         get_play_url.assert_not_called()
 
+    def test_header_authenticated_video_source_returns_url(self):
+        handler = self.make_handler(headers={"X-Schedule-Secret": "expected-secret"})
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
+                mock.patch.object(proxy, "_get_video_play_url", return_value="https://media.example/video.mp4"):
+            handler._resolve_drama_link({
+                "uid": ["demo"],
+                "video_id": ["123"],
+                "target": ["play"],
+                "redirect": ["0"],
+            })
+
+        self.assertEqual(handler.responses, [(200, {
+            "ok": True,
+            "url": "https://media.example/video.mp4",
+            "target": "play",
+        })])
+
+    def test_zip_download_requires_and_accepts_header_secret(self):
+        denied = self.make_handler()
+        denied._send_drama_episode_zip = mock.Mock()
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
+                mock.patch.object(proxy, "_get_drama_episode_items") as get_items:
+            denied._resolve_drama_link({
+                "uid": ["demo"],
+                "drama_id": ["drama-1"],
+                "target": ["zip"],
+            })
+        self.assertEqual(denied.responses[0][0], 403)
+        get_items.assert_not_called()
+        denied._send_drama_episode_zip.assert_not_called()
+
+        allowed = self.make_handler(headers={"X-Schedule-Secret": "expected-secret"})
+        allowed._send_drama_episode_zip = mock.Mock()
+        episode_items = [{"aweme_id": "123"}]
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
+                mock.patch.object(proxy, "_get_drama_episode_items", return_value=episode_items):
+            allowed._resolve_drama_link({
+                "uid": ["demo"],
+                "drama_id": ["drama-1"],
+                "target": ["zip"],
+            })
+        allowed._send_drama_episode_zip.assert_called_once_with("demo", "drama-1", episode_items)
+
+
+class EpisodePageSecurityTests(unittest.TestCase):
+    def test_episode_page_uses_header_authenticated_actions(self):
+        episodes = [{
+            "index": 1,
+            "episode_label": "第1集",
+            "video_id": "123",
+            "title": "Demo episode",
+            "publish_time": "2026-07-13 12:00:00",
+            "views": 100,
+            "views_text": "100",
+            "video_url": "https://www.tiktok.com/@demo/video/123",
+            "play_url": "/drama-link?uid=demo&video_id=123&target=play&redirect=1",
+        }]
+
+        with mock.patch.object(proxy, "_collect_episode_growth_and_record", return_value={}):
+            page = proxy._render_drama_episode_list_page("demo", "drama-1", episodes).decode("utf-8")
+
+        self.assertIn('id="backendSecretInput"', page)
+        self.assertIn('data-private-action="open-json"', page)
+        self.assertIn('data-private-action="download"', page)
+        self.assertIn('headers:{"X-Schedule-Secret":secret}', page)
+        self.assertIn('localStorage.getItem(storageKey)', page)
+        self.assertNotIn("?secret=", page)
+        self.assertNotIn("&secret=", page)
+
 
 class RetentionTests(unittest.TestCase):
     def test_runtime_cleanup_only_removes_archives_older_than_30_days(self):

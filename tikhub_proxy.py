@@ -4130,7 +4130,7 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
     for episode in episodes:
         metrics = growth_metrics.get(_clean_drama_id(episode.get("video_id"))) or {}
         page_link = '<a class="link ghost" href="%s" target="_blank" rel="noopener">&#20316;&#21697;&#39029;</a>' % _html_text(episode["video_url"]) if episode.get("video_url") else '<span class="muted">&#26080;</span>'
-        play_link = '<a class="link primary" href="%s" target="_blank" rel="noopener">&#25773;&#25918;&#28304;</a>' % _html_text(episode["play_url"]) if episode.get("play_url") else '<span class="muted">&#26080;</span>'
+        play_link = '<a class="link primary" href="%s" data-private-action="open-json">&#25773;&#25918;&#28304;</a>' % _html_text(episode["play_url"]) if episode.get("play_url") else '<span class="muted">&#26080;</span>'
         rows.append("""<tr>
   <td class="idx">%s</td>
   <td><div class="name">%s</div><div class="meta">%s</div></td>
@@ -4180,8 +4180,8 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>&#30701;&#21095;&#35270;&#39057;&#21015;&#34920;</title>
 <style>
-:root{color-scheme:light;--ink:#172033;--muted:#667085;--line:#e6eaf1;--head:#1d2633;--bg:#f5f7fb;--blue:#405cff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Arial,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:24px auto;padding:0 18px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(31,41,55,.08);overflow:hidden}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px}.tools{display:flex;gap:8px;flex-wrap:wrap}.btn,.link{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:6px;text-decoration:none;border:1px solid var(--line);white-space:nowrap}.btn{color:var(--ink);background:#fff}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.ghost{color:var(--blue);background:#fff;margin-left:8px}table{width:100%%;border-collapse:collapse;table-layout:fixed}thead th{background:var(--head);color:#fff;text-align:left;font-weight:700;padding:12px 14px}tbody td{border-top:1px solid var(--line);padding:12px 14px;vertical-align:top}tbody tr:nth-child(even){background:#fafbfe}.idx{width:64px;color:var(--muted)}.time-col{width:154px}.view-col{width:96px}.growth-col{width:118px}.action-col{width:178px}.name{font-weight:700;word-break:break-word}.meta{margin-top:3px;color:var(--muted);font-size:12px;word-break:break-all}.growth-cell{font-weight:800;white-space:nowrap}.growth-up{display:inline-flex;align-items:center;gap:4px;color:#e11d48}.growth-flat,.growth-empty{color:#98a2b3;font-weight:700}.trend-arrow{font-size:16px;line-height:1}.actions{white-space:nowrap}.empty{text-align:center;color:var(--muted);padding:34px}.note{color:var(--muted);font-size:12px;margin-top:12px}@media(max-width:760px){.top{display:block}.tools{margin-top:12px}table{table-layout:auto}.hide-sm{display:none}.actions{white-space:normal}.link.ghost{margin-left:0;margin-top:6px}}
+:root{color-scheme:light;--ink:#172033;--muted:#667085;--line:#e6eaf1;--head:#1d2633;--bg:#f5f7fb;--blue:#405cff;--ok:#067647;--err:#b42318}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Arial,"Microsoft YaHei",sans-serif}.wrap{max-width:1180px;margin:24px auto;padding:0 18px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 10px 28px rgba(31,41,55,.08);overflow:hidden}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line)}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px}.tools{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.secret-box{display:flex;align-items:center;gap:6px}.secret-input{width:170px;min-height:34px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;color:var(--ink);background:#fff}.btn,.link{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:7px 12px;border-radius:6px;text-decoration:none;border:1px solid var(--line);white-space:nowrap;cursor:pointer}.btn{color:var(--ink);background:#fff}.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.primary{background:var(--blue);border-color:var(--blue);color:#fff}.link.ghost{color:var(--blue);background:#fff;margin-left:8px}.private-status{display:none;padding:9px 20px;border-bottom:1px solid var(--line);font-size:13px}.private-status.show{display:block}.private-status.ok{color:var(--ok);background:#ecfdf3}.private-status.err{color:var(--err);background:#fef3f2}table{width:100%%;border-collapse:collapse;table-layout:fixed}thead th{background:var(--head);color:#fff;text-align:left;font-weight:700;padding:12px 14px}tbody td{border-top:1px solid var(--line);padding:12px 14px;vertical-align:top}tbody tr:nth-child(even){background:#fafbfe}.idx{width:64px;color:var(--muted)}.time-col{width:154px}.view-col{width:96px}.growth-col{width:118px}.action-col{width:178px}.name{font-weight:700;word-break:break-word}.meta{margin-top:3px;color:var(--muted);font-size:12px;word-break:break-all}.growth-cell{font-weight:800;white-space:nowrap}.growth-up{display:inline-flex;align-items:center;gap:4px;color:#e11d48}.growth-flat,.growth-empty{color:#98a2b3;font-weight:700}.trend-arrow{font-size:16px;line-height:1}.actions{white-space:nowrap}.empty{text-align:center;color:var(--muted);padding:34px}.note{color:var(--muted);font-size:12px;margin-top:12px}@media(max-width:760px){.top{display:block}.tools{justify-content:flex-start;margin-top:12px}.secret-box{width:100%%}.secret-input{flex:1;min-width:0}table{table-layout:auto}.hide-sm{display:none}.actions{white-space:normal}.link.ghost{margin-left:0;margin-top:6px}}
 </style>
 </head>
 <body>
@@ -4193,20 +4193,135 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
         <div class="sub">@%s &#183; &#20849; %s &#38598; &#183; &#30701;&#21095;ID %s</div>
       </div>
       <div class="tools">
+        <div class="secret-box">
+          <input class="secret-input" id="backendSecretInput" type="password" autocomplete="off" spellcheck="false" placeholder="先填写后端密码">
+          <button class="btn" id="saveBackendSecret" type="button">&#20445;&#23384;&#23494;&#30721;</button>
+        </div>
         <a class="btn" href="/" target="_self">&#36820;&#22238;&#25253;&#34920;</a>
-        <a class="btn primary" href="%s" target="_blank" rel="noopener">&#19979;&#36733;&#20840;&#37096; ZIP</a>
-        <a class="btn" href="%s" target="_blank" rel="noopener">&#26412;&#26426;&#19979;&#36733;&#33050;&#26412;</a>
-        <a class="btn" href="%s" target="_blank" rel="noopener">&#20445;&#23384;&#21040;&#26412;&#26426;</a>
+        <a class="btn primary" href="%s" data-private-action="download">&#19979;&#36733;&#20840;&#37096; ZIP</a>
+        <a class="btn" href="%s" data-private-action="download">&#26412;&#26426;&#19979;&#36733;&#33050;&#26412;</a>
+        <a class="btn" href="%s" data-private-action="navigate">&#20445;&#23384;&#21040;&#26412;&#26426;</a>
         <a class="btn" href="%s" target="_blank" rel="noopener">JSON</a>
       </div>
     </div>
+    <div class="private-status" id="privateStatus" role="status" aria-live="polite"></div>
     <table>
       <thead><tr><th class="idx">&#38598;&#25968;</th><th>&#35270;&#39057;</th><th class="hide-sm time-col">&#21457;&#24067;&#26102;&#38388;</th><th class="hide-sm view-col">&#35266;&#30475;</th><th class="hide-sm growth-col">&#21608;&#19978;&#28072;&#28909;&#24230;</th><th class="hide-sm growth-col">&#26376;&#19978;&#28072;&#28909;&#24230;</th><th class="action-col">&#38142;&#25509;</th></tr></thead>
       <tbody>%s</tbody>
     </table>
   </section>
-  <div class="note">&#25773;&#25918;&#28304;&#38142;&#25509;&#20250;&#22312;&#28857;&#20987;&#26102;&#23454;&#26102;&#33719;&#21462;&#26368;&#26032;&#30452;&#38142;&#12290;&#8220;&#26412;&#26426;&#19979;&#36733;&#33050;&#26412;&#8221;&#21487;&#20197;&#22312;&#32447;&#19978;&#39029;&#38754;&#29983;&#25104;&#65292;&#8220;&#20445;&#23384;&#21040;&#26412;&#26426;&#8221;&#38656;&#35201;&#29992;&#26412;&#22320;&#20195;&#29702;&#25171;&#24320;&#39029;&#38754;&#12290;</div>
+  <div class="note">&#25773;&#25918;&#28304;&#21644;&#19979;&#36733;&#24517;&#39035;&#20808;&#22635;&#20889;&#27491;&#30830;&#30340;&#21518;&#31471;&#23494;&#30721;&#12290;&#23494;&#30721;&#21482;&#36890;&#36807;&#35831;&#27714;&#22836;&#21457;&#36865;&#65292;&#19981;&#20250;&#25918;&#20837; URL&#12290;&#8220;&#26412;&#26426;&#19979;&#36733;&#33050;&#26412;&#8221;&#21487;&#20197;&#22312;&#32447;&#19978;&#39029;&#38754;&#29983;&#25104;&#65292;&#8220;&#20445;&#23384;&#21040;&#26412;&#26426;&#8221;&#38656;&#35201;&#29992;&#26412;&#22320;&#20195;&#29702;&#25171;&#24320;&#39029;&#38754;&#12290;</div>
 </div>
+<script>
+(function(){
+  "use strict";
+  var storageKey="thr_backend_secret";
+  var input=document.getElementById("backendSecretInput");
+  var saveButton=document.getElementById("saveBackendSecret");
+  var statusBox=document.getElementById("privateStatus");
+
+  function savedSecret(){
+    try{return String(localStorage.getItem(storageKey)||"").trim();}catch(_){return "";}
+  }
+  function currentSecret(){
+    return String((input&&input.value)||savedSecret()||"").trim();
+  }
+  function storeSecret(value){
+    try{
+      if(value)localStorage.setItem(storageKey,value);
+      else localStorage.removeItem(storageKey);
+    }catch(_){}
+  }
+  function setStatus(message,ok){
+    statusBox.textContent=message||"";
+    statusBox.className="private-status"+(message?" show "+(ok?"ok":"err"):"");
+  }
+  function requireSecret(){
+    var secret=currentSecret();
+    if(!secret){
+      setStatus("请先填写并保存后端密码，再打开播放源或下载。",false);
+      if(input)input.focus();
+      return "";
+    }
+    storeSecret(secret);
+    return secret;
+  }
+  function responseFilename(response,fallback){
+    var disposition=response.headers.get("Content-Disposition")||"";
+    var encoded=/filename\\*=UTF-8''([^;]+)/i.exec(disposition);
+    var plain=/filename="?([^";]+)"?/i.exec(disposition);
+    try{return decodeURIComponent((encoded&&encoded[1])||(plain&&plain[1])||fallback);}catch(_){return fallback;}
+  }
+  async function responseError(response){
+    var text=await response.text();
+    try{
+      var payload=JSON.parse(text);
+      if(payload&&payload.error)return payload.error;
+    }catch(_){}
+    return text||("HTTP "+response.status);
+  }
+  async function runPrivateAction(anchor){
+    var secret=requireSecret();
+    if(!secret)return;
+    var action=anchor.getAttribute("data-private-action")||"open-json";
+    var requestUrl=new URL(anchor.getAttribute("href"),location.href);
+    if(action==="open-json")requestUrl.searchParams.set("redirect","0");
+    var popup=(action==="open-json"||action==="navigate")?window.open("about:blank","_blank"):null;
+    if(popup)popup.opener=null;
+    anchor.setAttribute("aria-busy","true");
+    setStatus(action==="download"?"正在准备下载…":"正在验证密码并获取最新地址…",true);
+    try{
+      var response=await fetch(requestUrl.toString(),{
+        headers:{"X-Schedule-Secret":secret},
+        cache:"no-store"
+      });
+      if(!response.ok)throw new Error(await responseError(response));
+      if(action==="open-json"){
+        var data=await response.json();
+        if(!data||!data.url)throw new Error("后端没有返回可用播放地址");
+        if(popup)popup.location.replace(data.url);
+        else window.open(data.url,"_blank","noopener");
+        setStatus("密码验证成功，已打开最新播放源。",true);
+      }else if(action==="navigate"){
+        if(popup)popup.location.replace(response.url);
+        else window.open(response.url,"_blank","noopener");
+        setStatus("密码验证成功，已打开本机保存页面。",true);
+      }else{
+        var blob=await response.blob();
+        var blobUrl=URL.createObjectURL(blob);
+        var downloader=document.createElement("a");
+        downloader.href=blobUrl;
+        downloader.download=responseFilename(response,"download");
+        document.body.appendChild(downloader);
+        downloader.click();
+        downloader.remove();
+        setTimeout(function(){URL.revokeObjectURL(blobUrl);},60000);
+        setStatus("密码验证成功，下载已经开始。",true);
+      }
+    }catch(error){
+      if(popup)popup.close();
+      var message=String((error&&error.message)||error||"请求失败");
+      if(/secret|403/i.test(message))message="后端密码错误或后端尚未配置密码。";
+      setStatus(message,false);
+    }finally{
+      anchor.removeAttribute("aria-busy");
+    }
+  }
+
+  if(input)input.value=savedSecret();
+  if(saveButton)saveButton.addEventListener("click",function(){
+    var secret=String((input&&input.value)||"").trim();
+    storeSecret(secret);
+    setStatus(secret?"后端密码已保存在当前浏览器，可以播放和下载。":"后端密码已清除。",!!secret);
+  });
+  document.addEventListener("click",function(event){
+    var anchor=event.target.closest("[data-private-action]");
+    if(!anchor)return;
+    event.preventDefault();
+    runPrivateAction(anchor);
+  });
+})();
+</script>
 </body>
 </html>""" % (
         _html_text(account),
