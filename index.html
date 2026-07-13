@@ -177,12 +177,17 @@
   .discover-toolbar .search-field{width:min(440px,100%);max-width:440px}
   .discover-mini{display:flex;align-items:center;gap:6px;border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--ink-soft)}
   .discover-mini input{width:74px;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;text-align:right}
+  .discover-mini select{border:0;outline:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+  .discover-toolbar [hidden]{display:none!important}
   .discover-status{font-size:12px;color:var(--ink-faint)}
   .discover-account{display:flex;align-items:center;gap:9px;min-width:170px}
   .discover-avatar{width:34px;height:34px;border-radius:50%;object-fit:cover;background:#eef2ff;border:1px solid var(--line)}
   .discover-action{display:flex;align-items:center;gap:8px}
   .discover-action .mini-btn{white-space:nowrap}
   .discover-badge{display:inline-flex;align-items:center;border-radius:999px;padding:2px 8px;background:#f0fdf4;color:#15803d;font-size:11px}
+  .discover-work{min-width:260px;max-width:460px}
+  .discover-work-title{font-weight:650;color:var(--ink);line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .discover-work-id{display:block;margin-top:4px;color:var(--ink-faint);font:11px var(--mono)}
   #resultCard.detail-view .result-viewbar{display:grid;grid-template-columns:auto minmax(280px,1fr) minmax(500px,auto);align-items:center;gap:10px 12px}
   #resultCard.detail-view #detailSearchBox{grid-column:2;grid-row:1;flex:none;min-width:0}
   #resultCard.detail-view #detailSearchBox .search-field{width:100%;max-width:420px}
@@ -731,7 +736,7 @@ shortdramatime"></textarea>
         <div class="result-tabs" role="tablist" aria-label="报表视图">
           <button class="tab-btn active" id="summaryTabBtn" type="button" data-view="summary">账号汇总</button>
           <button class="tab-btn" id="detailTabBtn" type="button" data-view="detail">账号明细</button>
-          <button class="tab-btn" id="discoverTabBtn" type="button" data-view="discover">发现账号</button>
+          <button class="tab-btn" id="discoverTabBtn" type="button" data-view="discover">发现账号 / 作品</button>
         </div>
         <div class="report-search" id="summarySearchBox">
           <label class="search-field"><span>搜索账号</span><input id="summarySearchInput" type="search" placeholder="昵称 / @账号 / 最高观看短剧" autocomplete="off" aria-label="搜索账号"></label>
@@ -766,10 +771,11 @@ shortdramatime"></textarea>
           </div>
         </div>
         <div class="discover-toolbar" id="discoverToolbar" hidden>
-          <label class="search-field"><span>关键词 / @账号</span><input id="discoverKeywordsInput" type="search" placeholder="短剧, mini drama, @premiumepisodes, TikTok主页" autocomplete="off" aria-label="发现账号关键词或账号"></label>
+          <label class="discover-mini"><span>发现</span><select id="discoverModeSelect" aria-label="选择发现类型"><option value="accounts">账号</option><option value="works">作品</option></select></label>
+          <label class="search-field"><span id="discoverQueryLabel">关键词 / @账号 / 链接</span><input id="discoverKeywordsInput" type="search" placeholder="关键词、@账号或 TikTok 主页链接" autocomplete="off" aria-label="发现关键词、账号或 TikTok 链接"></label>
           <label class="discover-mini"><span>候选</span><input id="discoverLimitInput" type="number" min="1" max="200" step="1" value="40"><span>个</span></label>
-          <label class="discover-mini"><span>最低粉丝</span><input id="discoverMinFollowersInput" type="text" value="0"></label>
-          <label class="discover-mini"><span>最低短剧</span><input id="discoverMinDramasInput" type="number" min="0" max="100000" step="1" value="0"><span>部</span></label>
+          <label class="discover-mini" id="discoverMinFollowersField" data-account-only><span>最低粉丝</span><input id="discoverMinFollowersInput" type="text" value="0"></label>
+          <label class="discover-mini" id="discoverMinDramasField" data-account-only><span>最低短剧</span><input id="discoverMinDramasInput" type="number" min="0" max="100000" step="1" value="0"><span>部</span></label>
           <label class="discover-mini"><span>搜索视频</span><input id="discoverMaxVideosInput" type="number" min="1" max="200" step="1" value="50"><span>条/词</span></label>
           <button class="mini-btn" id="discoverLoadBtn" type="button">读取结果</button>
           <button class="mini-btn" id="discoverRunBtn" type="button">开始发现</button>
@@ -850,6 +856,7 @@ const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","�
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","日增播放","时长","题材","简介","短剧链接"];
 const DISCOVERY_COLUMNS=["候选账号","粉丝","短剧数","短剧播放","样本最高播放","来源关键词","状态","操作"];
+const DISCOVERY_WORK_COLUMNS=["作品","作者","发布时间","播放","点赞","评论","分享","来源","操作"];
 const DEFAULT_DISCOVERY_KEYWORDS=[
   "short drama","shortdrama","mini drama","minidrama","micro drama","microdrama",
   "vertical drama","verticaldrama","vertical series","drama series","drama clips",
@@ -922,6 +929,8 @@ let monitorSearchText=store.get("thr_monitor_search")||"";
 let summarySearchText=store.get("thr_summary_search")||"";
 let detailSearchText=store.get("thr_detail_search")||"";
 let discoveredAccounts=[];
+let discoveredWorks=[];
+let discoveryMode=store.get("thr_discover_mode")==="works"?"works":"accounts";
 let discoveryBusy=false;
 let discoveryGeneratedAt="";
 let discoveryEmptyMessage="";
@@ -2835,7 +2844,7 @@ function updateDetailControls(list){
 function renderResultTable(){
   const card=$("resultCard");
   const tb=$("resultTable").querySelector("tbody");
-  card.style.display=(rows.length||dramaRows.length||discoveredAccounts.length||resultView==="discover")?"block":"none";
+  card.style.display=(rows.length||dramaRows.length||discoveredAccounts.length||discoveredWorks.length||resultView==="discover")?"block":"none";
   card.classList.toggle("detail-view",resultView==="detail");
   card.classList.toggle("summary-view",resultView==="summary");
   card.classList.toggle("discover-view",resultView==="discover");
@@ -3069,14 +3078,23 @@ function discoverySetStatus(text, ok){
   el.textContent=text||"";
   el.style.color=ok?"var(--ok)":"var(--ink-faint)";
 }
-function storedDiscoveryKeywords(){
-  const saved=(store.get("thr_discover_keywords")||"").trim();
+function discoveryQueryStorageKey(mode){
+  return mode==="works"?"thr_discover_works_queries":"thr_discover_keywords";
+}
+function storedDiscoveryKeywords(mode){
+  mode=mode||discoveryMode;
+  const saved=(store.get(discoveryQueryStorageKey(mode))||"").trim();
+  if(mode==="works")return saved;
   return (!saved||isLegacyDiscoveryKeywords(saved))?DEFAULT_DISCOVERY_KEYWORDS:saved;
 }
 function discoveryKeywords(){
   const el=$("discoverKeywordsInput");
   const value=el&&el.value?el.value.trim():"";
-  return (!value||isLegacyDiscoveryKeywords(value))?storedDiscoveryKeywords():value;
+  if(discoveryMode==="works")return value;
+  return (!value||isLegacyDiscoveryKeywords(value))?storedDiscoveryKeywords("accounts"):value;
+}
+function discoveryResultItems(){
+  return discoveryMode==="works"?discoveredWorks:discoveredAccounts;
 }
 function discoveryLimit(){
   const el=$("discoverLimitInput");
@@ -3098,24 +3116,40 @@ function updateDiscoveryControls(){
   const toolbar=$("discoverToolbar");
   if(toolbar)toolbar.hidden=resultView!=="discover";
   const input=$("discoverKeywordsInput"), limit=$("discoverLimitInput"), min=$("discoverMinFollowersInput"), minDramas=$("discoverMinDramasInput"), maxVideos=$("discoverMaxVideosInput");
+  const modeSelect=$("discoverModeSelect");
+  if(modeSelect){modeSelect.value=discoveryMode;modeSelect.disabled=discoveryBusy;}
   if(input&&document.activeElement!==input)input.value=storedDiscoveryKeywords();
+  if(input){
+    input.placeholder=discoveryMode==="works"?"关键词、@账号、主页链接、作品链接或分享短链接":"关键词、@账号或 TikTok 主页链接";
+    input.setAttribute("aria-label",discoveryMode==="works"?"发现作品关键词、账号或 TikTok 链接":"发现账号关键词、账号或 TikTok 链接");
+  }
+  const queryLabel=$("discoverQueryLabel");
+  if(queryLabel)queryLabel.textContent=discoveryMode==="works"?"关键词 / @账号 / 作品链接":"关键词 / @账号 / 主页链接";
   if(limit&&document.activeElement!==limit)limit.value=store.get("thr_discover_limit")||"40";
   if(min&&document.activeElement!==min)min.value=store.get("thr_discover_min_followers")||"0";
   if(minDramas&&document.activeElement!==minDramas)minDramas.value=store.get("thr_discover_min_dramas")||"0";
   if(maxVideos&&document.activeElement!==maxVideos)maxVideos.value=store.get("thr_discover_max_videos")||"50";
+  document.querySelectorAll("[data-account-only]").forEach(el=>{el.hidden=discoveryMode==="works";});
   const runBtn=$("discoverRunBtn"), loadBtn=$("discoverLoadBtn"), addAllBtn=$("discoverAddAllBtn");
-  if(runBtn)runBtn.disabled=discoveryBusy;
+  if(runBtn){runBtn.disabled=discoveryBusy;runBtn.textContent=discoveryMode==="works"?"开始发现作品":"开始发现账号";}
   if(loadBtn)loadBtn.disabled=discoveryBusy;
-  if(addAllBtn)addAllBtn.disabled=discoveryBusy||!discoveredAccounts.some(item=>item&&!item.already_monitored&&item.account);
+  if(addAllBtn){
+    addAllBtn.hidden=discoveryMode==="works";
+    addAllBtn.disabled=discoveryBusy||!discoveredAccounts.some(item=>item&&!item.already_monitored&&item.account);
+  }
   if(resultView==="discover"){
     const time=reportTimeLabel(discoveryGeneratedAt)||"";
-    discoverySetStatus(discoveryBusy?"正在发现账号，通常 1 分钟内结束...":(discoveredAccounts.length?("候选 "+fmt(discoveredAccounts.length)+" 个"+(time?" · "+time:"")):"需要任务密码后开始发现"), !!discoveredAccounts.length);
+    const items=discoveryResultItems();
+    const noun=discoveryMode==="works"?"作品":"候选账号";
+    discoverySetStatus(discoveryBusy?("正在发现"+noun+"，通常 1 分钟内结束..."):(items.length?(noun+" "+fmt(items.length)+" 个"+(time?" · "+time:"")):"需要任务密码后开始发现"), !!items.length);
   }
 }
 function loadDiscoveryPayload(payload, shouldRender=true){
-  discoveredAccounts=Array.isArray(payload&&payload.accounts)?payload.accounts:[];
+  if(discoveryMode==="works")discoveredWorks=Array.isArray(payload&&payload.works)?payload.works:[];
+  else discoveredAccounts=Array.isArray(payload&&payload.accounts)?payload.accounts:[];
   discoveryGeneratedAt=(payload&&payload.generated_at)||"";
-  discoveryEmptyMessage=(!discoveredAccounts.length&&discoveryGeneratedAt)?"上次发现没有候选账号。可以换关键词或降低最低粉丝后重试。":"";
+  const items=discoveryResultItems();
+  discoveryEmptyMessage=(!items.length&&discoveryGeneratedAt)?(discoveryMode==="works"?"上次没有发现作品。可以换关键词、账号或直接粘贴作品链接重试。":"上次发现没有候选账号。可以换关键词或降低最低粉丝后重试。"):"";
   if(shouldRender)renderResultTable();
 }
 function discoveryErrorSummary(payload){
@@ -3133,43 +3167,52 @@ function discoveryErrorSummary(payload){
 }
 async function loadDiscoveryLatest(){
   discoverySetStatus("正在读取发现结果...");
-  const payload=await backendFetchJson("/discover-accounts",{}, {requireSecret:true});
+  const payload=await backendFetchJson("/discover-accounts",{mode:discoveryMode}, {requireSecret:true});
   loadDiscoveryPayload(payload);
 }
 async function runDiscovery(){
   if(discoveryBusy)return;
-  discoveryBusy=true;
   const keywords=discoveryKeywords();
+  if(discoveryMode==="works"&&!keywords){
+    discoveryEmptyMessage="请输入关键词、@账号、TikTok 主页链接、作品链接或分享短链接。";
+    discoverySetStatus(discoveryEmptyMessage,false);
+    renderResultTable();
+    return;
+  }
+  discoveryBusy=true;
   const limit=discoveryLimit();
   const minFollowers=discoveryMinFollowers();
   const minDramas=discoveryMinDramas();
   const maxVideos=discoveryMaxVideos();
-  store.set("thr_discover_keywords",keywords);
+  store.set(discoveryQueryStorageKey(),keywords);
   store.set("thr_discover_limit",String(limit));
   store.set("thr_discover_min_followers",($("discoverMinFollowersInput")&&$("discoverMinFollowersInput").value)||"0");
   store.set("thr_discover_min_dramas",String(minDramas));
   store.set("thr_discover_max_videos",String(maxVideos));
-  discoverySetStatus("正在搜索短剧视频并筛作者...");
+  discoverySetStatus(discoveryMode==="works"?"正在搜索或解析作品...":"正在搜索短剧视频并筛作者...");
   discoveryEmptyMessage="";
   renderResultTable();
   let finalStatus="", finalOk=false;
   try{
     const payload=await backendFetchJson("/discover-accounts",{
       run:"1",
+      mode:discoveryMode,
       keywords,
+      queries:keywords,
       limit:String(limit),
       min_followers:String(minFollowers),
       min_dramas:String(minDramas),
       max_videos:String(maxVideos),
     }, {requireSecret:true, timeoutMs:95000});
     loadDiscoveryPayload(payload, false);
-    if(!discoveredAccounts.length){
+    const items=discoveryResultItems();
+    if(!items.length){
       const errors=Array.isArray(payload&&payload.errors)?payload.errors:[];
       const hitLimit=errors.some(item=>String(typeof item==="string"?item:(item&&item.message)||(item&&item.error)||"").includes("runtime limit"));
       const detail=discoveryErrorSummary(payload);
-      discoveryEmptyMessage=hitLimit?"发现已到时间上限，本次没有候选账号。可以减少关键词或候选数量后重试。":("本次没有发现候选账号。TikHub 搜索接口可能没有返回可用的短剧作者。"+(detail?" "+detail:""));
+      discoveryEmptyMessage=hitLimit?("发现已到时间上限，本次没有"+(discoveryMode==="works"?"作品":"候选账号")+"。可以减少关键词或候选数量后重试。"):(discoveryMode==="works"?("本次没有发现作品。可直接粘贴作品链接，或换关键词、@账号后重试。"+(detail?" "+detail:"")):("本次没有发现候选账号。TikHub 搜索接口可能没有返回可用的短剧作者。"+(detail?" "+detail:"")));
     }
-    finalStatus="发现完成 · 候选 "+fmt(discoveredAccounts.length)+" 个";
+    finalStatus="发现完成 · "+(discoveryMode==="works"?"作品 ":"候选 ")+fmt(items.length)+" 个";
     finalOk=true;
   }catch(e){
     finalStatus="发现失败: "+(e.message||e);
@@ -3190,6 +3233,9 @@ async function addDiscoveredAccount(account){
     updateScheduleAccountState(payload);
     const added=(payload.added||[]).map(String);
     for(const item of discoveredAccounts){
+      if(String(item.account||"").toLowerCase()===account.toLowerCase())item.already_monitored=true;
+    }
+    for(const item of discoveredWorks){
       if(String(item.account||"").toLowerCase()===account.toLowerCase())item.already_monitored=true;
     }
     renderResultTable();
@@ -3295,7 +3341,102 @@ function appendDiscoveryCell(tr,c,row){
   }
   tr.appendChild(td);
 }
+async function openDiscoveredWorkSource(row){
+  if(!row||!row.video_id)return;
+  const popup=window.open("about:blank","_blank");
+  if(popup)popup.opener=null;
+  discoverySetStatus("正在获取作品播放源...");
+  try{
+    const payload=await backendFetchJson("/drama-link",{
+      uid:row.account||"",
+      video_id:row.video_id,
+      target:"play",
+      redirect:"0",
+    },{requireSecret:true,timeoutMs:45000});
+    if(!payload||!payload.url)throw new Error("没有找到播放源");
+    if(popup)popup.location.href=payload.url;
+    else window.open(payload.url,"_blank","noopener");
+    discoverySetStatus("已打开作品播放源",true);
+  }catch(e){
+    if(popup)popup.close();
+    discoverySetStatus("播放源打开失败: "+(e.message||e),false);
+    toast("播放源打开失败:"+(e.message||e));
+  }
+}
+function appendDiscoveryWorkCell(tr,c,row){
+  const td=document.createElement("td");
+  if(c==="作品"){
+    td.className="discover-work";
+    const title=document.createElement(row.video_url?"a":"div");
+    title.className="discover-work-title";
+    title.textContent=row.description||"无标题作品";
+    if(row.video_url){title.href=row.video_url;title.target="_blank";title.rel="noopener";}
+    td.appendChild(title);
+    if(row.video_id){
+      const id=document.createElement("span");
+      id.className="discover-work-id";
+      id.textContent="ID "+row.video_id;
+      td.appendChild(id);
+    }
+  }else if(c==="作者"){
+    if(row.account){
+      const author=document.createElement("a");
+      author.href=row.profile_url||("https://www.tiktok.com/@"+row.account);
+      author.target="_blank";
+      author.rel="noopener";
+      author.textContent=(row.nickname&&row.nickname!==row.account?row.nickname+" ":"")+"@"+row.account;
+      td.appendChild(author);
+    }else td.textContent="未知";
+  }else if(c==="发布时间"){td.className="num";td.textContent=row.publish_time||"—";}
+  else if(c==="播放"){td.className="num";td.textContent=fmtPlay(row.views);}
+  else if(c==="点赞"){td.className="num";td.textContent=fmtPlay(row.likes);}
+  else if(c==="评论"){td.className="num";td.textContent=fmtPlay(row.comments);}
+  else if(c==="分享"){td.className="num";td.textContent=fmtPlay(row.shares);}
+  else if(c==="来源"){td.className="detail-text";td.textContent=(row.source_queries||[]).join(" / ");}
+  else if(c==="操作"){
+    td.className="discover-action";
+    if(row.video_url){
+      const view=document.createElement("a");
+      view.className="mini-btn";view.href=row.video_url;view.target="_blank";view.rel="noopener";view.textContent="看作品";
+      td.appendChild(view);
+    }
+    if(row.video_id){
+      const play=document.createElement("button");
+      play.className="mini-btn";play.type="button";play.textContent="播放源";
+      play.addEventListener("click",()=>openDiscoveredWorkSource(row));
+      td.appendChild(play);
+    }
+    if(row.account){
+      const add=document.createElement("button");
+      add.className="mini-btn";add.type="button";add.textContent=row.already_monitored?"作者已加入":"加作者";add.disabled=!!row.already_monitored;
+      add.addEventListener("click",()=>addDiscoveredAccount(row.account));
+      td.appendChild(add);
+    }
+  }
+  tr.appendChild(td);
+}
+function renderDiscoveryWorksTable(){
+  const tb=$("resultTable").querySelector("tbody");
+  setHeader(DISCOVERY_WORK_COLUMNS);
+  if(!discoveredWorks.length){
+    const tr=document.createElement("tr"),td=document.createElement("td");
+    td.colSpan=DISCOVERY_WORK_COLUMNS.length;
+    td.className="detail-text";
+    td.textContent=discoveryBusy?"正在搜索或解析作品，通常 1 分钟内结束...":(discoveryEmptyMessage||"暂无作品。可输入关键词、@账号，或直接粘贴 TikTok 作品链接搜索。");
+    tr.appendChild(td);tb.appendChild(tr);return;
+  }
+  const list=[...discoveredWorks].sort((a,b)=>toInt(b.views)-toInt(a.views)||toInt(b.likes)-toInt(a.likes));
+  for(const row of list){
+    const tr=document.createElement("tr");
+    for(const c of DISCOVERY_WORK_COLUMNS)appendDiscoveryWorkCell(tr,c,row);
+    tb.appendChild(tr);
+  }
+}
 function renderDiscoveryTable(){
+  if(discoveryMode==="works"){
+    renderDiscoveryWorksTable();
+    return;
+  }
   const tb=$("resultTable").querySelector("tbody");
   setHeader(DISCOVERY_COLUMNS);
   if(!discoveredAccounts.length){
@@ -3926,12 +4067,24 @@ function init(){
   setPublicPageView("dashboard");
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
-  $("discoverTabBtn").addEventListener("click",()=>{resultView="discover";renderResultTable();if(!discoveredAccounts.length)loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));});
+  $("discoverTabBtn").addEventListener("click",()=>{resultView="discover";renderResultTable();if(!discoveryResultItems().length)loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));});
   $("sortHotBtn").addEventListener("click",()=>setResultSort("hot"));
   $("sortLatestBtn").addEventListener("click",()=>setResultSort("latest"));
   $("discoverLoadBtn").addEventListener("click",()=>loadDiscoveryLatest().catch(e=>{discoverySetStatus("读取失败: "+(e.message||e),false);toast("读取失败:"+(e.message||e));}));
   $("discoverRunBtn").addEventListener("click",()=>runDiscovery());
   $("discoverAddAllBtn").addEventListener("click",()=>addAllDiscoveredAccounts());
+  $("discoverModeSelect").addEventListener("change",()=>{
+    if(discoveryBusy)return;
+    const input=$("discoverKeywordsInput");
+    store.set(discoveryQueryStorageKey(discoveryMode),(input&&input.value||"").trim());
+    discoveryMode=$("discoverModeSelect").value==="works"?"works":"accounts";
+    store.set("thr_discover_mode",discoveryMode);
+    discoveryGeneratedAt="";
+    discoveryEmptyMessage="";
+    if(input)input.value=storedDiscoveryKeywords();
+    renderResultTable();
+    loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));
+  });
   ["discoverKeywordsInput","discoverLimitInput","discoverMinFollowersInput","discoverMinDramasInput","discoverMaxVideosInput"].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener("keydown",e=>{if(e.key==="Enter")runDiscovery();});

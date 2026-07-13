@@ -37,6 +37,7 @@ DRAMA_EPISODE_HISTORY_FILE = os.path.join(REPORTS_DIR, "drama_episode_history.js
 SCHEDULE_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "schedule_accounts.json")
 SCHEDULE_ACCOUNTS_SEED_FILE = os.path.join(ROOT, "schedule_accounts.seed.json")
 DISCOVERED_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "discovered_accounts.json")
+DISCOVERED_WORKS_FILE = os.path.join(REPORTS_DIR, "discovered_works.json")
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
 ALLOW_HEADERS = "Authorization, Content-Type, Accept, X-Schedule-Secret"
@@ -178,6 +179,10 @@ SINGLE_VIDEO_EP_CANDIDATES = [
     "/api/v1/tiktok/app/v3/fetch_one_video_v2",
     "/api/v1/tiktok/app/v3/fetch_one_video_v3",
 ]
+SHARE_VIDEO_EP_CANDIDATES = [
+    ("/api/v1/tiktok/app/v3/fetch_one_video_by_share_url_v2", "share_url"),
+    ("/api/v1/hybrid/video_data", "url"),
+]
 DISCOVERY_SEARCH_ENDPOINTS = {
     "app_v3": "/api/v1/tiktok/app/v3/fetch_video_search_result",
     "web": "/api/v1/tiktok/web/fetch_search_video",
@@ -191,6 +196,9 @@ DISCOVERY_TOPIC_SEARCH_PHRASES = {
     "reelshort", "dramabox", "shortmax", "goodshort", "netshort", "yuzu drama", "pinedrama", "duanju",
 }
 PLAY_KEYS = ("play_count", "playCount", "play_cnt")
+LIKE_KEYS = ("digg_count", "diggCount", "like_count", "likeCount")
+COMMENT_KEYS = ("comment_count", "commentCount", "comments_count", "commentsCount")
+SHARE_KEYS = ("share_count", "shareCount", "shares_count", "sharesCount")
 DESC_KEYS = ("desc", "title", "content", "aweme_title", "text")
 ID_KEYS = ("aweme_id", "awemeId", "id", "item_id", "itemId")
 PLAYLIST_ID_KEYS = ("mixId", "mix_id", "playlist_id", "playlistId")
@@ -1263,6 +1271,36 @@ def _write_discovered_accounts(payload):
     return payload
 
 
+def _read_discovered_works():
+    try:
+        with open(DISCOVERED_WORKS_FILE, "r", encoding="utf-8-sig") as handle:
+            payload = json.load(handle)
+        if isinstance(payload, dict):
+            return payload
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "mode": "works",
+        "generated_at": "",
+        "queries": [],
+        "works": [],
+        "count": 0,
+        "errors": [],
+        "runtime_file": "reports/discovered_works.json",
+    }
+
+
+def _write_discovered_works(payload):
+    os.makedirs(REPORTS_DIR, exist_ok=True)
+    payload["runtime_file"] = "reports/discovered_works.json"
+    tmp = DISCOVERED_WORKS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp, DISCOVERED_WORKS_FILE)
+    return payload
+
+
 def _discovery_error(layer, source, message, status=None, hint=""):
     item = {"layer": layer, "source": source, "message": str(message)}
     if status:
@@ -1566,7 +1604,7 @@ def _account_lookup_candidates(keyword):
         if re.fullmatch(r"[A-Za-z0-9._]{2,80}", uid) and uid.lower() not in {x.lower() for x in candidates}:
             candidates.append(uid)
 
-    for match in re.finditer(r"(?:https?://)?(?:www\.)?tiktok\.com/@([A-Za-z0-9._-]+)", value, flags=re.I):
+    for match in re.finditer(r"(?:https?://)?(?:www\.|m\.)?tiktok\.com/@([A-Za-z0-9._-]+)", value, flags=re.I):
         add(match.group(1))
     if value.startswith("@"):
         add(value)
@@ -1780,6 +1818,321 @@ def _discover_search_videos(keyword, max_items, started):
         cursor = str(next_cursor)
         time.sleep(SCHEDULE_DELAY_MS / 1000.0)
     return items, endpoint, errors
+
+
+def _discovery_tiktok_urls(value):
+    urls, seen = [], set()
+    pattern = r"https?://(?:[A-Za-z0-9-]+\.)?tiktok\.com/[^\s\"'<>]+"
+    for match in re.finditer(pattern, _to_text(value, 2000), flags=re.I):
+        url = html.unescape(match.group(0)).rstrip(").,;，；。】》")
+        try:
+            host = (urllib.parse.urlparse(url).hostname or "").lower().rstrip(".")
+        except Exception:
+            continue
+        if host != "tiktok.com" and not host.endswith(".tiktok.com"):
+            continue
+        key = url.lower()
+        if key not in seen:
+            seen.add(key)
+            urls.append(url)
+    return urls
+
+
+def _discovery_video_id(value):
+    text = _to_text(value, 2000)
+    match = re.search(r"/video/(\d{8,30})(?:[/?#]|$)", text, flags=re.I)
+    if match:
+        return match.group(1)
+    stripped = text.strip()
+    return stripped if re.fullmatch(r"\d{8,30}", stripped) else ""
+
+
+def _discovery_account(value):
+    text = _to_text(value, 1000).strip()
+    if _discovery_video_id(text):
+        return ""
+    match = re.search(r"(?:https?://)?(?:www\.|m\.)?tiktok\.com/@([A-Za-z0-9._-]+)(?:[/?#]|$)", text, flags=re.I)
+    if match:
+        return match.group(1)
+    match = re.fullmatch(r"@([A-Za-z0-9._-]{2,80})", text)
+    return match.group(1) if match else ""
+
+
+def _first_video_from_payload(data):
+    batch = _video_batch_from_search_payload(data, 1)
+    if batch:
+        return batch[0]
+
+    def find(obj, depth=0):
+        if depth > 10 or obj is None:
+            return None
+        if isinstance(obj, dict):
+            if _get_video_id(obj) and any(key in obj for key in ("video", "statistics", "stats", "author", "authorInfo", "desc")):
+                return obj
+            for key in ("aweme_detail", "awemeDetail", "item_info", "itemInfo", "item", "aweme", "video_detail", "videoDetail", "data"):
+                found = find(obj.get(key), depth + 1) if key in obj else None
+                if found:
+                    return found
+            for nested in obj.values():
+                if isinstance(nested, (dict, list)):
+                    found = find(nested, depth + 1)
+                    if found:
+                        return found
+        elif isinstance(obj, list):
+            for nested in obj:
+                found = find(nested, depth + 1)
+                if found:
+                    return found
+        return None
+
+    return find(data)
+
+
+def _fetch_discovery_video_by_id(video_id, started=None):
+    clean_id = _clean_drama_id(video_id)
+    if not clean_id:
+        raise TikHubError("作品链接中没有可用的作品 ID")
+    last_error = None
+    for endpoint in SINGLE_VIDEO_EP_CANDIDATES:
+        if _discovery_runtime_exceeded(started):
+            raise TikHubError("discovery runtime limit reached")
+        params = {"aweme_id": clean_id}
+        if endpoint.endswith("_v3"):
+            params["region"] = TIKTOK_REGION
+        try:
+            data = _send_tikhub_get(
+                endpoint,
+                params,
+                "TikHub single video discovery endpoint",
+                timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 8,
+                retries=1,
+            )
+            item = _first_video_from_payload(data)
+            if item:
+                return item, endpoint
+            last_error = TikHubError("TikHub single video endpoint returned no parseable work")
+        except TikHubError as exc:
+            last_error = exc
+    raise last_error or TikHubError("作品没有返回可解析的数据")
+
+
+def _fetch_discovery_video_by_url(share_url, started=None):
+    urls = _discovery_tiktok_urls(share_url)
+    if not urls:
+        raise TikHubError("没有识别到 TikTok 作品链接")
+    clean_url = urls[0]
+    last_error = None
+    for endpoint, param_name in SHARE_VIDEO_EP_CANDIDATES:
+        if _discovery_runtime_exceeded(started):
+            raise TikHubError("discovery runtime limit reached")
+        try:
+            data = _send_tikhub_get(
+                endpoint,
+                {param_name: clean_url},
+                "TikHub share link video endpoint",
+                timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 12,
+                retries=1,
+            )
+            item = _first_video_from_payload(data)
+            if item:
+                return item, endpoint
+            last_error = TikHubError("TikHub share link endpoint returned no parseable work")
+        except TikHubError as exc:
+            last_error = exc
+    raise last_error or TikHubError("作品分享链接解析失败")
+
+
+def _fetch_discovery_account_videos(account, max_items, started=None):
+    account = _to_text(account, 80).strip().lstrip("@")
+    if not account:
+        raise TikHubError("账号链接中没有可用的账号 ID")
+    secuid = _resolve_secuid(account, timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 5, retries=1)
+    if not secuid:
+        raise TikHubError("没有找到 @%s 的 secUid" % account)
+    items, seen = [], set()
+    cursor, locked_endpoint = "0", ""
+    endpoints = [DEFAULT_ENDPOINTS["posts"]] + [ep for ep in POST_EP_CANDIDATES if ep != DEFAULT_ENDPOINTS["posts"]]
+    for _page in range(1, DISCOVERY_SEARCH_PAGES + 1):
+        if _discovery_runtime_exceeded(started) or len(items) >= max_items:
+            break
+        params = {
+            "secUid": secuid,
+            "sec_user_id": secuid,
+            "unique_id": account,
+            "count": str(min(30, max_items - len(items))),
+            "cursor": str(cursor),
+            "max_cursor": str(cursor),
+        }
+        data, batch, last_error = None, [], None
+        candidates = [locked_endpoint] if locked_endpoint else endpoints
+        for endpoint in candidates:
+            try:
+                data = _send_tikhub_get(
+                    endpoint,
+                    params,
+                    "TikHub account works endpoint",
+                    timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 8,
+                    retries=1,
+                )
+                batch = _video_batch_from_search_payload(data, min(30, max_items - len(items)))
+                if batch:
+                    locked_endpoint = endpoint
+                    break
+                last_error = TikHubError("TikHub account works endpoint returned no parseable works")
+            except TikHubError as exc:
+                last_error = exc
+                if exc.status not in (404, 422):
+                    break
+        if not batch:
+            if items:
+                break
+            raise last_error or TikHubError("账号主页没有返回可解析的作品")
+        for video in batch:
+            video_id = _get_video_id(video)
+            key = video_id or json.dumps(video, ensure_ascii=False, sort_keys=True)[:200]
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(video)
+            if len(items) >= max_items:
+                break
+        has_more, next_cursor = _read_pagination(data)
+        advanced = next_cursor not in (None, "", "0") and str(next_cursor) != str(cursor)
+        if has_more in (False, 0, "0") or not advanced:
+            break
+        cursor = str(next_cursor)
+        time.sleep(SCHEDULE_DELAY_MS / 1000.0)
+    return items[:max_items], locked_endpoint or DEFAULT_ENDPOINTS["posts"]
+
+
+def _get_video_metric(video, keys):
+    if isinstance(video, dict):
+        for container_key in ("statistics", "stats"):
+            container = video.get(container_key)
+            if isinstance(container, dict):
+                for key in keys:
+                    if key in container:
+                        return _to_int(container[key])
+    return _to_int(_deep_find(video, keys))
+
+
+def _discovery_work_from_video(video, source_query, source_endpoint, fallback_url="", monitored=None):
+    if not isinstance(video, dict):
+        return None
+    author = _author_from_video(video) or {}
+    account = _to_text(author.get("account"), 80).lstrip("@")
+    if not account:
+        account = _extract_account_from_url(video).lstrip("@") or _extract_account_from_url(fallback_url).lstrip("@")
+    video_id = _clean_drama_id(_get_video_id(video))
+    if not video_id:
+        video_id = _discovery_video_id(fallback_url)
+    video_url = _video_link_from_item(account, video) or fallback_url
+    if not video_id and not video_url:
+        return None
+    return {
+        "video_id": video_id,
+        "description": _to_text(_get_desc(video), 320),
+        "account": account,
+        "nickname": _to_text(author.get("nickname"), 120) or account,
+        "avatar": author.get("avatar") or "",
+        "publish_time": _publish_time_of(video),
+        "views": _get_play_count(video),
+        "likes": _get_video_metric(video, LIKE_KEYS),
+        "comments": _get_video_metric(video, COMMENT_KEYS),
+        "shares": _get_video_metric(video, SHARE_KEYS),
+        "video_url": video_url,
+        "profile_url": ("https://www.tiktok.com/@" + account) if account else "",
+        "source_queries": [source_query] if source_query else [],
+        "source_endpoint": source_endpoint or "",
+        "already_monitored": bool(account and account.lower() in (monitored or set())),
+    }
+
+
+def _merge_discovered_work(works, item):
+    if not item:
+        return
+    key = item.get("video_id") or str(item.get("video_url") or "").lower()
+    if not key:
+        return
+    existing = works.get(key)
+    if not existing:
+        works[key] = item
+        return
+    for query in item.get("source_queries") or []:
+        if query and query not in existing["source_queries"]:
+            existing["source_queries"].append(query)
+    for field in ("views", "likes", "comments", "shares"):
+        existing[field] = max(_to_int(existing.get(field)), _to_int(item.get(field)))
+    for field in ("description", "account", "nickname", "avatar", "publish_time", "video_url", "profile_url", "source_endpoint"):
+        if not existing.get(field) and item.get(field):
+            existing[field] = item[field]
+    existing["already_monitored"] = bool(existing.get("already_monitored") or item.get("already_monitored"))
+
+
+def _discover_works(queries, limit, max_videos_per_query):
+    started = time.time()
+    queries = _parse_discovery_keywords(queries)
+    limit = max(1, min(int(limit or DISCOVERY_MAX_CANDIDATES), 200))
+    max_videos_per_query = max(1, min(int(max_videos_per_query or DISCOVERY_MAX_VIDEOS_PER_KEYWORD), 200))
+    configured_accounts, _source = _configured_schedule_accounts()
+    monitored = {item.lower() for item in configured_accounts}
+    works, errors = {}, []
+    for query in queries:
+        if _discovery_runtime_exceeded(started) or len(works) >= limit:
+            if _discovery_runtime_exceeded(started):
+                errors.append(_discovery_error(
+                    "runtime", "discover-works", "discovery runtime limit reached",
+                    hint="减少关键词、作品数量或每词搜索数后重试。",
+                ))
+            break
+        remaining = max(1, min(max_videos_per_query, limit - len(works)))
+        urls = _discovery_tiktok_urls(query)
+        video_id = _discovery_video_id(query)
+        account = _discovery_account(query)
+        videos, endpoint, query_errors = [], "", []
+        fallback_url = urls[0] if urls else ""
+        try:
+            if video_id:
+                video, endpoint = _fetch_discovery_video_by_id(video_id, started)
+                videos = [video]
+            elif urls and not account:
+                video, endpoint = _fetch_discovery_video_by_url(urls[0], started)
+                videos = [video]
+            elif account:
+                videos, endpoint = _fetch_discovery_account_videos(account, remaining, started)
+            else:
+                videos, endpoint, query_errors = _discover_search_videos(query, remaining, started)
+        except Exception as exc:
+            errors.append(_discovery_error(
+                "works", endpoint or ("direct-link" if urls else "search"), exc,
+                getattr(exc, "status", None),
+                "可输入关键词、@账号、TikTok 主页链接、作品链接或分享短链接。",
+            ) | {"query": query})
+            continue
+        for error in query_errors:
+            item = dict(error) if isinstance(error, dict) else _discovery_error("search", endpoint or "unknown", error)
+            item["query"] = query
+            errors.append(item)
+        for video in videos:
+            item = _discovery_work_from_video(video, query, endpoint, fallback_url, monitored)
+            _merge_discovered_work(works, item)
+            if len(works) >= limit:
+                break
+    result = sorted(works.values(), key=lambda item: (_to_int(item.get("views")), _to_int(item.get("likes"))), reverse=True)[:limit]
+    payload = {
+        "ok": True,
+        "mode": "works",
+        "generated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
+        "queries": queries,
+        "count": len(result),
+        "works": result,
+        "errors": errors[:80],
+        "monitored_count": len(monitored),
+        "runtime_seconds": round(time.time() - started, 2),
+        "runtime_limit_seconds": DISCOVERY_MAX_RUNTIME_SECONDS,
+        "runtime_file": "reports/discovered_works.json",
+    }
+    return _write_discovered_works(payload)
 
 
 def _discovery_raw_account_score(item):
@@ -4717,6 +5070,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _discover_accounts_endpoint(self, qs):
         if not self._require_schedule_secret(qs):
+            return
+        mode = str(qs.get("mode", ["accounts"])[0] or "accounts").strip().lower()
+        if mode in ("works", "videos"):
+            if self.command != "GET":
+                self._send_json(405, {"ok": False, "error": "discover works only supports GET"})
+                return
+            should_run = str(qs.get("run", ["0"])[0]).lower() in ("1", "true", "yes")
+            if not should_run:
+                self._send_json(200, _read_discovered_works())
+                return
+            try:
+                payload = _discover_works(
+                    qs.get("queries", qs.get("keywords", [""]))[0],
+                    _to_int(qs.get("limit", [DISCOVERY_MAX_CANDIDATES])[0]) or DISCOVERY_MAX_CANDIDATES,
+                    _to_int(qs.get("max_videos", [DISCOVERY_MAX_VIDEOS_PER_KEYWORD])[0]) or DISCOVERY_MAX_VIDEOS_PER_KEYWORD,
+                )
+                self._send_json(200, payload)
+            except Exception as exc:
+                self._send_json(500, {"ok": False, "error": str(exc)})
             return
         if self.command == "GET":
             should_run = str(qs.get("run", ["0"])[0]).lower() in ("1", "true", "yes")

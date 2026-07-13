@@ -135,6 +135,94 @@ class EpisodePageSecurityTests(unittest.TestCase):
         self.assertNotIn("&secret=", page)
 
 
+class DiscoveryWorksTests(unittest.TestCase):
+    def sample_video(self):
+        return {
+            "aweme_id": "7653132293346692365",
+            "desc": "Demo short drama episode",
+            "create_time": 1783900800,
+            "author": {
+                "unique_id": "demo.author",
+                "nickname": "Demo Author",
+            },
+            "statistics": {
+                "play_count": 12000,
+                "digg_count": 800,
+                "comment_count": 40,
+                "share_count": 12,
+            },
+        }
+
+    def test_direct_video_and_profile_links_are_classified_separately(self):
+        video_url = "https://www.tiktok.com/@demo.author/video/7653132293346692365?lang=en"
+        profile_url = "https://www.tiktok.com/@demo.author?lang=en"
+        self.assertEqual(proxy._discovery_video_id(video_url), "7653132293346692365")
+        self.assertEqual(proxy._discovery_account(video_url), "")
+        self.assertEqual(proxy._discovery_account(profile_url), "demo.author")
+
+    def test_discover_works_accepts_direct_video_link(self):
+        video_url = "https://www.tiktok.com/@demo.author/video/7653132293346692365"
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                mock.patch.object(proxy, "DISCOVERED_WORKS_FILE", str(pathlib.Path(temp_dir) / "works.json")), \
+                mock.patch.object(proxy, "_configured_schedule_accounts", return_value=(["demo.author"], "test")), \
+                mock.patch.object(proxy, "_fetch_discovery_video_by_id", return_value=(self.sample_video(), "single-video")) as fetch:
+            payload = proxy._discover_works(video_url, 10, 10)
+
+        fetch.assert_called_once_with("7653132293346692365", mock.ANY)
+        self.assertEqual(payload["mode"], "works")
+        self.assertEqual(payload["count"], 1)
+        work = payload["works"][0]
+        self.assertEqual(work["video_id"], "7653132293346692365")
+        self.assertEqual(work["account"], "demo.author")
+        self.assertEqual(work["views"], 12000)
+        self.assertEqual(work["likes"], 800)
+        self.assertTrue(work["already_monitored"])
+
+    def test_discover_works_accepts_tiktok_share_short_link(self):
+        share_url = "https://www.tiktok.com/t/ZTFNEj8Hk/"
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                mock.patch.object(proxy, "DISCOVERED_WORKS_FILE", str(pathlib.Path(temp_dir) / "works.json")), \
+                mock.patch.object(proxy, "_configured_schedule_accounts", return_value=([], "test")), \
+                mock.patch.object(proxy, "_fetch_discovery_video_by_url", return_value=(self.sample_video(), "share-video")) as fetch:
+            payload = proxy._discover_works(share_url, 10, 10)
+
+        fetch.assert_called_once_with(share_url, mock.ANY)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["works"][0]["source_endpoint"], "share-video")
+
+    def test_discover_works_accepts_profile_link(self):
+        profile_url = "https://m.tiktok.com/@demo.author"
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                mock.patch.object(proxy, "DISCOVERED_WORKS_FILE", str(pathlib.Path(temp_dir) / "works.json")), \
+                mock.patch.object(proxy, "_configured_schedule_accounts", return_value=([], "test")), \
+                mock.patch.object(proxy, "_fetch_discovery_account_videos", return_value=([self.sample_video()], "account-posts")) as fetch:
+            payload = proxy._discover_works(profile_url, 10, 10)
+
+        fetch.assert_called_once_with("demo.author", 10, mock.ANY)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["works"][0]["source_endpoint"], "account-posts")
+
+    def test_both_frontends_expose_account_and_work_modes(self):
+        root = pathlib.Path(proxy.ROOT)
+        for name in ("index.html", "tikhub-report-frontend.html"):
+            page = (root / name).read_text(encoding="utf-8")
+            self.assertIn('id="discoverModeSelect"', page)
+            self.assertIn('<option value="works">作品</option>', page)
+            self.assertIn('mode:discoveryMode', page)
+            self.assertIn('作品链接或分享短链接', page)
+
+    def test_discovery_endpoint_reads_separate_work_results(self):
+        handler = object.__new__(proxy.Handler)
+        handler.command = "GET"
+        handler._require_schedule_secret = mock.Mock(return_value=True)
+        handler.responses = []
+        handler._send_json = lambda code, payload: handler.responses.append((code, payload))
+        stored = {"ok": True, "mode": "works", "works": [{"video_id": "1"}]}
+        with mock.patch.object(proxy, "_read_discovered_works", return_value=stored):
+            handler._discover_accounts_endpoint({"mode": ["works"]})
+        self.assertEqual(handler.responses, [(200, stored)])
+
+
 class RetentionTests(unittest.TestCase):
     def test_runtime_cleanup_only_removes_archives_older_than_30_days(self):
         now = datetime.datetime(2026, 7, 10, 12, 0, tzinfo=proxy.BEIJING_TZ)
