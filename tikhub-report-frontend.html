@@ -3432,6 +3432,7 @@ async function addDirectDiscoveryAccounts(){
   discoveryBusy=true;
   updateDiscoveryControls();
   discoverySetStatus("正在按账号名加入 "+fmt(accounts.length)+" 个账号...");
+  let finalStatus="", finalOk=false;
   try{
     const payload=await backendPostJson("/discover-accounts",{accounts}, {}, {requireSecret:true});
     updateScheduleAccountState(payload);
@@ -3442,14 +3443,16 @@ async function addDirectDiscoveryAccounts(){
     const added=Array.isArray(payload&&payload.added)?payload.added:[];
     renderResultTable();
     renderDashboard();
-    discoverySetStatus("已新增 "+fmt(added.length)+" 个账号，跳过 "+fmt(accounts.length-added.length)+" 个重复账号", true);
+    finalStatus="已新增 "+fmt(added.length)+" 个账号，跳过 "+fmt(accounts.length-added.length)+" 个重复账号";
+    finalOk=true;
     toast("已同步到后端监控池");
   }catch(e){
-    discoverySetStatus("直接加入失败: "+(e.message||e), false);
+    finalStatus="直接加入失败: "+(e.message||e);
     toast("直接加入失败:"+(e.message||e));
   }finally{
     discoveryBusy=false;
     updateDiscoveryControls();
+    if(finalStatus)discoverySetStatus(finalStatus, finalOk);
   }
 }
 async function openDiscoveredWorkSource(row){
