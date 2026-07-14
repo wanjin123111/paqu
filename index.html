@@ -858,7 +858,7 @@ const DRAMA_LINK_FIELDS=["短剧链接","Drama Link / 短剧链接","Drama URL /
 
 const COLUMNS=["截图名称","账号","昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
 const DISPLAY_COLUMNS=["账号 / 昵称","粉丝","点赞","短剧数","总集数","累计观看","单剧均观看","最高观看短剧","最高观看短剧中文名","最高观看","主页链接"];
-const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","日增播放","时长","题材","简介","短剧链接"];
+const DRAMA_DETAIL_COLUMNS=["账号 / 昵称","英文剧名","中文剧名","发布时间","集数","观看","日增播放","周增播放","时长","题材","简介","短剧链接"];
 const DISCOVERY_COLUMNS=["候选账号","粉丝","短剧数","短剧播放","样本最高播放","来源关键词","状态","操作"];
 const DISCOVERY_WORK_COLUMNS=["作品","作者","发布时间","播放","点赞","评论","分享","来源","操作"];
 const DEFAULT_DISCOVERY_KEYWORDS=[
@@ -1770,31 +1770,19 @@ function dramaGrowthOf(row){
   }
   return null;
 }
-function detailDailyGrowthOf(row){
+function detailGrowthOf(row,days){
   const currentPayload=dashboardCurrentPayload();
   const payloads=dashboardComparablePayloads();
   const currentMs=dashboardPayloadTime(currentPayload)||currentReportMs();
-  const baseline=dashboardPreviousPayload(payloads,currentMs);
-  if(!baseline)return null;
   const keys=dashboardDramaGrowthKeys(row);
   if(!keys.length)return null;
-  const baseMap=new Map();
-  for(const baseRow of dashboardPayloadDetails(baseline)){
-    for(const key of dashboardDramaGrowthKeys(baseRow)){
-      baseMap.set(key,Math.max(baseMap.get(key)||0,dramaViewsOf(baseRow)));
-    }
-  }
-  let before=0, matched=false;
-  for(const key of keys){
-    if(baseMap.has(key)){
-      before=baseMap.get(key)||0;
-      matched=true;
-      break;
-    }
-  }
-  if(!matched)return null;
-  return Math.max(0,dramaViewsOf(row)-before);
+  const baselineChoice=dashboardDramaBaselinePayload(payloads,currentMs,days,new Set(keys));
+  const baselineRow=baselineChoice.payload&&dashboardDramaRowInPayload(baselineChoice.payload,new Set(keys));
+  if(!baselineRow)return null;
+  return Math.max(0,dramaViewsOf(row)-dramaViewsOf(baselineRow));
 }
+function detailDailyGrowthOf(row){return detailGrowthOf(row,1);}
+function detailWeeklyGrowthOf(row){return detailGrowthOf(row,7);}
 function normalizeSearch(value){
   return String(value||"").normalize("NFKC").toLowerCase().replace(/[@\s_\-./:：，,。·|()[\]【】"'’‘“”]+/g,"");
 }
@@ -2068,6 +2056,18 @@ function dashboardBaselinePayload(payloads,currentMs,days){
   const older=candidates.filter(payload=>(dashboardPayloadTime(payload)||0)<=target);
   return older.length?older[older.length-1]:candidates[0];
 }
+function dashboardDramaBaselinePayload(payloads,currentMs,days,targetKeys){
+  const target=currentMs-Math.max(1,days)*86400000;
+  const candidates=payloads.filter(payload=>{
+    const ms=dashboardPayloadTime(payload);
+    return ms&&ms<currentMs-60000&&dashboardDramaRowInPayload(payload,targetKeys);
+  }).sort((a,b)=>(dashboardPayloadTime(a)||0)-(dashboardPayloadTime(b)||0));
+  if(!candidates.length)return {payload:null,exact:false};
+  const older=candidates.filter(payload=>(dashboardPayloadTime(payload)||0)<=target);
+  return older.length
+    ?{payload:older[older.length-1],exact:true}
+    :{payload:candidates[0],exact:false};
+}
 function dashboardPreviousPayload(payloads,currentMs){
   const candidates=payloads.filter(payload=>{
     const ms=dashboardPayloadTime(payload);
@@ -2136,7 +2136,8 @@ function dashboardDramaGrowthForRow(days,payloads,currentPayload,targetRow){
   const targetKeys=new Set(dashboardDramaGrowthKeys(targetRow));
   const row=dashboardDramaRowInPayload(currentPayload,targetKeys)||targetRow;
   const views=dramaViewsOf(row);
-  const baseline=dashboardBaselinePayload(payloads,currentMs,days);
+  const baselineChoice=dashboardDramaBaselinePayload(payloads,currentMs,days,targetKeys);
+  const baseline=baselineChoice.payload;
   if(!baseline||!targetKeys.size){
     return {row,views,before:null,diff:0,baseline:null,sub:`当前 ${fmtPlay(views)} · 暂无${days}天历史基准`};
   }
@@ -2146,7 +2147,10 @@ function dashboardDramaGrowthForRow(days,payloads,currentPayload,targetRow){
   }
   const before=dramaViewsOf(baselineRow);
   const diff=Math.max(0,views-before);
-  return {row,views,before,diff,baseline,sub:`+${fmtPlay(diff)} · ${fmtPlay(before)}→${fmtPlay(views)}`};
+  const sub=baselineChoice.exact
+    ?`+${fmtPlay(diff)} · ${fmtPlay(before)}→${fmtPlay(views)}`
+    :`+${fmtPlay(diff)} · 首次监控 ${fmtPlay(before)}→${fmtPlay(views)}`;
+  return {row,views,before,diff,baseline,baselineExact:baselineChoice.exact,sub};
 }
 function dashboardDramaCardHtml(label,item,opts={}){
   const row=item&&item.row;
@@ -2735,6 +2739,26 @@ function setDetailOptionalCell(td,value,row,column,loadingText){
     setMutedCell(td,"暂无");
   }
 }
+function appendDetailGrowthValue(td,growth,label){
+  if(growth==null){
+    if(dashboardHistoryLoading)setLoadingCell(td,"同步中…");
+    else setMutedCell(td,"—");
+  }else if(growth>0){
+    const wrap=document.createElement("span");
+    wrap.className="daily-growth";
+    wrap.title=`对比${label}历史记录的播放增量；历史不足时使用首次监控记录`;
+    const arrow=document.createElement("span");
+    arrow.className="daily-growth-arrow";
+    arrow.textContent="↑";
+    const value=document.createElement("span");
+    value.textContent="+"+fmtPlay(growth);
+    wrap.appendChild(arrow);
+    wrap.appendChild(value);
+    td.appendChild(wrap);
+  }else{
+    setMutedCell(td,"0");
+  }
+}
 function appendDetailCell(tr,c,row,index){
   const td=document.createElement("td");
   if(c==="账号 / 昵称")appendAccountCell(td,row);
@@ -2745,27 +2769,10 @@ function appendDetailCell(tr,c,row,index){
   else if(c==="发布时间"){td.className="num";setDetailOptionalCell(td,dramaPublishTimeOf(row),row,c);}
   else if(c==="集数"){td.className="num";td.textContent=fmt(dramaEpisodesOf(row));}
   else if(c==="观看"){td.className="num";td.textContent=fmtPlay(dramaViewsOf(row));}
-  else if(c==="日增播放"){
+  else if(c==="日增播放"||c==="周增播放"){
     td.className="num";
-    const growth=detailDailyGrowthOf(row);
-    if(growth==null){
-      if(dashboardHistoryLoading)setLoadingCell(td,"同步中…");
-      else setMutedCell(td,"—");
-    }else if(growth>0){
-      const wrap=document.createElement("span");
-      wrap.className="daily-growth";
-      wrap.title="对比上一条历史报表的播放增量";
-      const arrow=document.createElement("span");
-      arrow.className="daily-growth-arrow";
-      arrow.textContent="↑";
-      const value=document.createElement("span");
-      value.textContent="+"+fmtPlay(growth);
-      wrap.appendChild(arrow);
-      wrap.appendChild(value);
-      td.appendChild(wrap);
-    }else{
-      setMutedCell(td,"0");
-    }
+    const weekly=c==="周增播放";
+    appendDetailGrowthValue(td,weekly?detailWeeklyGrowthOf(row):detailDailyGrowthOf(row),weekly?"7天":"1天");
   }
   else if(c==="时长"){
     td.className="num";

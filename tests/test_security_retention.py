@@ -269,6 +269,16 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn('document.addEventListener("visibilitychange"', page)
             self.assertIn('window.addEventListener("focus",refreshPublicDashboardQuiet)', page)
 
+    def test_dashboard_growth_uses_first_matching_history_for_new_accounts(self):
+        root = pathlib.Path(proxy.ROOT)
+        for name in ("index.html", "tikhub-report-frontend.html"):
+            page = (root / name).read_text(encoding="utf-8")
+            self.assertIn('"日增播放","周增播放"', page)
+            self.assertIn("function dashboardDramaBaselinePayload", page)
+            self.assertIn("dashboardDramaRowInPayload(payload,targetKeys)", page)
+            self.assertIn("detailWeeklyGrowthOf", page)
+            self.assertIn("首次监控", page)
+
     def test_discovery_endpoint_reads_separate_work_results(self):
         handler = object.__new__(proxy.Handler)
         handler.command = "GET"
