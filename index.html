@@ -900,7 +900,8 @@ let dashboardHistoryLoading=false;
 let scheduleAccountCount=null;
 let scheduleAccountSource="";
 const DASHBOARD_CACHE_MAX_AGE=7*24*60*60*1000;
-const PUBLIC_REPORT_REFRESH_MS=5*60*1000;
+const PUBLIC_REPORT_REFRESH_MS=60*1000;
+const DASHBOARD_HISTORY_WORKERS=2;
 const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v2";
 const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v2";
 function dashboardCacheGet(key,maxAgeMs){
@@ -916,17 +917,22 @@ function dashboardCacheGet(key,maxAgeMs){
 function dashboardCacheSet(key,value){
   try{store.set(key,JSON.stringify({t:Date.now(),value:value}));}catch(_){}
 }
-function loadCachedDashboardState(){
-  if(!isPublicMode())return false;
+function readCachedDashboardState(){
+  if(!isPublicMode())return null;
   const payload=dashboardCacheGet(DASHBOARD_LATEST_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE);
-  if(!payload)return false;
+  if(!payload)return null;
   const history=dashboardCacheGet(DASHBOARD_HISTORY_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE);
-  dashboardHistoryPayloads=Array.isArray(history)?history:[];
+  return {payload,history:Array.isArray(history)?history:[]};
+}
+function applyCachedDashboardState(state){
+  if(!state||!state.payload)return false;
+  dashboardHistoryPayloads=state.history||[];
   dashboardHistoryLoading=false;
   dashboardHistoryReady=true;
-  loadBackendPayload(payload,{source:"latest",quiet:true,skipCache:true});
+  loadBackendPayload(state.payload,{source:"latest",quiet:true,skipCache:true});
   return true;
 }
+function loadCachedDashboardState(){return applyCachedDashboardState(readCachedDashboardState());}
 let publicPageView="dashboard";
 let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7)||7,minText:store.get("thr_growth_min_text")||"100\u4e07",minValue:0,baselineMap:null,baselineItem:null,status:""};
 let monitorSearchText=store.get("thr_monitor_search")||"";
@@ -2612,14 +2618,20 @@ async function refreshDashboardHistory(opts){
     }
     return [];
   }
-  const payloads=(await Promise.all(items.map(async item=>{
-    try{
-      const payload=await fetchReportPayloadForItem(item);
-      if(run!==dashboardHistoryRun)return null;
-      return payload;
-    }catch(_){}
-    return null;
-  }))).filter(Boolean);
+  const orderedPayloads=new Array(items.length).fill(null);
+  let cursor=0;
+  async function historyWorker(){
+    while(cursor<items.length){
+      const index=cursor++;
+      try{
+        const payload=await fetchReportPayloadForItem(items[index]);
+        if(run!==dashboardHistoryRun)return;
+        orderedPayloads[index]=payload;
+      }catch(_){}
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(DASHBOARD_HISTORY_WORKERS,items.length)},()=>historyWorker()));
+  const payloads=orderedPayloads.filter(Boolean);
   if(run!==dashboardHistoryRun)return;
   if(payloads.length||!quiet||opts.initial)dashboardHistoryPayloads=payloads;
   if(payloads.length)dashboardCacheSet(DASHBOARD_HISTORY_CACHE_KEY,payloads);
@@ -3922,32 +3934,50 @@ async function loadBackendReports(opts){
   renderHistoryList([], "");
   throw lastErr||new Error("empty history");
 }
+async function loadPublicLatestMeta(){
+  const data=await backendFetchJson("/supabase/reports",{limit:"1"}, {sendSecret:false});
+  return (data.reports||[])[0]||null;
+}
 async function loadPublicDashboard(){
-  const cacheReady=loadCachedDashboardState();
-  const cachedMs=cacheReady?currentReportMs():0;
-  if(!cacheReady){
-    dashboardHistoryLoading=true;
-    dashboardHistoryReady=false;
-    renderDashboardLoading("正在同步最新数据...");
-  }
+  const cachedState=readCachedDashboardState();
+  const cachedMs=cachedState?dashboardPayloadTime(cachedState.payload):0;
+  dashboardHistoryLoading=true;
+  dashboardHistoryReady=false;
+  renderDashboardLoading("正在检查最新数据...");
+  let latestMeta=null;
   try{
-    await loadBackendLatest({quiet:cacheReady});
+    latestMeta=await loadPublicLatestMeta();
   }catch(e){
-    if(!cacheReady){
+  }
+  const latestMetaMs=reportItemMs(latestMeta);
+  let cacheReady=!!(cachedState&&latestMetaMs&&cachedMs>=latestMetaMs-1000);
+  if(cacheReady){
+    applyCachedDashboardState(cachedState);
+  }else{
+    renderDashboardLoading("正在同步最新数据...");
+    try{
+      await loadBackendLatest({quiet:true});
+      if(cachedState&&cachedState.history.length)dashboardHistoryPayloads=cachedState.history;
       dashboardHistoryLoading=false;
       dashboardHistoryReady=true;
-      backendSetStatus("暂时没有最新结果:"+(e.message||e));
-      renderDashboardLoading("暂时没有最新数据，请稍后刷新");
+      renderDashboard();
+      renderResultTable();
+    }catch(e){
+      dashboardHistoryLoading=false;
+      dashboardHistoryReady=true;
+      backendSetStatus("最新数据加载失败:"+(e.message||e));
+      renderDashboardLoading("最新数据暂时加载失败，请稍后重试");
       renderHistoryList([], "");
+      return;
     }
-    return;
   }
-  const latestChanged=cacheReady&&currentReportMs()>cachedMs+1000;
-  dashboardHistoryLoading=!cacheReady||latestChanged||!dashboardHistoryPayloads.length;
+  const latestChanged=!cacheReady||currentReportMs()>cachedMs+1000;
+  dashboardHistoryLoading=latestChanged||!dashboardHistoryPayloads.length;
+  dashboardHistoryReady=true;
   await loadBackendReports({
     quiet:true,
-    initial:!cacheReady,
-    refreshPayloads:!cacheReady||latestChanged||!dashboardHistoryPayloads.length
+    initial:false,
+    refreshPayloads:latestChanged||!dashboardHistoryPayloads.length
   }).catch(()=>{
     dashboardHistoryLoading=false;
     dashboardHistoryReady=true;
@@ -3956,17 +3986,19 @@ async function loadPublicDashboard(){
     renderHistoryList([], "");
   });
 }
+let publicRefreshInFlight=false;
 async function refreshPublicDashboardQuiet(){
-  if(isAdminMode()||document.hidden)return;
+  if(isAdminMode()||document.hidden||publicRefreshInFlight)return;
+  publicRefreshInFlight=true;
   window.__quietRefresh=true;
   try{
-    const data=await backendFetchJson("/supabase/reports",{limit:"1"}, {sendSecret:false});
-    const latestMeta=(data.reports||[])[0];
-    if(!latestMeta||reportItemMs(latestMeta)<=currentReportMs()+1000)return;
+    const latestMeta=await loadPublicLatestMeta();
+    if(!latestMeta||(currentReportGeneratedAt&&reportItemMs(latestMeta)<=currentReportMs()+1000))return;
     await loadBackendLatest({quiet:true});
     await loadBackendReports({quiet:true,refreshPayloads:true});
   }catch(_){
   }finally{
+    publicRefreshInFlight=false;
     window.__quietRefresh=false;
   }
 }
@@ -4396,7 +4428,11 @@ function init(){
   $("keyModal").addEventListener("click",e=>{if(e.target===$("keyModal"))closeKeyModal();});
   document.addEventListener("keydown",e=>{if(e.key==="Escape")closeKeyModal();});
   setTimeout(loadPublicDashboard,600);
-  if(!isAdminMode())setInterval(refreshPublicDashboardQuiet,PUBLIC_REPORT_REFRESH_MS);
+  if(!isAdminMode()){
+    setInterval(refreshPublicDashboardQuiet,PUBLIC_REPORT_REFRESH_MS);
+    document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshPublicDashboardQuiet();});
+    window.addEventListener("focus",refreshPublicDashboardQuiet);
+  }
 }
 function updateAcctCount(){$("acctCount").textContent=parseAccounts().length;}
 

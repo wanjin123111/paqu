@@ -257,6 +257,18 @@ class DiscoveryWorksTests(unittest.TestCase):
             (root / "tikhub-report-frontend.html").read_bytes(),
         )
 
+    def test_public_dashboard_validates_cache_before_rendering(self):
+        root = pathlib.Path(proxy.ROOT)
+        for name in ("index.html", "tikhub-report-frontend.html"):
+            page = (root / name).read_text(encoding="utf-8")
+            self.assertIn("const PUBLIC_REPORT_REFRESH_MS=60*1000;", page)
+            self.assertIn("const DASHBOARD_HISTORY_WORKERS=2;", page)
+            self.assertIn("const cachedState=readCachedDashboardState();", page)
+            self.assertIn("latestMeta=await loadPublicLatestMeta();", page)
+            self.assertIn("cachedMs>=latestMetaMs-1000", page)
+            self.assertIn('document.addEventListener("visibilitychange"', page)
+            self.assertIn('window.addEventListener("focus",refreshPublicDashboardQuiet)', page)
+
     def test_discovery_endpoint_reads_separate_work_results(self):
         handler = object.__new__(proxy.Handler)
         handler.command = "GET"
