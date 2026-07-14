@@ -782,6 +782,7 @@ shortdramatime"></textarea>
           <label class="discover-mini"><span>搜索视频</span><input id="discoverMaxVideosInput" type="number" min="1" max="200" step="1" value="50"><span>条/词</span></label>
           <button class="mini-btn" id="discoverLoadBtn" type="button">读取结果</button>
           <button class="mini-btn" id="discoverRunBtn" type="button">开始发现</button>
+          <button class="mini-btn" id="discoverAddDirectBtn" type="button" data-account-only>按账号名直接加入</button>
           <button class="mini-btn" id="discoverAddAllBtn" type="button">加入全部候选</button>
           <span class="discover-status" id="discoverStatus"></span>
         </div>
@@ -3150,9 +3151,13 @@ function updateDiscoveryControls(){
   if(minDramas&&document.activeElement!==minDramas)minDramas.value=store.get("thr_discover_min_dramas")||"0";
   if(maxVideos&&document.activeElement!==maxVideos)maxVideos.value=store.get("thr_discover_max_videos")||"50";
   document.querySelectorAll("[data-account-only]").forEach(el=>{el.hidden=discoveryMode==="works";});
-  const runBtn=$("discoverRunBtn"), loadBtn=$("discoverLoadBtn"), addAllBtn=$("discoverAddAllBtn");
+  const runBtn=$("discoverRunBtn"), loadBtn=$("discoverLoadBtn"), addDirectBtn=$("discoverAddDirectBtn"), addAllBtn=$("discoverAddAllBtn");
   if(runBtn){runBtn.disabled=discoveryBusy;runBtn.textContent=discoveryMode==="works"?"开始发现作品":"开始发现账号";}
   if(loadBtn)loadBtn.disabled=discoveryBusy;
+  if(addDirectBtn){
+    addDirectBtn.hidden=discoveryMode==="works";
+    addDirectBtn.disabled=discoveryBusy;
+  }
   if(addAllBtn){
     addAllBtn.hidden=discoveryMode==="works";
     addAllBtn.disabled=discoveryBusy||!discoveredAccounts.some(item=>item&&!item.already_monitored&&item.account);
@@ -3361,6 +3366,37 @@ function appendDiscoveryCell(tr,c,row){
     td.appendChild(btn);
   }
   tr.appendChild(td);
+}
+async function addDirectDiscoveryAccounts(){
+  if(discoveryBusy||discoveryMode!=="accounts")return;
+  const accounts=parseAccountsText(discoveryKeywords()).filter(item=>/^[A-Za-z0-9._]+$/.test(item));
+  if(!accounts.length){
+    discoverySetStatus("请填写 @账号，多个账号可用逗号、空格或换行分隔", false);
+    toast("没有可加入的账号名");
+    return;
+  }
+  discoveryBusy=true;
+  updateDiscoveryControls();
+  discoverySetStatus("正在按账号名加入 "+fmt(accounts.length)+" 个账号...");
+  try{
+    const payload=await backendPostJson("/discover-accounts",{accounts}, {}, {requireSecret:true});
+    updateScheduleAccountState(payload);
+    const requested=new Set(accounts.map(item=>item.toLowerCase()));
+    for(const item of discoveredAccounts){
+      if(requested.has(String(item.account||"").toLowerCase()))item.already_monitored=true;
+    }
+    const added=Array.isArray(payload&&payload.added)?payload.added:[];
+    renderResultTable();
+    renderDashboard();
+    discoverySetStatus("已新增 "+fmt(added.length)+" 个账号，跳过 "+fmt(accounts.length-added.length)+" 个重复账号", true);
+    toast("已同步到后端监控池");
+  }catch(e){
+    discoverySetStatus("直接加入失败: "+(e.message||e), false);
+    toast("直接加入失败:"+(e.message||e));
+  }finally{
+    discoveryBusy=false;
+    updateDiscoveryControls();
+  }
 }
 async function openDiscoveredWorkSource(row){
   if(!row||!row.video_id)return;
@@ -4123,6 +4159,7 @@ function init(){
   $("sortLatestBtn").addEventListener("click",()=>setResultSort("latest"));
   $("discoverLoadBtn").addEventListener("click",()=>loadDiscoveryLatest().catch(e=>{discoverySetStatus("读取失败: "+(e.message||e),false);toast("读取失败:"+(e.message||e));}));
   $("discoverRunBtn").addEventListener("click",()=>runDiscovery());
+  $("discoverAddDirectBtn").addEventListener("click",()=>addDirectDiscoveryAccounts());
   $("discoverAddAllBtn").addEventListener("click",()=>addAllDiscoveredAccounts());
   $("discoverModeSelect").addEventListener("change",()=>{
     if(discoveryBusy)return;
