@@ -95,6 +95,13 @@ SCHEDULE_TRANSLATE_TITLES = _env_bool("SCHEDULE_TRANSLATE_TITLES", True)
 SCHEDULE_DELAY_MS = _env_int("SCHEDULE_DELAY_MS", 300, 0, 60000)
 SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
 SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
+SCHEDULE_ACCOUNT_WORKERS = _env_int("SCHEDULE_ACCOUNT_WORKERS", 4, 1, 16)
+# TikHub's 20-RPS plan is kept below its hard ceiling so retries and manual
+# lookups from the same process still have a little headroom.
+TIKHUB_RPS_LIMIT = _env_int("TIKHUB_RPS_LIMIT", 18, 1, 1000)
+# Drama-library calls go directly to TikTok and do not consume TikHub RPS.
+# Keep those requests paced as well when multiple accounts run concurrently.
+TIKTOK_RPS_LIMIT = _env_int("TIKTOK_RPS_LIMIT", 8, 1, 1000)
 AUTO_REFRESH_COOLDOWN_SECONDS = _env_int("AUTO_REFRESH_COOLDOWN_SECONDS", 300, 30, 86400)
 VIDEO_PLAY_URL_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_URL_CACHE_TTL_SECONDS", 600, 0, 86400)
 DRAMA_LINK_PAGE_SIZE = _env_int("DRAMA_LINK_PAGE_SIZE", 50, 1, 50)
@@ -157,6 +164,31 @@ SUPABASE_REPORT_CACHE_MAX_ITEMS = _env_int("SUPABASE_REPORT_CACHE_MAX_ITEMS", 12
 SUPABASE_LATEST_CACHE_SECONDS = _env_int("SUPABASE_LATEST_CACHE_SECONDS", 120, 0, 3600)
 SUPABASE_REPORT_CACHE = {"latest": None, "latest_expires_at": 0, "by_id": {}}
 SUPABASE_REPORT_CACHE_LOCK = threading.Lock()
+
+
+class _EvenRateLimiter:
+    """Thread-safe, evenly spaced request limiter without burst traffic."""
+
+    def __init__(self, requests_per_second, clock=None, sleeper=None):
+        self.requests_per_second = max(1, int(requests_per_second))
+        self._interval = 1.0 / self.requests_per_second
+        self._clock = clock or time.monotonic
+        self._sleeper = sleeper or time.sleep
+        self._lock = threading.Lock()
+        self._next_at = 0.0
+
+    def wait(self):
+        with self._lock:
+            now = self._clock()
+            scheduled = max(now, self._next_at)
+            self._next_at = scheduled + self._interval
+        delay = scheduled - now
+        if delay > 0:
+            self._sleeper(delay)
+
+
+TIKHUB_RATE_LIMITER = _EvenRateLimiter(TIKHUB_RPS_LIMIT)
+TIKTOK_RATE_LIMITER = _EvenRateLimiter(TIKTOK_RPS_LIMIT)
 
 DEFAULT_ENDPOINTS = {
     "profile": "/api/v1/tiktok/app/v3/handler_user_profile",
@@ -268,13 +300,19 @@ LAST_JOB = {
     "phase": "idle",
     "accounts_total": 0,
     "accounts_completed": 0,
+    "accounts_succeeded": 0,
+    "accounts_failed": 0,
     "current_account": "",
+    "current_accounts": [],
+    "account_workers": SCHEDULE_ACCOUNT_WORKERS,
+    "tikhub_rps_limit": TIKHUB_RPS_LIMIT,
 }
 LAST_AUTO_REFRESH_AT = 0.0
 DRAMA_DETAIL_CACHE = None
-DRAMA_DETAIL_CACHE_LOCK = threading.Lock()
+DRAMA_DETAIL_CACHE_LOCK = threading.RLock()
 DRAMA_EPISODE_HISTORY_LOCK = threading.Lock()
 TITLE_TRANSLATION_CACHE = {}
+TITLE_TRANSLATION_CACHE_LOCK = threading.Lock()
 VIDEO_PLAY_URL_CACHE = {}
 VIDEO_PLAY_URL_CACHE_LOCK = threading.Lock()
 LOCAL_DOWNLOAD_JOBS = {}
@@ -328,6 +366,7 @@ def _send_tikhub_get(path, params, label, timeout=90, retries=None):
     attempts = SCHEDULE_RETRIES if retries is None else max(1, int(retries))
     for attempt in range(1, attempts + 1):
         try:
+            TIKHUB_RATE_LIMITER.wait()
             req = urllib.request.Request(url, headers=headers, method="GET")
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 text = resp.read().decode("utf-8", "replace")
@@ -361,6 +400,7 @@ def _send_tiktok_get(path, params, label, referer_uid=None, timeout=90, retries=
     attempts = SCHEDULE_RETRIES if retries is None else max(1, int(retries))
     for attempt in range(1, attempts + 1):
         try:
+            TIKTOK_RATE_LIMITER.wait()
             req = urllib.request.Request(url, headers=headers, method="GET")
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 text = resp.read().decode("utf-8", "replace")
@@ -614,10 +654,12 @@ def _translate_english_title(title):
     if _has_cjk(title):
         return title
     key = title.lower()
-    if key in TITLE_TRANSLATION_CACHE:
-        return TITLE_TRANSLATION_CACHE[key]
+    with TITLE_TRANSLATION_CACHE_LOCK:
+        if key in TITLE_TRANSLATION_CACHE:
+            return TITLE_TRANSLATION_CACHE[key]
     if not SCHEDULE_TRANSLATE_TITLES:
-        TITLE_TRANSLATION_CACHE[key] = ""
+        with TITLE_TRANSLATION_CACHE_LOCK:
+            TITLE_TRANSLATION_CACHE[key] = ""
         return ""
     translated = ""
     params = urllib.parse.urlencode({
@@ -640,7 +682,8 @@ def _translate_english_title(title):
     except Exception:
         translated = ""
     if translated:
-        TITLE_TRANSLATION_CACHE[key] = translated
+        with TITLE_TRANSLATION_CACHE_LOCK:
+            TITLE_TRANSLATION_CACHE[key] = translated
     return translated
 
 
@@ -824,24 +867,26 @@ def _remember_drama_detail(uid, drama_id, title, detail):
     key = _drama_cache_key(uid, drama_id, title)
     if not key:
         return
-    cache = _load_drama_detail_cache()
-    cached = cache.setdefault(key, {})
-    for field in DRAMA_DETAIL_CACHE_FIELDS:
-        value = detail.get(field)
-        if _has_cache_value(value):
-            cached[field] = value
+    with DRAMA_DETAIL_CACHE_LOCK:
+        cache = _load_drama_detail_cache()
+        cached = cache.setdefault(key, {})
+        for field in DRAMA_DETAIL_CACHE_FIELDS:
+            value = detail.get(field)
+            if _has_cache_value(value):
+                cached[field] = value
 
 
 def _apply_cached_drama_detail(uid, drama_id, title, detail):
     key = _drama_cache_key(uid, drama_id, title)
     if not key:
         return detail
-    cached = _load_drama_detail_cache().get(key)
-    if not isinstance(cached, dict):
-        return detail
-    for field in DRAMA_DETAIL_CACHE_FIELDS:
-        if not _has_cache_value(detail.get(field)) and _has_cache_value(cached.get(field)):
-            detail[field] = cached[field]
+    with DRAMA_DETAIL_CACHE_LOCK:
+        cached = _load_drama_detail_cache().get(key)
+        if not isinstance(cached, dict):
+            return detail
+        for field in DRAMA_DETAIL_CACHE_FIELDS:
+            if not _has_cache_value(detail.get(field)) and _has_cache_value(cached.get(field)):
+                detail[field] = cached[field]
     return detail
 
 
@@ -3662,25 +3707,90 @@ def _write_report_bundle(rows, drama_rows, errors):
     }, payload
 
 
+def _scrape_scheduled_accounts(accounts, scrape=None):
+    """Scrape accounts concurrently while preserving configured account order."""
+    clean_accounts = list(accounts or [])
+    if not clean_accounts:
+        return [], [], []
+    scrape = scrape or _scrape_account
+    worker_count = min(SCHEDULE_ACCOUNT_WORKERS, len(clean_accounts))
+    ordered_results = [None] * len(clean_accounts)
+    ordered_errors = [None] * len(clean_accounts)
+    active_accounts = {}
+    progress_lock = threading.Lock()
+
+    LAST_JOB.update({
+        "accounts_completed": 0,
+        "accounts_succeeded": 0,
+        "accounts_failed": 0,
+        "current_account": "",
+        "current_accounts": [],
+        "account_workers": worker_count,
+        "tikhub_rps_limit": TIKHUB_RPS_LIMIT,
+    })
+
+    def update_active():
+        current = [active_accounts[key] for key in sorted(active_accounts)]
+        LAST_JOB["current_accounts"] = current
+        LAST_JOB["current_account"] = current[0] if current else ""
+
+    def run_one(index, uid):
+        with progress_lock:
+            active_accounts[index] = uid
+            update_active()
+        try:
+            summary, dramas = scrape(uid)
+            return index, summary, dramas, None
+        except Exception as exc:
+            return index, None, None, {"account": uid, "error": str(exc)}
+        finally:
+            with progress_lock:
+                active_accounts.pop(index, None)
+                update_active()
+
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=worker_count,
+        thread_name_prefix="scheduled-account",
+    ) as pool:
+        futures = [pool.submit(run_one, index, uid) for index, uid in enumerate(clean_accounts)]
+        for future in concurrent.futures.as_completed(futures):
+            index, summary, dramas, error = future.result()
+            if error:
+                ordered_errors[index] = error
+            else:
+                ordered_results[index] = (summary, dramas or [])
+            with progress_lock:
+                LAST_JOB["accounts_completed"] += 1
+                if error:
+                    LAST_JOB["accounts_failed"] += 1
+                else:
+                    LAST_JOB["accounts_succeeded"] += 1
+
+    rows, drama_rows = [], []
+    for result in ordered_results:
+        if not result:
+            continue
+        summary, dramas = result
+        rows.append(summary)
+        drama_rows.extend(dramas)
+    errors = [error for error in ordered_errors if error]
+    return rows, drama_rows, errors
+
+
 def _run_scheduled_job(accounts):
-    rows, drama_rows, errors = [], [], []
     LAST_JOB.update({
         "phase": "accounts",
         "accounts_total": len(accounts),
         "accounts_completed": 0,
+        "accounts_succeeded": 0,
+        "accounts_failed": 0,
         "current_account": "",
+        "current_accounts": [],
+        "account_workers": min(SCHEDULE_ACCOUNT_WORKERS, max(1, len(accounts))),
+        "tikhub_rps_limit": TIKHUB_RPS_LIMIT,
     })
-    for index, uid in enumerate(accounts, 1):
-        LAST_JOB["current_account"] = uid
-        try:
-            summary, dramas = _scrape_account(uid)
-            rows.append(summary)
-            drama_rows.extend(dramas)
-        except Exception as exc:
-            errors.append({"account": uid, "error": str(exc)})
-        finally:
-            LAST_JOB["accounts_completed"] = index
-    LAST_JOB.update({"phase": "reports", "current_account": ""})
+    rows, drama_rows, errors = _scrape_scheduled_accounts(accounts)
+    LAST_JOB.update({"phase": "reports", "current_account": "", "current_accounts": []})
     try:
         _save_drama_detail_cache()
     except Exception:
@@ -3724,17 +3834,20 @@ def _execute_scheduled_job(accounts):
     LAST_JOB.update({"running": True, "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
                      "finished_at": None, "result": None, "error": None,
                      "phase": "starting", "accounts_total": len(accounts),
-                     "accounts_completed": 0, "current_account": ""})
+                     "accounts_completed": 0, "accounts_succeeded": 0,
+                     "accounts_failed": 0, "current_account": "", "current_accounts": [],
+                     "account_workers": min(SCHEDULE_ACCOUNT_WORKERS, max(1, len(accounts))),
+                     "tikhub_rps_limit": TIKHUB_RPS_LIMIT})
     try:
         result = _run_scheduled_job(accounts)
         LAST_JOB.update({"running": False, "finished_at": datetime.datetime.now().isoformat(timespec="seconds"),
                          "result": result, "error": None, "phase": "completed",
-                         "current_account": ""})
+                         "current_account": "", "current_accounts": []})
         return result
     except Exception as exc:
         LAST_JOB.update({"running": False, "finished_at": datetime.datetime.now().isoformat(timespec="seconds"),
                          "result": None, "error": str(exc), "phase": "failed",
-                         "current_account": ""})
+                         "current_account": "", "current_accounts": []})
         raise
 
 

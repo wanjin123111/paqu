@@ -44,6 +44,12 @@ services:
         value: 600
       - key: SCHEDULE_DELAY_MS
         value: 300
+      - key: SCHEDULE_ACCOUNT_WORKERS
+        value: 4
+      - key: TIKHUB_RPS_LIMIT
+        value: 18
+      - key: TIKTOK_RPS_LIMIT
+        value: 8
       - key: REPORT_RETENTION_DAYS
         value: 30
       - key: DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS

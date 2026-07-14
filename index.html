@@ -3995,15 +3995,29 @@ function logSupabaseResult(result){
 function backendJobProgressText(job){
   const done=Math.max(0,toInt(job&&job.accounts_completed));
   const total=Math.max(0,toInt(job&&job.accounts_total));
-  const current=String((job&&job.current_account)||"").trim();
+  const active=Array.isArray(job&&job.current_accounts)
+    ? job.current_accounts.map(v=>String(v||"").trim()).filter(Boolean)
+    : [];
+  const current=active.length
+    ? active.slice(0,3).map(v=>"@"+v).join("、")+(active.length>3?" 等"+active.length+"个账号":"")
+    : String((job&&job.current_account)||"").trim();
+  const workers=Math.max(0,toInt(job&&job.account_workers));
+  const rps=Math.max(0,toInt(job&&job.tikhub_rps_limit));
+  const succeeded=Math.max(0,toInt(job&&job.accounts_succeeded));
+  const failed=Math.max(0,toInt(job&&job.accounts_failed));
   const phase=String((job&&job.phase)||"").trim();
   const phaseLabels={starting:"启动中",accounts:"抓取账号",reports:"生成报表",supabase:"保存数据库",episode_history:"保存剧集历史",finishing:"收尾中"};
   setProgress(done,total);
-  return (total?(" · "+done+"/"+total):"")+(current?(" · @"+current):"")+(phaseLabels[phase]?(" · "+phaseLabels[phase]):"");
+  return (total?(" · "+done+"/"+total):"")
+    +(current?(" · "+current):"")
+    +(workers?(" · 并发"+workers):"")
+    +(rps?(" · "+rps+" RPS上限"):"")
+    +(done?(" · 成功"+succeeded+"/失败"+failed):"")
+    +(phaseLabels[phase]?(" · "+phaseLabels[phase]):"");
 }
 async function pollBackendJob(expectedStartedAt){
   let sawRunning=!!expectedStartedAt;
-  const deadline=Date.now()+2*60*60*1000;
+  const deadline=Date.now()+24*60*60*1000;
   while(Date.now()<deadline){
     const data=await backendFetchJson("/schedule-status",{}, {requireSecret:true});
     updateScheduleAccountState(data);
@@ -4031,7 +4045,7 @@ async function pollBackendJob(expectedStartedAt){
     backendSetStatus("后端空闲");
     return null;
   }
-  throw new Error("后端任务运行超过 2 小时，请检查 Render 日志");
+  throw new Error("后端任务运行超过 24 小时，请检查 Render 日志");
 }
 async function runBackendJob(manual){
   if(schedBusy){if(manual)toast("后端任务正在运行");return;}

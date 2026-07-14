@@ -3,6 +3,8 @@ import io
 import json
 import pathlib
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -430,6 +432,88 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(compact["dramas_detail"][0]["id"], "42")
         self.assertNotIn("English Description Preview / 英文简介预览", compact["dramas_detail"][0])
         self.assertLess(len(json.dumps(compact, ensure_ascii=False)), len(json.dumps(payload, ensure_ascii=False)))
+
+
+class ScheduledConcurrencyTests(unittest.TestCase):
+    def setUp(self):
+        self.original_job = dict(proxy.LAST_JOB)
+
+    def tearDown(self):
+        proxy.LAST_JOB.clear()
+        proxy.LAST_JOB.update(self.original_job)
+
+    def test_even_rate_limiter_spaces_requests_without_bursts(self):
+        now = [0.0]
+        sleeps = []
+
+        def clock():
+            return now[0]
+
+        def sleeper(delay):
+            sleeps.append(delay)
+            now[0] += delay
+
+        limiter = proxy._EvenRateLimiter(2, clock=clock, sleeper=sleeper)
+        limiter.wait()
+        limiter.wait()
+        limiter.wait()
+
+        self.assertEqual(len(sleeps), 2)
+        self.assertAlmostEqual(sleeps[0], 0.5)
+        self.assertAlmostEqual(sleeps[1], 0.5)
+
+    def test_account_workers_are_bounded_and_preserve_configured_order(self):
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def scrape(uid):
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                time.sleep(0.015)
+                if uid == "account-3":
+                    raise RuntimeError("expected failure")
+                return {"account": uid}, [{"drama": uid}]
+            finally:
+                with lock:
+                    active -= 1
+
+        accounts = ["account-%s" % index for index in range(8)]
+        with mock.patch.object(proxy, "SCHEDULE_ACCOUNT_WORKERS", 3):
+            rows, dramas, errors = proxy._scrape_scheduled_accounts(accounts, scrape=scrape)
+
+        self.assertLessEqual(max_active, 3)
+        self.assertGreaterEqual(max_active, 2)
+        self.assertEqual([row["account"] for row in rows], [
+            "account-0", "account-1", "account-2", "account-4",
+            "account-5", "account-6", "account-7",
+        ])
+        self.assertEqual([row["drama"] for row in dramas], [
+            "account-0", "account-1", "account-2", "account-4",
+            "account-5", "account-6", "account-7",
+        ])
+        self.assertEqual(errors, [{"account": "account-3", "error": "expected failure"}])
+        self.assertEqual(proxy.LAST_JOB["accounts_completed"], 8)
+        self.assertEqual(proxy.LAST_JOB["accounts_succeeded"], 7)
+        self.assertEqual(proxy.LAST_JOB["accounts_failed"], 1)
+
+    def test_account_worker_pipeline_does_not_truncate_500_accounts(self):
+        accounts = ["account-%03d" % index for index in range(500)]
+
+        def scrape(uid):
+            return {"account": uid}, []
+
+        with mock.patch.object(proxy, "SCHEDULE_ACCOUNT_WORKERS", 4):
+            rows, dramas, errors = proxy._scrape_scheduled_accounts(accounts, scrape=scrape)
+
+        self.assertEqual(len(rows), 500)
+        self.assertEqual(rows[0]["account"], "account-000")
+        self.assertEqual(rows[-1]["account"], "account-499")
+        self.assertEqual(dramas, [])
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":

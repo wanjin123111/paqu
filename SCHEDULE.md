@@ -17,7 +17,12 @@ SCHEDULE_PAGE_SIZE=30
 SCHEDULE_PLAYLIST_PAGE_SIZE=20
 SCHEDULE_PLAYLIST_VIDEO_PAGE_SIZE=30
 SCHEDULE_DELAY_MS=300
+SCHEDULE_ACCOUNT_WORKERS=4
+TIKHUB_RPS_LIMIT=18
+TIKTOK_RPS_LIMIT=8
 ```
+
+上述并发配置适用于已经单独购买 TikHub 20 RPS 套餐的账号。`18` 是安全上限，不等于把接口余额充值到 5 美元；RPS 套餐与按请求扣费余额是两项独立配置。如果 TikHub 后台显示的上限仍为 10 RPS，请把 `TIKHUB_RPS_LIMIT` 改为 `8`。
 
 `SCHEDULE_ACCOUNTS` 也可以一行一个账号。现在前端报表页还提供“账号池”，输入 `SCHEDULE_SECRET` 后可以把账号保存到后端运行时文件 `reports/schedule_accounts.json`。抓取时优先使用后端账号池；账号池为空时才回退到 `SCHEDULE_ACCOUNTS`。
 
