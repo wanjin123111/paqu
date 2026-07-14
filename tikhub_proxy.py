@@ -33,7 +33,8 @@ DEFAULT_PAGE = "tikhub-report-frontend.html"
 REPORTS_DIR = os.path.join(ROOT, "reports")   # 定时监控存盘目录
 PUBLIC_REPORTS_DIR = os.path.join(ROOT, "public_reports")
 DRAMA_DETAIL_CACHE_FILE = os.path.join(REPORTS_DIR, "drama_detail_cache.json")
-DRAMA_EPISODE_HISTORY_FILE = os.path.join(REPORTS_DIR, "drama_episode_history.json")
+DRAMA_EPISODE_HISTORY_DIR = os.path.join(REPORTS_DIR, "episode_history")
+PUBLIC_DRAMA_EPISODE_HISTORY_DIR = os.path.join(PUBLIC_REPORTS_DIR, "episode_history")
 SCHEDULE_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "schedule_accounts.json")
 SCHEDULE_ACCOUNTS_SEED_FILE = os.path.join(ROOT, "schedule_accounts.seed.json")
 DISCOVERED_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "discovered_accounts.json")
@@ -258,7 +259,17 @@ DRAMA_DETAIL_CACHE_FIELDS = (
 )
 
 JOB_LOCK = threading.Lock()
-LAST_JOB = {"running": False, "started_at": None, "finished_at": None, "result": None, "error": None}
+LAST_JOB = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "result": None,
+    "error": None,
+    "phase": "idle",
+    "accounts_total": 0,
+    "accounts_completed": 0,
+    "current_account": "",
+}
 LAST_AUTO_REFRESH_AT = 0.0
 DRAMA_DETAIL_CACHE = None
 DRAMA_DETAIL_CACHE_LOCK = threading.Lock()
@@ -3653,21 +3664,33 @@ def _write_report_bundle(rows, drama_rows, errors):
 
 def _run_scheduled_job(accounts):
     rows, drama_rows, errors = [], [], []
-    for uid in accounts:
+    LAST_JOB.update({
+        "phase": "accounts",
+        "accounts_total": len(accounts),
+        "accounts_completed": 0,
+        "current_account": "",
+    })
+    for index, uid in enumerate(accounts, 1):
+        LAST_JOB["current_account"] = uid
         try:
             summary, dramas = _scrape_account(uid)
             rows.append(summary)
             drama_rows.extend(dramas)
         except Exception as exc:
             errors.append({"account": uid, "error": str(exc)})
+        finally:
+            LAST_JOB["accounts_completed"] = index
+    LAST_JOB.update({"phase": "reports", "current_account": ""})
     try:
         _save_drama_detail_cache()
     except Exception:
         pass
     files, report_payload = _write_report_bundle(rows, drama_rows, errors)
     runtime_retention = _cleanup_runtime_report_files()
+    LAST_JOB["phase"] = "supabase"
     supabase = _save_report_to_supabase(report_payload)
     supabase_retention = _cleanup_supabase_report_history()
+    LAST_JOB["phase"] = "episode_history"
     try:
         episode_history = _save_scheduled_episode_history(drama_rows)
     except Exception as exc:
@@ -3675,8 +3698,9 @@ def _run_scheduled_job(accounts):
             "enabled": bool(SCHEDULE_SAVE_EPISODE_HISTORY),
             "ok": False,
             "error": str(exc),
-            "file": "reports/drama_episode_history.json",
+            "directory": "reports/episode_history",
         }
+    LAST_JOB["phase"] = "finishing"
     return {
         "ok": True,
         "generated_at": report_payload.get("generated_at") or datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
@@ -3698,15 +3722,19 @@ def _run_scheduled_job(accounts):
 
 def _execute_scheduled_job(accounts):
     LAST_JOB.update({"running": True, "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                     "finished_at": None, "result": None, "error": None})
+                     "finished_at": None, "result": None, "error": None,
+                     "phase": "starting", "accounts_total": len(accounts),
+                     "accounts_completed": 0, "current_account": ""})
     try:
         result = _run_scheduled_job(accounts)
         LAST_JOB.update({"running": False, "finished_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                         "result": result, "error": None})
+                         "result": result, "error": None, "phase": "completed",
+                         "current_account": ""})
         return result
     except Exception as exc:
         LAST_JOB.update({"running": False, "finished_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                         "result": None, "error": str(exc)})
+                         "result": None, "error": str(exc), "phase": "failed",
+                         "current_account": ""})
         raise
 
 
@@ -3756,9 +3784,23 @@ def _episode_point_ms(point):
     return 0
 
 
-def _read_drama_episode_history():
+def _episode_history_account_name(uid):
+    account = str(uid or "").strip().lstrip("@").lower()
+    safe = re.sub(r"[^a-z0-9._-]+", "_", account).strip("._-")
+    return safe or "unknown"
+
+
+def _episode_history_paths(uid):
+    name = _episode_history_account_name(uid) + ".json"
+    return (
+        os.path.join(DRAMA_EPISODE_HISTORY_DIR, name),
+        os.path.join(PUBLIC_DRAMA_EPISODE_HISTORY_DIR, name),
+    )
+
+
+def _read_drama_episode_history(uid):
     data = {}
-    for path in (DRAMA_EPISODE_HISTORY_FILE, os.path.join(PUBLIC_REPORTS_DIR, "drama_episode_history.json")):
+    for path in _episode_history_paths(uid):
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
@@ -3768,18 +3810,23 @@ def _read_drama_episode_history():
     items = data.get("items") if isinstance(data, dict) else {}
     if not isinstance(items, dict):
         items = {}
-    return {"version": 1, "items": items}
+    return {"version": 2, "account": _episode_history_account_name(uid), "items": items}
 
 
-def _write_drama_episode_history(history):
+def _write_drama_episode_history(history, uid):
     items = history.get("items") if isinstance(history, dict) else {}
     if not isinstance(items, dict):
         items = {}
-    os.makedirs(REPORTS_DIR, exist_ok=True)
-    tmp = DRAMA_EPISODE_HISTORY_FILE + ".tmp"
+    os.makedirs(DRAMA_EPISODE_HISTORY_DIR, exist_ok=True)
+    path = _episode_history_paths(uid)[0]
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump({"version": 1, "items": items}, handle, ensure_ascii=False, indent=2)
-    os.replace(tmp, DRAMA_EPISODE_HISTORY_FILE)
+        json.dump({
+            "version": 2,
+            "account": _episode_history_account_name(uid),
+            "items": items,
+        }, handle, ensure_ascii=False, separators=(",", ":"))
+    os.replace(tmp, path)
 
 
 def _episode_growth_from_points(points, current_views, now_ms, days):
@@ -3895,12 +3942,12 @@ def _collect_episode_growth_and_record(uid, drama_id, episodes):
     now_text = datetime.datetime.fromtimestamp(now_ms / 1000.0, BEIJING_TZ).isoformat(timespec="seconds")
     changed = False
     with DRAMA_EPISODE_HISTORY_LOCK:
-        history = _read_drama_episode_history()
+        history = _read_drama_episode_history(uid)
         pruned = _prune_episode_history(history, now_ms)
         metrics, changed, _recorded = _record_episode_history_entries(history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=True)
         if changed or pruned:
             try:
-                _write_drama_episode_history(history)
+                _write_drama_episode_history(history, uid)
             except Exception:
                 pass
     return metrics
@@ -4543,7 +4590,7 @@ def _save_scheduled_episode_history(drama_rows):
         "episodes_saved": 0,
         "errors": [],
         "runtime_limited": False,
-        "file": "reports/drama_episode_history.json",
+        "directory": "reports/episode_history",
     }
     if not SCHEDULE_SAVE_EPISODE_HISTORY:
         return result
@@ -4553,41 +4600,48 @@ def _save_scheduled_episode_history(drama_rows):
         return result
     started = time.time()
     max_episodes = SCHEDULE_EPISODE_HISTORY_MAX_EPISODES or DRAMA_LINK_MAX_EPISODES
-    fetched = []
+    now_ms = int(time.time() * 1000)
+    now_text = datetime.datetime.fromtimestamp(now_ms / 1000.0, BEIJING_TZ).isoformat(timespec="seconds")
+    targets_by_account = {}
     for target in targets:
+        targets_by_account.setdefault(target["uid"], []).append(target)
+    for uid, account_targets in targets_by_account.items():
         if _runtime_exceeded(started):
             result["runtime_limited"] = True
             break
-        uid, drama_id = target["uid"], target["drama_id"]
-        result["attempted"] += 1
-        try:
-            items = _get_drama_episode_items(drama_id, uid, started=started, limit=max_episodes)
-            episodes = [_drama_episode_summary(item, uid, idx + 1) for idx, item in enumerate(items)]
-            if episodes:
-                fetched.append((uid, drama_id, episodes))
-                result["dramas_ok"] += 1
-                result["episodes_saved"] += len(episodes)
-            else:
-                result["dramas_empty"] += 1
-        except Exception as exc:
-            if len(result["errors"]) < 20:
-                result["errors"].append({"uid": uid, "drama_id": drama_id, "error": str(exc)})
-        if SCHEDULE_EPISODE_HISTORY_DELAY_MS:
-            time.sleep(SCHEDULE_EPISODE_HISTORY_DELAY_MS / 1000.0)
-    if not fetched:
-        return result
-    now_ms = int(time.time() * 1000)
-    now_text = datetime.datetime.fromtimestamp(now_ms / 1000.0, BEIJING_TZ).isoformat(timespec="seconds")
-    with DRAMA_EPISODE_HISTORY_LOCK:
-        history = _read_drama_episode_history()
-        changed = bool(_prune_episode_history(history, now_ms))
-        for uid, drama_id, episodes in fetched:
-            _metrics, item_changed, _recorded = _record_episode_history_entries(
-                history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=False
-            )
-            changed = changed or item_changed
-        if changed:
-            _write_drama_episode_history(history)
+        fetched = []
+        for target in account_targets:
+            if _runtime_exceeded(started):
+                result["runtime_limited"] = True
+                break
+            drama_id = target["drama_id"]
+            result["attempted"] += 1
+            try:
+                items = _get_drama_episode_items(drama_id, uid, started=started, limit=max_episodes)
+                episodes = [_drama_episode_summary(item, uid, idx + 1) for idx, item in enumerate(items)]
+                if episodes:
+                    fetched.append((drama_id, episodes))
+                    result["dramas_ok"] += 1
+                    result["episodes_saved"] += len(episodes)
+                else:
+                    result["dramas_empty"] += 1
+            except Exception as exc:
+                if len(result["errors"]) < 20:
+                    result["errors"].append({"uid": uid, "drama_id": drama_id, "error": str(exc)})
+            if SCHEDULE_EPISODE_HISTORY_DELAY_MS:
+                time.sleep(SCHEDULE_EPISODE_HISTORY_DELAY_MS / 1000.0)
+        if not fetched:
+            continue
+        with DRAMA_EPISODE_HISTORY_LOCK:
+            history = _read_drama_episode_history(uid)
+            changed = bool(_prune_episode_history(history, now_ms))
+            for drama_id, episodes in fetched:
+                _metrics, item_changed, _recorded = _record_episode_history_entries(
+                    history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=False
+                )
+                changed = changed or item_changed
+            if changed:
+                _write_drama_episode_history(history, uid)
     return result
 
 
@@ -5432,13 +5486,25 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_report(self, path, qs):
         if not self._allow_report_read(qs):
             return
-        name = os.path.basename(urllib.parse.unquote(path[len("/reports/"):]))
-        full = os.path.normpath(os.path.join(REPORTS_DIR, name))
-        if not full.startswith(REPORTS_DIR) or not os.path.isfile(full):
-            if name == "latest_report.json":
+        relative = posixpath.normpath(urllib.parse.unquote(path[len("/reports/"):]).replace("\\", "/")).lstrip("/")
+        if relative in ("", ".", "..") or relative.startswith("../"):
+            self._send_json(404, {"ok": False, "error": "report not found"})
+            return
+        name = os.path.basename(relative)
+        full = os.path.normpath(os.path.join(REPORTS_DIR, *relative.split("/")))
+        try:
+            runtime_safe = os.path.commonpath((os.path.normpath(REPORTS_DIR), full)) == os.path.normpath(REPORTS_DIR)
+        except ValueError:
+            runtime_safe = False
+        if not runtime_safe or not os.path.isfile(full):
+            if relative == "latest_report.json":
                 _start_configured_scheduled_job_if_idle()
-            public_full = os.path.normpath(os.path.join(PUBLIC_REPORTS_DIR, name))
-            if public_full.startswith(PUBLIC_REPORTS_DIR) and os.path.isfile(public_full):
+            public_full = os.path.normpath(os.path.join(PUBLIC_REPORTS_DIR, *relative.split("/")))
+            try:
+                public_safe = os.path.commonpath((os.path.normpath(PUBLIC_REPORTS_DIR), public_full)) == os.path.normpath(PUBLIC_REPORTS_DIR)
+            except ValueError:
+                public_safe = False
+            if public_safe and os.path.isfile(public_full):
                 full = public_full
             else:
                 self._send_json(404, {"ok": False, "error": "report not found"})
@@ -5448,7 +5514,7 @@ class Handler(BaseHTTPRequestHandler):
             data = handle.read()
         self.send_response(200)
         self._cors()
-        cache_control = "no-store" if name == "latest_report.json" or full.startswith(REPORTS_DIR) else "public, max-age=120, stale-while-revalidate=600"
+        cache_control = "no-store" if relative == "latest_report.json" or runtime_safe else "public, max-age=120, stale-while-revalidate=600"
         self.send_header("Cache-Control", cache_control)
         if cache_control == "no-store":
             self.send_header("Pragma", "no-cache")

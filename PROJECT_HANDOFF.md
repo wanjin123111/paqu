@@ -42,7 +42,7 @@ paqu/
 │  ├─ latest_report.json
 │  ├─ latest_report.csv
 │  ├─ latest_dramas.csv
-│  ├─ drama_episode_history.json
+│  ├─ episode_history/                # 按账号分片的剧集播放历史，避免 Render 内存溢出
 │  ├─ manifest.json
 │  └─ scheduled_*                     # 历史快照，自动清理 30 天以前文件
 ├─ reports/                           # Render/本地运行时目录，已忽略，不是永久存储
@@ -127,7 +127,7 @@ GitHub Actions（每天 08:05）
 - `public_reports/latest_*`：最新公开报表。
 - `public_reports/scheduled_*`：最近 30 天历史快照。
 - `public_reports/manifest.json`：历史报表索引。
-- `public_reports/drama_episode_history.json`：剧集播放历史。
+- `public_reports/episode_history/*.json`：按账号分片的剧集播放历史；运行时更新写入 `reports/episode_history/`。
 
 ### Supabase
 
@@ -245,7 +245,7 @@ python -m unittest discover -s tests -v
 - 视频直链可能过期，且浏览器编解码器、来源防盗链或 CORS 会导致“有声音但画面停住”等播放差异。
 - Supabase 免费额度和平台政策不是项目代码能保证的永久服务，需要定期查看配额和项目状态。
 - `README.md` 与 `SCHEDULE.md` 部分内容早于最近的安全改造；敏感接口以本文件和当前代码的 `X-Schedule-Secret` 逻辑为准。
-- `public_reports/drama_episode_history.json` 增长较快，但当前已按 30 天和点数上限清理。
+- `public_reports/episode_history/*.json` 增长较快，当前按账号分片，并按 30 天和点数上限清理；不要再合并成单个 JSON，否则 Render 512MB 实例解析时容易内存溢出。
 
 ## 12. 不能随意改动/需要注意的约束
 

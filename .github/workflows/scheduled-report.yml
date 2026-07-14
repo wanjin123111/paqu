@@ -18,7 +18,7 @@ jobs:
 
       - name: Trigger Render scheduled scraper
         run: |
-          curl --fail --show-error --silent --max-time 3600 \
+          curl --fail --show-error --silent --max-time 7200 \
             -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
             "https://paqu-tikhub-proxy.onrender.com/run-scheduled?wait=1" \
             -o run_result.json
@@ -40,8 +40,23 @@ jobs:
             -o tmp_reports/latest_dramas.csv
           curl --fail --show-error --silent --max-time 120 \
             -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
-            "https://paqu-tikhub-proxy.onrender.com/reports/drama_episode_history.json" \
-            -o tmp_reports/drama_episode_history.json || true
+            "https://paqu-tikhub-proxy.onrender.com/schedule-accounts" \
+            -o tmp_reports/schedule_accounts.json
+          mkdir -p tmp_reports/episode_history
+          python3 - <<'PY' > tmp_reports/episode_accounts.txt
+          import json, re
+          payload = json.load(open("tmp_reports/schedule_accounts.json", encoding="utf-8"))
+          for account in payload.get("accounts", []):
+              safe = re.sub(r"[^a-z0-9._-]+", "_", str(account).strip().lstrip("@").lower()).strip("._-")
+              if safe:
+                  print(safe)
+          PY
+          while IFS= read -r account; do
+            curl --fail --show-error --silent --max-time 120 \
+              -H "X-Schedule-Secret: ${{ secrets.SCHEDULE_SECRET }}" \
+              "https://paqu-tikhub-proxy.onrender.com/reports/episode_history/${account}.json" \
+              -o "tmp_reports/episode_history/${account}.json" || true
+          done < tmp_reports/episode_accounts.txt
 
       - name: Publish report history
         run: |
@@ -75,9 +90,12 @@ jobs:
           shutil.copyfile(tmp / "latest_report.json", out / "latest_report.json")
           shutil.copyfile(tmp / "latest_report.csv", out / "latest_report.csv")
           shutil.copyfile(tmp / "latest_dramas.csv", out / "latest_dramas.csv")
-          episode_history = tmp / "drama_episode_history.json"
-          if episode_history.exists() and episode_history.stat().st_size:
-              shutil.copyfile(episode_history, out / "drama_episode_history.json")
+          episode_history = tmp / "episode_history"
+          public_episode_history = out / "episode_history"
+          public_episode_history.mkdir(exist_ok=True)
+          for shard in episode_history.glob("*.json"):
+              if shard.stat().st_size:
+                  shutil.copyfile(shard, public_episode_history / shard.name)
 
           archive_pattern = re.compile(r"^scheduled_(?:report|dramas)_(\d{8}-\d{6})\.(?:json|csv)$")
           for path in out.iterdir():

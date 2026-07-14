@@ -3992,14 +3992,27 @@ function logSupabaseResult(result){
   log(msg, ok?"c-ok":"c-err");
   return msg;
 }
-async function pollBackendJob(){
-  for(let i=0;i<180;i++){
+function backendJobProgressText(job){
+  const done=Math.max(0,toInt(job&&job.accounts_completed));
+  const total=Math.max(0,toInt(job&&job.accounts_total));
+  const current=String((job&&job.current_account)||"").trim();
+  const phase=String((job&&job.phase)||"").trim();
+  const phaseLabels={starting:"启动中",accounts:"抓取账号",reports:"生成报表",supabase:"保存数据库",episode_history:"保存剧集历史",finishing:"收尾中"};
+  setProgress(done,total);
+  return (total?(" · "+done+"/"+total):"")+(current?(" · @"+current):"")+(phaseLabels[phase]?(" · "+phaseLabels[phase]):"");
+}
+async function pollBackendJob(expectedStartedAt){
+  let sawRunning=!!expectedStartedAt;
+  const deadline=Date.now()+2*60*60*1000;
+  while(Date.now()<deadline){
     const data=await backendFetchJson("/schedule-status",{}, {requireSecret:true});
     updateScheduleAccountState(data);
     const job=data.job||{};
     if(job.running){
+      sawRunning=true;
+      if(!expectedStartedAt&&job.started_at)expectedStartedAt=job.started_at;
       const started=job.started_at?(" · "+job.started_at):"";
-      backendSetStatus("后端抓取中"+started);
+      backendSetStatus("后端抓取中"+backendJobProgressText(job)+started);
       await sleep(5000);
       continue;
     }
@@ -4012,10 +4025,13 @@ async function pollBackendJob(){
       if(supabaseMsg)backendSetStatus(supabaseMsg+" · result loaded", supabaseOk);
       return latest;
     }
+    if(sawRunning&&!job.finished_at){
+      throw new Error("后端在抓取过程中因内存不足或重启而中断，请稍后重试");
+    }
     backendSetStatus("后端空闲");
     return null;
   }
-  throw new Error("等待后端任务超时");
+  throw new Error("后端任务运行超过 2 小时，请检查 Render 日志");
 }
 async function runBackendJob(manual){
   if(schedBusy){if(manual)toast("后端任务正在运行");return;}
@@ -4025,16 +4041,17 @@ async function runBackendJob(manual){
     $("runCard").style.display="block";
     clearConsole();
     logHead("后端账号任务启动 "+nowStamp());
-    let started=false;
+    let started=false,expectedStartedAt="";
     try{
-      await backendFetchJson("/run-scheduled",{}, {requireSecret:true});
+      const startPayload=await backendFetchJson("/run-scheduled",{}, {requireSecret:true});
+      expectedStartedAt=String((startPayload&&startPayload.job&&startPayload.job.started_at)||"");
       started=true;
     }catch(e){
       if(!/already running/i.test(e.message||""))throw e;
       log("后端已有任务在跑,开始等待结果","c-dim");
     }
     if(started)log("后端已开始抓取,账号名单来自后端监控账号配置或 Render 环境变量兜底","c-ok");
-    await pollBackendJob();
+    await pollBackendJob(expectedStartedAt);
     store.set("thr_sched_last",dayStr());
     log("后端结果已加载到前端表格,可以导出 CSV/Excel/Word","c-ok");
   }catch(e){

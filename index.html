@@ -943,7 +943,13 @@ let detailAccountIndex=-1;
 let detailAccountKey="";
 const DETAIL_PAGE_SIZE=7;
 let detailPage=1;
+let currentReportSource="latest";
 let currentReportGeneratedAt="";
+let detailRefreshTimer=null;
+let detailRefreshCount=0;
+const DETAIL_REFRESH_LIMIT=24;
+const DETAIL_REFRESH_MS=5000;
+let backendJobRunning=false;
 let running=false, cancelled=false;
 let corsShown=false;
 
@@ -1358,6 +1364,14 @@ function setPublicPageView(view){
 }
 function valueOf(row,keys,fallback){
   for(const k of keys){if(row&&row[k]!=null&&row[k]!=="")return row[k];}
+  if(row&&typeof row==="object"){
+    const aliases=new Set(keys.map(k=>String(k||"").split(" / ")[0].trim().toLowerCase()).filter(Boolean));
+    for(const [key,value] of Object.entries(row)){
+      if(value==null||value==="")continue;
+      const alias=String(key||"").split(" / ")[0].trim().toLowerCase();
+      if(aliases.has(alias))return value;
+    }
+  }
   return fallback==null?"":fallback;
 }
 function accountOf(row){return valueOf(row,["账号","Account / 账号","a"],"");}
@@ -1624,6 +1638,39 @@ function dramaPublishMsOf(row){
   if(!text)return 0;
   const ms=Date.parse(String(text).replace(" ","T")+"+08:00");
   return Number.isFinite(ms)?ms:0;
+}
+function dramaDurationTextOf(row){
+  const seconds=toInt(valueOf(row,["Duration Seconds / 总时长(秒)"],0));
+  const minutes=valueOf(row,["Duration Minutes / 总时长(分钟)"],"");
+  return minutes?minutes+"分钟":(seconds?fmt(seconds)+"秒":"");
+}
+function dramaDescriptionTextOf(row){
+  return valueOf(row,["Chinese Description / 中文简介","English Description Preview / 英文简介预览"],"");
+}
+function detailRowHasIdentity(row){
+  return !!(dramaTitleOf(row)||valueOf(row,["Drama ID / 短剧ID"],"")||accountOf(row));
+}
+function detailFieldMissing(row,column){
+  if(currentReportSource!=="latest"||!detailRowHasIdentity(row))return false;
+  if(column==="发布时间")return !dramaPublishTimeOf(row);
+  if(column==="时长")return !dramaDurationTextOf(row);
+  if(column==="题材")return !themeDisplayList(row).length&&!englishThemeLabelsOf(row).length&&!chineseThemeLabelsOf(row).length;
+  if(column==="简介")return !dramaDescriptionTextOf(row);
+  return false;
+}
+function detailFieldPending(row,column){
+  return backendJobRunning&&detailFieldMissing(row,column);
+}
+function detailFieldAwaiting(row,column){
+  return false;
+}
+function detailEnrichmentPending(){
+  return currentReportSource==="latest"&&backendJobRunning&&dramaRows.some(row=>
+    detailFieldPending(row,"发布时间")||
+    detailFieldPending(row,"时长")||
+    detailFieldPending(row,"题材")||
+    detailFieldPending(row,"简介")
+  );
 }
 function summaryHotOf(row){return toInt(valueOf(row,[DISPLAY_COLUMNS[5],COLUMNS[7],"v"],0));}
 function summaryAccountKey(row){return String(accountOf(row)||"").trim().toLowerCase();}
@@ -2402,15 +2449,6 @@ function updateScheduleAccountState(payload){
   }
   if(payload.schedule_account_source)scheduleAccountSource=String(payload.schedule_account_source||"");
 }
-async function refreshScheduleAccountState(opts){
-  try{
-    const data=await backendFetchJson("/schedule-status",{}, opts&&opts.requireSecret?{requireSecret:true}:{sendSecret:false});
-    updateScheduleAccountState(data);
-    return data;
-  }catch(_){
-    return null;
-  }
-}
 function dashboardReportAccountCount(current){
   return toInt(current&&current.accountCount)||rows.length||0;
 }
@@ -2651,11 +2689,18 @@ function setMutedCell(td,text){
   td.classList.add("cell-muted");
   td.textContent=text;
 }
-function setLoadingCell(td){
+function setLoadingCell(td,text){
   td.classList.add("cell-muted");
   const span=document.createElement("span");
   span.className="loading-inline";
-  span.textContent="加载中…";
+  span.textContent=text||"加载中…";
+  td.appendChild(span);
+}
+function setAwaitingCell(td){
+  td.classList.add("cell-muted");
+  const span=document.createElement("span");
+  span.className="loading-inline";
+  span.textContent="补全中";
   td.appendChild(span);
 }
 function setOptionalCell(td,value,isLoading=false){
@@ -2667,6 +2712,17 @@ function setOptionalCell(td,value,isLoading=false){
     setMutedCell(td,"暂无");
   }
 }
+function setDetailOptionalCell(td,value,row,column,loadingText){
+  if(value!=null&&value!==""){
+    td.textContent=value;
+  }else if(detailFieldPending(row,column)){
+    setLoadingCell(td,loadingText);
+  }else if(detailFieldAwaiting(row,column)){
+    setAwaitingCell(td);
+  }else{
+    setMutedCell(td,"暂无");
+  }
+}
 function appendDetailCell(tr,c,row,index){
   const td=document.createElement("td");
   if(c==="账号 / 昵称")appendAccountCell(td,row);
@@ -2674,7 +2730,7 @@ function appendDetailCell(tr,c,row,index){
   else if(c==="短剧ID"){td.className="detail-id";td.textContent=valueOf(row,["Drama ID / 短剧ID"],"");}
   else if(c==="英文剧名"){td.className="detail-title";td.textContent=dramaTitleOf(row);}
   else if(c==="中文剧名"){td.className="detail-title";setOptionalCell(td,chineseTitleOf(row),titleHydrating&&!!dramaTitleOf(row));}
-  else if(c==="发布时间"){td.className="num";setOptionalCell(td,dramaPublishTimeOf(row));}
+  else if(c==="发布时间"){td.className="num";setDetailOptionalCell(td,dramaPublishTimeOf(row),row,c);}
   else if(c==="集数"){td.className="num";td.textContent=fmt(dramaEpisodesOf(row));}
   else if(c==="观看"){td.className="num";td.textContent=fmtPlay(dramaViewsOf(row));}
   else if(c==="日增播放"){
@@ -2700,16 +2756,13 @@ function appendDetailCell(tr,c,row,index){
     }
   }
   else if(c==="时长"){
-    const seconds=toInt(valueOf(row,["Duration Seconds / 总时长(秒)"],0));
-    const minutes=valueOf(row,["Duration Minutes / 总时长(分钟)"],"");
     td.className="num";
-    const text=minutes?minutes+"分钟":(seconds?fmt(seconds)+"秒":"");
-    setOptionalCell(td,text);
+    setDetailOptionalCell(td,dramaDurationTextOf(row),row,c);
   }else if(c==="限免")td.textContent=valueOf(row,["Limited Free / 是否限免"],"");
   else if(c==="题材"){
     td.className="detail-text";
     const labels=themeDisplayList(row);
-    if(labels.length&&!(themeHydrating&&themeHasPendingTranslation(row))){
+    if(labels.length){
       const wrap=document.createElement("div");
       wrap.className="theme-tags";
       labels.forEach(label=>{
@@ -2719,11 +2772,12 @@ function appendDetailCell(tr,c,row,index){
         wrap.appendChild(tag);
       });
       td.appendChild(wrap);
-    }else if(themeHydrating&&englishThemeLabelsOf(row).length)setLoadingCell(td);
+    }else if(detailFieldPending(row,c))setLoadingCell(td,"补全中…");
+    else if(detailFieldAwaiting(row,c))setAwaitingCell(td);
     else setMutedCell(td,"暂无");
   }else if(c==="简介"){
     td.className="detail-text detail-description";
-    const description=valueOf(row,["English Description Preview / 英文简介预览","Chinese Description / 中文简介"],"");
+    const description=dramaDescriptionTextOf(row);
     if(description){
       const text=document.createElement("div");
       text.className="description-text";
@@ -2732,7 +2786,7 @@ function appendDetailCell(tr,c,row,index){
       text.textContent=description;
       td.appendChild(text);
     }else{
-      setOptionalCell(td,description);
+      setDetailOptionalCell(td,description,row,c);
     }
   }else if(c==="短剧链接"||c==="主页链接"){
     td.className="link";
@@ -3611,9 +3665,55 @@ function reportTimeLabel(value){
   return bj.getUTCFullYear()+"-"+pad2(bj.getUTCMonth()+1)+"-"+pad2(bj.getUTCDate())+" "+
     pad2(bj.getUTCHours())+":"+pad2(bj.getUTCMinutes())+":"+pad2(bj.getUTCSeconds())+" 北京时间";
 }
+function stopDetailAutoRefresh(){
+  if(detailRefreshTimer){
+    clearTimeout(detailRefreshTimer);
+    detailRefreshTimer=null;
+  }
+}
+async function refreshBackendJobState(){
+  try{
+    const data=await backendFetchJson("/schedule-status",{}, {sendSecret:false});
+    updateScheduleAccountState(data);
+    backendJobRunning=!!(data&&data.job&&data.job.running);
+  }catch(_){
+    backendJobRunning=false;
+  }
+  return backendJobRunning;
+}
+function scheduleDetailAutoRefresh(){
+  stopDetailAutoRefresh();
+  if(currentReportSource!=="latest"||!detailEnrichmentPending()){
+    detailRefreshCount=0;
+    return;
+  }
+  if(detailRefreshCount>=DETAIL_REFRESH_LIMIT)return;
+  detailRefreshCount+=1;
+  detailRefreshTimer=setTimeout(async()=>{
+    if(document.hidden){
+      scheduleDetailAutoRefresh();
+      return;
+    }
+    window.__quietRefresh=true;
+    try{
+      await refreshBackendJobState();
+      await loadBackendLatest({quiet:true});
+    }catch(_){
+      scheduleDetailAutoRefresh();
+    }finally{
+      window.__quietRefresh=false;
+    }
+  },DETAIL_REFRESH_MS);
+}
+function shouldHydrateClientTranslations(){
+  return isAdminMode()||!isPublicMode();
+}
 function loadBackendPayload(payload,opts){
   opts=opts||{};
+  const previousGeneratedAt=currentReportGeneratedAt;
+  currentReportSource=opts.source||"latest";
   currentReportGeneratedAt=payload.generated_at||"";
+  if(!opts.quiet||currentReportGeneratedAt!==previousGeneratedAt)detailRefreshCount=0;
   clearResults();
   currentReportPayload=payload;
   const summary=Array.isArray(payload.summary)?payload.summary:[];
@@ -3631,16 +3731,21 @@ function loadBackendPayload(payload,opts){
   const failed=(payload.errors||[]).map(e=>e.account||e.error||"未知");
   const dataTime=reportTimeLabel(payload.generated_at);
   updateSummary(failed, dataTime);
-  backendSetStatus("数据时间 "+dataTime+" · 已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧", true);
-  hydrateChineseTitles(dramaRows);
-  hydrateThemeLabels(dramaRows);
-  if(summary.length&&!opts.quiet)toast("已加载最新结果");
-  if(!opts.skipCache)dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,payload);
+  const pending=detailEnrichmentPending();
+  backendSetStatus("数据时间 "+dataTime+" · 已加载 "+summary.length+" 个账号 / "+dramas.length+" 部短剧"+(pending?" · 明细补全中，页面会自动刷新":""), !pending);
+  scheduleDetailAutoRefresh();
+  if(shouldHydrateClientTranslations()){
+    hydrateChineseTitles(dramaRows);
+    hydrateThemeLabels(dramaRows);
+  }
+  if(summary.length&&!window.__quietRefresh&&!opts.quiet)toast("已加载最新结果");
+  if(!opts.skipCache&&currentReportSource==="latest")dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,payload);
 }
 async function loadBackendLatest(opts){
   opts=opts||{};
   if(!opts.quiet)backendSetStatus("正在加载最新结果…");
-  if(!isPublicMode())await refreshScheduleAccountState();
+  const shouldCheckJob=!isPublicMode();
+  if(shouldCheckJob)await refreshBackendJobState();
   let payload=null;
   try{
     try{
@@ -3648,6 +3753,7 @@ async function loadBackendLatest(opts){
     }catch(_){
       payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
     }
+    if(shouldCheckJob)await refreshBackendJobState();
   }catch(firstErr){
     if(backendSecret()){
       try{
@@ -3658,6 +3764,7 @@ async function loadBackendLatest(opts){
         }catch(_){
           payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
         }
+        if(shouldCheckJob)await refreshBackendJobState();
       }catch(_){
         payload=await fetchJsonUrl("public_reports/latest_report.json");
       }
@@ -3665,7 +3772,7 @@ async function loadBackendLatest(opts){
       payload=await fetchJsonUrl("public_reports/latest_report.json");
     }
   }
-  loadBackendPayload(payload,{quiet:opts.quiet});
+  loadBackendPayload(payload,{source:"latest", quiet:opts.quiet});
   return payload;
 }
 function reportStamp(name){
@@ -3703,7 +3810,7 @@ function renderHistoryList(items, source){
       backendSetStatus("正在加载历史记录…");
       const url=btn.getAttribute("data-report-json");
       const payload=url.startsWith("http")||url.startsWith("public_reports/")?await fetchJsonUrl(url):await backendFetchJson(url,{}, {sendSecret:false});
-      loadBackendPayload(payload,{skipCache:true});
+      loadBackendPayload(payload,{source:"history"});
     }catch(e){backendSetStatus("加载历史失败:"+(e.message||e));toast("加载历史失败");}
   }));
   box.querySelectorAll("[data-report-download]").forEach(btn=>btn.addEventListener("click",()=>{
@@ -3885,14 +3992,27 @@ function logSupabaseResult(result){
   log(msg, ok?"c-ok":"c-err");
   return msg;
 }
-async function pollBackendJob(){
-  for(let i=0;i<180;i++){
+function backendJobProgressText(job){
+  const done=Math.max(0,toInt(job&&job.accounts_completed));
+  const total=Math.max(0,toInt(job&&job.accounts_total));
+  const current=String((job&&job.current_account)||"").trim();
+  const phase=String((job&&job.phase)||"").trim();
+  const phaseLabels={starting:"启动中",accounts:"抓取账号",reports:"生成报表",supabase:"保存数据库",episode_history:"保存剧集历史",finishing:"收尾中"};
+  setProgress(done,total);
+  return (total?(" · "+done+"/"+total):"")+(current?(" · @"+current):"")+(phaseLabels[phase]?(" · "+phaseLabels[phase]):"");
+}
+async function pollBackendJob(expectedStartedAt){
+  let sawRunning=!!expectedStartedAt;
+  const deadline=Date.now()+2*60*60*1000;
+  while(Date.now()<deadline){
     const data=await backendFetchJson("/schedule-status",{}, {requireSecret:true});
     updateScheduleAccountState(data);
     const job=data.job||{};
     if(job.running){
+      sawRunning=true;
+      if(!expectedStartedAt&&job.started_at)expectedStartedAt=job.started_at;
       const started=job.started_at?(" · "+job.started_at):"";
-      backendSetStatus("后端抓取中"+started);
+      backendSetStatus("后端抓取中"+backendJobProgressText(job)+started);
       await sleep(5000);
       continue;
     }
@@ -3905,10 +4025,13 @@ async function pollBackendJob(){
       if(supabaseMsg)backendSetStatus(supabaseMsg+" · result loaded", supabaseOk);
       return latest;
     }
+    if(sawRunning&&!job.finished_at){
+      throw new Error("后端在抓取过程中因内存不足或重启而中断，请稍后重试");
+    }
     backendSetStatus("后端空闲");
     return null;
   }
-  throw new Error("等待后端任务超时");
+  throw new Error("后端任务运行超过 2 小时，请检查 Render 日志");
 }
 async function runBackendJob(manual){
   if(schedBusy){if(manual)toast("后端任务正在运行");return;}
@@ -3918,16 +4041,17 @@ async function runBackendJob(manual){
     $("runCard").style.display="block";
     clearConsole();
     logHead("后端账号任务启动 "+nowStamp());
-    let started=false;
+    let started=false,expectedStartedAt="";
     try{
-      await backendFetchJson("/run-scheduled",{}, {requireSecret:true});
+      const startPayload=await backendFetchJson("/run-scheduled",{}, {requireSecret:true});
+      expectedStartedAt=String((startPayload&&startPayload.job&&startPayload.job.started_at)||"");
       started=true;
     }catch(e){
       if(!/already running/i.test(e.message||""))throw e;
       log("后端已有任务在跑,开始等待结果","c-dim");
     }
     if(started)log("后端已开始抓取,账号名单来自后端监控账号配置或 Render 环境变量兜底","c-ok");
-    await pollBackendJob();
+    await pollBackendJob(expectedStartedAt);
     store.set("thr_sched_last",dayStr());
     log("后端结果已加载到前端表格,可以导出 CSV/Excel/Word","c-ok");
   }catch(e){

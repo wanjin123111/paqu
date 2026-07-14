@@ -1,4 +1,5 @@
 import datetime
+import io
 import json
 import pathlib
 import tempfile
@@ -249,6 +250,10 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn('openDiscoveredSeries', page)
             self.assertIn('整剧列表/下载', page)
             self.assertNotIn('throw new Error("missing SCHEDULE_SECRET")', page)
+        self.assertEqual(
+            (root / "index.html").read_bytes(),
+            (root / "tikhub-report-frontend.html").read_bytes(),
+        )
 
     def test_discovery_endpoint_reads_separate_work_results(self):
         handler = object.__new__(proxy.Handler)
@@ -292,6 +297,57 @@ class DiscoveryWorksTests(unittest.TestCase):
 
 
 class RetentionTests(unittest.TestCase):
+    def test_report_route_serves_nested_episode_history_shard(self):
+        handler = object.__new__(proxy.Handler)
+        handler._allow_report_read = mock.Mock(return_value=True)
+        handler._cors = mock.Mock()
+        handler.send_response = mock.Mock()
+        handler.send_header = mock.Mock()
+        handler.end_headers = mock.Mock()
+        handler._send_json = mock.Mock()
+        handler.wfile = io.BytesIO()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            reports = root / "reports"
+            public = root / "public"
+            shard = reports / "episode_history" / "alpha.json"
+            shard.parent.mkdir(parents=True)
+            public.mkdir()
+            shard.write_bytes(b'{"version":2}')
+            with mock.patch.object(proxy, "REPORTS_DIR", str(reports)), \
+                    mock.patch.object(proxy, "PUBLIC_REPORTS_DIR", str(public)):
+                handler._serve_report("/reports/episode_history/alpha.json", {})
+        handler.send_response.assert_called_once_with(200)
+        self.assertEqual(handler.wfile.getvalue(), b'{"version":2}')
+        handler._send_json.assert_not_called()
+
+    def test_episode_history_reads_and_writes_only_one_account_shard(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            runtime_dir = root / "runtime"
+            public_dir = root / "public"
+            public_dir.mkdir()
+            (public_dir / "alpha.json").write_text(json.dumps({
+                "version": 2,
+                "account": "alpha",
+                "items": {"alpha|1|10": {"uid": "alpha", "points": [{"ms": 1, "views": 2}]}},
+            }), encoding="utf-8")
+            (public_dir / "beta.json").write_text(json.dumps({
+                "version": 2,
+                "account": "beta",
+                "items": {"beta|2|20": {"uid": "beta", "points": [{"ms": 1, "views": 3}]}},
+            }), encoding="utf-8")
+            with mock.patch.object(proxy, "DRAMA_EPISODE_HISTORY_DIR", str(runtime_dir)), \
+                    mock.patch.object(proxy, "PUBLIC_DRAMA_EPISODE_HISTORY_DIR", str(public_dir)):
+                history = proxy._read_drama_episode_history("@Alpha")
+                self.assertEqual(set(history["items"]), {"alpha|1|10"})
+                history["items"]["alpha|1|11"] = {"uid": "alpha", "points": []}
+                proxy._write_drama_episode_history(history, "Alpha")
+                stored = json.loads((runtime_dir / "alpha.json").read_text(encoding="utf-8"))
+            self.assertEqual(stored["account"], "alpha")
+            self.assertEqual(set(stored["items"]), {"alpha|1|10", "alpha|1|11"})
+            self.assertNotIn("beta|2|20", stored["items"])
+
     def test_runtime_cleanup_only_removes_archives_older_than_30_days(self):
         now = datetime.datetime(2026, 7, 10, 12, 0, tzinfo=proxy.BEIJING_TZ)
         with tempfile.TemporaryDirectory() as temp_dir:
