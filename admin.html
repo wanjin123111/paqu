@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>短剧资产管理后台</title>
+  <style>
+    :root{
+      --bg:#f4f5f9;--surface:#fff;--surface-2:#f8f8fc;--ink:#171923;--muted:#73778a;
+      --line:#e7e8f0;--line-strong:#d7d9e5;--purple:#635bff;--purple-dark:#4e46df;
+      --purple-soft:#efeeff;--nav:#181a24;--nav-2:#242735;--green:#159a67;--green-soft:#eaf9f2;
+      --amber:#b56b09;--amber-soft:#fff6e7;--red:#d44444;--red-soft:#fff0f0;--shadow:0 12px 36px rgba(28,31,45,.08);
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;min-height:100%;font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:var(--bg)}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    a{color:inherit}
+    .app{min-height:100vh;display:grid;grid-template-columns:246px minmax(0,1fr)}
+    .sidebar{position:sticky;top:0;height:100vh;background:var(--nav);color:#fff;padding:22px 16px 18px;display:flex;flex-direction:column;z-index:20}
+    .brand{display:flex;gap:12px;align-items:center;padding:0 8px 24px}
+    .brand-mark{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:var(--purple);font-weight:900;font-size:20px;box-shadow:0 8px 20px rgba(99,91,255,.35)}
+    .brand strong{display:block;font-size:15px;letter-spacing:.2px}.brand small{display:block;color:#a9adbd;font-size:11px;margin-top:3px}
+    .nav-label{padding:0 11px;margin:12px 0 7px;color:#74798d;font-size:10px;font-weight:700;letter-spacing:1.2px}
+    .nav{display:grid;gap:5px}
+    .nav-btn{border:0;background:transparent;color:#aeb2c2;border-radius:10px;padding:11px 12px;display:flex;align-items:center;gap:11px;text-align:left;font-weight:600;font-size:13px;transition:.15s}
+    .nav-btn:hover{background:#20232f;color:#fff}.nav-btn.active{background:var(--nav-2);color:#fff;box-shadow:inset 3px 0 var(--purple)}
+    .nav-icon{width:23px;text-align:center;font-size:15px}.nav-count{margin-left:auto;color:#fff;background:#35394b;border-radius:999px;padding:2px 7px;font-size:10px}
+    .sidebar-foot{margin-top:auto;padding:14px 10px 0;border-top:1px solid #2a2d39}
+    .sidebar-foot p{margin:0 0 10px;font-size:11px;color:#8f94a8;line-height:1.65}
+    .front-link{display:flex;justify-content:center;text-decoration:none;border:1px solid #343848;border-radius:9px;padding:9px;color:#c6cad7;font-size:12px}
+    .main{min-width:0}
+    .topbar{height:76px;padding:0 30px;display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.88);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:15;backdrop-filter:blur(14px)}
+    .top-title h1{font-size:19px;margin:0 0 4px}.top-title p{margin:0;color:var(--muted);font-size:12px}
+    .top-actions{display:flex;align-items:center;gap:9px}.status-pill{display:flex;gap:7px;align-items:center;padding:8px 11px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--muted);font-size:12px}.dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px var(--green-soft)}
+    .btn{border:1px solid var(--line-strong);border-radius:9px;background:#fff;color:var(--ink);padding:9px 13px;font-size:12px;font-weight:650;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px}.btn:hover{border-color:#bfc1cf;background:#fafaff}.btn.primary{border-color:var(--purple);background:var(--purple);color:#fff}.btn.primary:hover{background:var(--purple-dark)}.btn.danger{color:var(--red)}.btn.small{padding:6px 9px;min-height:30px}.btn.icon{width:34px;padding:0}
+    .content{padding:24px 30px 45px;max-width:1600px;margin:0 auto}
+    .notice{display:flex;align-items:flex-start;gap:11px;padding:12px 14px;border-radius:10px;background:var(--purple-soft);border:1px solid #dcd9ff;color:#4d478e;font-size:12px;line-height:1.6;margin-bottom:18px}.notice strong{color:#332e73}.notice .close{margin-left:auto;border:0;background:transparent;color:#7670a6;font-size:18px;line-height:1}
+    .view{display:none}.view.active{display:block}
+    .section-head{display:flex;align-items:end;justify-content:space-between;gap:16px;margin:0 0 16px}.section-head h2{margin:0 0 5px;font-size:18px}.section-head p{margin:0;color:var(--muted);font-size:12px}.section-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px;margin-bottom:17px}
+    .stat{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:17px 18px;min-height:122px;position:relative;overflow:hidden}.stat:after{content:"";position:absolute;width:74px;height:74px;border-radius:50%;right:-22px;top:-25px;background:var(--purple-soft)}
+    .stat-label{font-size:12px;color:var(--muted);margin-bottom:17px}.stat-value{font-size:27px;line-height:1;font-weight:780;letter-spacing:-.5px}.stat-sub{font-size:11px;color:var(--muted);margin-top:10px}.stat-sub.good{color:var(--green)}.stat-icon{position:absolute;right:16px;bottom:15px;color:#9a96ff;font-size:18px}
+    .dashboard-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(310px,.8fr);gap:15px}
+    .card{background:var(--surface);border:1px solid var(--line);border-radius:13px;overflow:hidden}.card-head{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.card-head h3{margin:0;font-size:14px}.card-head span{font-size:11px;color:var(--muted)}.card-body{padding:16px 18px}
+    .queue{display:grid;gap:2px}.queue-item{display:grid;grid-template-columns:minmax(0,1.4fr) 120px 104px 90px;gap:12px;align-items:center;padding:12px 3px;border-bottom:1px solid var(--line)}.queue-item:last-child{border:0}.title-main{font-size:13px;font-weight:680;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.title-sub{font-size:11px;color:var(--muted);margin-top:4px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+    .badge{display:inline-flex;align-items:center;gap:5px;width:max-content;border-radius:999px;padding:4px 8px;font-size:10.5px;font-weight:700}.badge.pending{color:var(--amber);background:var(--amber-soft)}.badge.owned{color:var(--green);background:var(--green-soft)}.badge.ignored{color:#76798a;background:#f0f1f5}.badge.live{color:var(--purple-dark);background:var(--purple-soft)}
+    .rank-list{display:grid;gap:14px}.rank-line{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:9px;align-items:center}.rank-no{width:25px;height:25px;border-radius:8px;display:grid;place-items:center;background:var(--surface-2);font-size:11px;font-weight:800}.rank-line:first-child .rank-no{background:var(--purple);color:#fff}.bar{height:5px;background:#eeeef5;border-radius:99px;margin-top:7px;overflow:hidden}.bar i{display:block;height:100%;background:var(--purple);border-radius:99px}.rank-value{font-size:12px;font-weight:700}
+    .toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:13px}.field{border:1px solid var(--line-strong);background:#fff;border-radius:9px;padding:9px 11px;font-size:12px;color:var(--ink);min-height:37px}.field:focus{outline:none;border-color:var(--purple);box-shadow:0 0 0 3px var(--purple-soft)}.search{min-width:270px;flex:1}.toolbar .spacer{flex:1}.muted{color:var(--muted)}
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}.data-table{width:100%;border-collapse:collapse;min-width:1000px}.data-table th{position:sticky;top:0;background:#f8f8fb;color:#686c7d;font-size:10.5px;text-align:left;padding:11px 13px;border-bottom:1px solid var(--line);font-weight:750;white-space:nowrap}.data-table td{font-size:12px;padding:12px 13px;border-bottom:1px solid var(--line);vertical-align:middle}.data-table tr:last-child td{border:0}.data-table tbody tr:hover{background:#fbfbff}.check{width:15px;height:15px;accent-color:var(--purple)}
+    .account-cell{display:flex;align-items:center;gap:10px}.avatar{width:32px;height:32px;border-radius:10px;background:linear-gradient(145deg,#292d3b,#635bff);color:#fff;display:grid;place-items:center;font-weight:800;font-size:11px;flex:0 0 auto}.account-name{font-weight:700}.account-handle{font-size:10.5px;color:var(--muted);margin-top:3px}.metric{font-variant-numeric:tabular-nums;font-weight:700}.action-row{display:flex;gap:6px;white-space:nowrap}
+    .pager{display:flex;align-items:center;justify-content:space-between;padding-top:13px;color:var(--muted);font-size:11px}.pager-buttons{display:flex;gap:6px}
+    .account-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.account-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}.account-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.account-profile{display:flex;align-items:center;gap:11px}.account-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:15px;padding-top:13px;border-top:1px solid var(--line)}.account-meta div{font-size:10px;color:var(--muted)}.account-meta strong{display:block;color:var(--ink);font-size:13px;margin-bottom:3px}.empty{padding:45px 20px;text-align:center;color:var(--muted)}.empty strong{display:block;color:var(--ink);font-size:14px;margin-bottom:6px}
+    .auth-box{display:none;position:absolute;right:30px;top:66px;width:350px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:15px;z-index:30}.auth-box.open{display:block}.auth-box h3{font-size:13px;margin:0 0 5px}.auth-box p{font-size:11px;color:var(--muted);line-height:1.6;margin:0 0 12px}.auth-line{display:flex;gap:7px}.auth-line input{min-width:0;flex:1}
+    dialog{border:0;border-radius:15px;padding:0;box-shadow:0 24px 80px rgba(27,30,44,.25);width:min(680px,calc(100vw - 28px));color:var(--ink)}dialog::backdrop{background:rgba(21,23,32,.52);backdrop-filter:blur(3px)}
+    .modal-head{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.modal-head h3{margin:0;font-size:16px}.modal-close{border:0;background:transparent;color:var(--muted);font-size:22px}.modal-body{padding:19px 20px;max-height:70vh;overflow:auto}.modal-foot{padding:14px 20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.form-group{display:grid;gap:6px}.form-group.full{grid-column:1/-1}.form-group label{font-size:11px;color:#5d6172;font-weight:700}.form-group .field{width:100%}.hint{font-size:10.5px;color:var(--muted);line-height:1.5}.source-box{background:var(--surface-2);border-radius:10px;padding:12px;font-size:11px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:8px}.source-box strong{color:var(--ink)}
+    .switch-line{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:9px}.switch{position:relative;width:38px;height:21px}.switch input{opacity:0;width:0;height:0}.switch i{position:absolute;inset:0;border-radius:99px;background:#c9cbd5;transition:.16s}.switch i:before{content:"";position:absolute;width:17px;height:17px;left:2px;top:2px;border-radius:50%;background:white;transition:.16s}.switch input:checked+i{background:var(--purple)}.switch input:checked+i:before{transform:translateX(17px)}
+    .toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,18px);opacity:0;pointer-events:none;background:#171923;color:#fff;border-radius:10px;padding:11px 15px;font-size:12px;z-index:99;transition:.18s}.toast.show{opacity:1;transform:translate(-50%,0)}
+    .menu-btn{display:none}
+    @media(max-width:1120px){.stats{grid-template-columns:repeat(2,1fr)}.dashboard-grid{grid-template-columns:1fr}.account-grid{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:-260px;width:246px;transition:.2s}.sidebar.open{left:0;box-shadow:30px 0 80px rgba(0,0,0,.22)}.menu-btn{display:inline-flex}.topbar{height:auto;min-height:68px;padding:12px 15px}.content{padding:17px 14px 35px}.top-title p,.status-pill{display:none}.stats{grid-template-columns:1fr 1fr}.account-grid{grid-template-columns:1fr}.section-head{align-items:flex-start;flex-direction:column}.queue-item{grid-template-columns:minmax(0,1fr) auto}.queue-item>:nth-child(2),.queue-item>:nth-child(3){display:none}.form-grid{grid-template-columns:1fr}.form-group.full{grid-column:auto}.auth-box{right:14px;top:61px;width:calc(100vw - 28px)}}
+    @media(max-width:480px){.stats{grid-template-columns:1fr}.top-actions .btn span{display:none}.search{min-width:100%}.source-box{grid-template-columns:1fr}}
+    @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="brand-mark">T</div><div><strong>短剧资产管理</strong><small>TikHub Content Ops</small></div></div>
+    <div class="nav-label">管理中心</div>
+    <nav class="nav">
+      <button class="nav-btn active" data-view="dashboard"><span class="nav-icon">⌂</span>工作台</button>
+      <button class="nav-btn" data-view="accounts"><span class="nav-icon">◎</span>监控账号<span class="nav-count" id="navAccountCount">0</span></button>
+      <button class="nav-btn" data-view="review"><span class="nav-icon">◇</span>作品认领<span class="nav-count" id="navPendingCount">0</span></button>
+      <button class="nav-btn" data-view="dramas"><span class="nav-icon">▣</span>公司短剧<span class="nav-count" id="navOwnedCount">0</span></button>
+    </nav>
+    <div class="nav-label">系统</div>
+    <nav class="nav"><button class="nav-btn" data-view="settings"><span class="nav-icon">⚙</span>后台设置</button></nav>
+    <div class="sidebar-foot"><p>作品归属、主创资料、上架状态和排序由后端统一保存。</p><a class="front-link" href="/catalog">查看公司短剧前台 →</a><a class="front-link" href="/" style="margin-top:7px">返回原始数据看板 →</a></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:10px"><button class="btn icon menu-btn" id="menuBtn" aria-label="打开菜单">☰</button><div class="top-title"><h1 id="pageTitle">运营工作台</h1><p id="pageSub">管理监控账号、认领公司作品并维护短剧资料</p></div></div>
+      <div class="top-actions"><div class="status-pill"><span class="dot"></span><span id="syncText">正在加载数据</span></div><button class="btn" id="refreshBtn">↻ <span>刷新数据</span></button><button class="btn primary" id="authBtn">⌁ <span>后台密码</span></button></div>
+      <div class="auth-box" id="authBox"><h3>验证后台权限</h3><p>密码仅保存在当前浏览器会话，通过 <b>X-Schedule-Secret</b> 请求头发送，不会写入网址。</p><div class="auth-line"><input class="field" id="secretInput" type="password" autocomplete="off" placeholder="输入 SCHEDULE_SECRET" /><button class="btn primary" id="verifyBtn">验证</button></div><div class="hint" id="authStatus" style="margin-top:8px">未验证时仍可查看公开报表。</div></div>
+    </header>
+
+    <div class="content">
+      <div class="notice" id="draftNotice"><span>✦</span><div><strong>公司短剧管理中心</strong><br />先从抓取结果中认领公司作品；同一部剧在多个账号发布时，可一次选择多条来源并合并为同一部短剧。</div><button class="close" id="noticeClose" aria-label="关闭提示">×</button></div>
+
+      <section class="view active" id="view-dashboard">
+        <div class="section-head"><div><h2>今日概览</h2><p id="generatedText">正在读取最新报表...</p></div><div class="section-actions"><button class="btn" data-jump="review">处理待认领作品</button><button class="btn primary" id="newDramaBtn">＋ 新建公司短剧</button></div></div>
+        <div class="stats">
+          <div class="stat"><div class="stat-label">监控账号</div><div class="stat-value" id="statAccounts">—</div><div class="stat-sub good" id="statAccountsSub">读取中</div><span class="stat-icon">◎</span></div>
+          <div class="stat"><div class="stat-label">待确认作品</div><div class="stat-value" id="statPending">—</div><div class="stat-sub">需要判断是否为公司作品</div><span class="stat-icon">◇</span></div>
+          <div class="stat"><div class="stat-label">公司短剧</div><div class="stat-value" id="statOwned">—</div><div class="stat-sub good" id="statLive">0 部已上架</div><span class="stat-icon">▣</span></div>
+          <div class="stat"><div class="stat-label">原始短剧数据</div><div class="stat-value" id="statRaw">—</div><div class="stat-sub" id="statRawSub">来自最新 TikHub 报表</div><span class="stat-icon">↗</span></div>
+        </div>
+        <div class="dashboard-grid">
+          <div class="card"><div class="card-head"><h3>待处理队列</h3><span>优先确认播放量较高的作品</span></div><div class="card-body"><div class="queue" id="queueList"></div></div></div>
+          <div class="card"><div class="card-head"><h3>当前高播放作品</h3><span>最新报表 Top 5</span></div><div class="card-body"><div class="rank-list" id="rankList"></div></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-accounts">
+        <div class="section-head"><div><h2>监控账号</h2><p>管理定时抓取的 TikTok 发布账号</p></div><div class="section-actions"><button class="btn" id="loadBackendAccountsBtn">读取后端账号池</button><button class="btn primary" id="addAccountBtn">＋ 添加监控账号</button></div></div>
+        <div class="toolbar"><input class="field search" id="accountSearch" placeholder="搜索账号或昵称" /><select class="field" id="accountFilter"><option value="all">全部账号</option><option value="healthy">抓取正常</option><option value="error">需要检查</option></select><span class="muted" id="accountSource" style="font-size:11px">来源：最新报表</span></div>
+        <div class="account-grid" id="accountGrid"></div>
+      </section>
+
+      <section class="view" id="view-review">
+        <div class="section-head"><div><h2>作品认领</h2><p>从抓取结果中筛选公司自有短剧</p></div><div class="section-actions"><button class="btn" id="bulkIgnoreBtn">忽略所选</button><button class="btn primary" id="bulkClaimBtn">认领所选</button></div></div>
+        <div class="toolbar"><input class="field search" id="reviewSearch" placeholder="搜索中文名、英文名或发布账号" /><select class="field" id="reviewFilter"><option value="pending">待确认</option><option value="owned">已认领</option><option value="ignored">已忽略</option><option value="all">全部状态</option></select><select class="field" id="reviewSort"><option value="views">播放量从高到低</option><option value="latest">最新发布</option><option value="title">按剧名排序</option></select><span class="muted" id="reviewCount" style="font-size:11px"></span></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th><input class="check" id="reviewCheckAll" type="checkbox" aria-label="全选" /></th><th>作品</th><th>发布账号</th><th>发布时间</th><th>集数</th><th>累计播放</th><th>状态</th><th>操作</th></tr></thead><tbody id="reviewBody"></tbody></table></div>
+        <div class="pager"><span id="reviewPagerText">—</span><div class="pager-buttons"><button class="btn small" id="reviewPrev">上一页</button><button class="btn small" id="reviewNext">下一页</button></div></div>
+      </section>
+
+      <section class="view" id="view-dramas">
+        <div class="section-head"><div><h2>公司短剧</h2><p>维护剧名、主创人员、来源绑定、上架状态和前台顺序</p></div><div class="section-actions"><button class="btn" id="exportDraftBtn">导出配置 JSON</button><a class="btn" href="/catalog">查看前台</a><button class="btn primary" id="newDramaBtn2">＋ 新建短剧</button></div></div>
+        <div class="toolbar"><input class="field search" id="dramaSearch" placeholder="搜索剧名、编剧、制作或账号" /><select class="field" id="dramaFilter"><option value="all">全部短剧</option><option value="live">前台已上架</option><option value="draft">未上架</option></select><span class="muted" id="dramaCount" style="font-size:11px"></span></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>顺序</th><th>短剧</th><th>发布账号</th><th>编剧</th><th>制作/制片</th><th>汇总播放</th><th>前台状态</th><th>操作</th></tr></thead><tbody id="dramaBody"></tbody></table></div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="section-head"><div><h2>后台设置</h2><p>当前面板的数据来源和草稿状态</p></div></div>
+        <div class="dashboard-grid"><div class="card"><div class="card-head"><h3>数据连接</h3><span>只显示状态，不显示密钥</span></div><div class="card-body"><div class="queue"><div class="queue-item"><div><div class="title-main">公开报表</div><div class="title-sub">最新 TikHub 抓取结果</div></div><span class="badge owned">已连接</span></div><div class="queue-item"><div><div class="title-main">后台账号池</div><div class="title-sub">验证任务密码后可管理</div></div><span class="badge pending" id="settingBackendState">未验证</span></div><div class="queue-item"><div><div class="title-main">短剧资料持久化</div><div class="title-sub" id="storageDetail">等待验证后台连接</div></div><span class="badge pending" id="storageState">待连接</span></div></div></div></div><div class="card"><div class="card-head"><h3>配置备份</h3><span>来自后端的完整数据</span></div><div class="card-body"><p class="muted" style="font-size:12px;line-height:1.8;margin-top:0">可以随时导出公司短剧、人员资料和来源绑定。正式数据以后台保存结果为准，不再依赖当前浏览器。</p><div class="section-actions"><button class="btn" id="settingsExportBtn">导出配置</button><button class="btn" id="reloadCatalogBtn">重新读取后端</button></div></div></div></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<dialog id="editDialog">
+  <form method="dialog" id="editForm">
+    <div class="modal-head"><div><h3 id="editTitle">认领公司短剧</h3><div class="hint" id="editSubtitle">补充公司内部资料</div></div><button class="modal-close" value="cancel" aria-label="关闭">×</button></div>
+    <div class="modal-body">
+      <div class="source-box" id="sourceBox"></div>
+      <div class="form-grid" style="margin-top:16px">
+        <input type="hidden" id="editKey" />
+        <div class="form-group full" id="attachGroup"><label for="editAttach">归入哪一部公司短剧</label><select class="field" id="editAttach"><option value="__new__">新建一部公司短剧</option></select><div class="hint">选择已有短剧，可以把不同 TikTok 账号的发布记录合并统计。</div></div>
+        <div class="form-group"><label for="editCn">中文剧名 *</label><input class="field" id="editCn" required /></div>
+        <div class="form-group"><label for="editEn">英文剧名 *</label><input class="field" id="editEn" required /></div>
+        <div class="form-group"><label for="editWriter">编剧 *</label><input class="field" id="editWriter" required placeholder="内部人员姓名" /></div>
+        <div class="form-group"><label for="editProducer">制作/制片 *</label><input class="field" id="editProducer" required placeholder="待确认准确岗位名称" /></div>
+        <div class="form-group"><label for="editDirector">导演</label><input class="field" id="editDirector" /></div>
+        <div class="form-group"><label for="editCast">主演</label><input class="field" id="editCast" /></div>
+        <div class="form-group full"><label for="editAliases">历史剧名/合作方别名</label><textarea class="field" id="editAliases" rows="2" placeholder="一行一个，用于剧名修改后的匹配和搜索"></textarea></div>
+        <div class="form-group"><label for="editOrder">前台顺序</label><input class="field" id="editOrder" type="number" min="1" /></div>
+        <div class="form-group"><label>前台展示</label><div class="switch-line"><span class="hint">允许出现在用户看板</span><label class="switch"><input id="editOnline" type="checkbox" /><i></i></label></div></div>
+        <div class="form-group full"><label for="editNotes">内部备注</label><textarea class="field" id="editNotes" rows="3" placeholder="例如：历史剧名、合作方称呼、归属说明"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn danger" id="ignoreFromEdit" value="cancel" type="button">标记为非公司作品</button><div class="section-actions"><button class="btn" value="cancel">取消</button><button class="btn primary" id="saveDramaBtn" value="default">保存并认领</button></div></div>
+  </form>
+</dialog>
+
+<dialog id="accountDialog">
+  <form method="dialog" id="accountForm">
+    <div class="modal-head"><div><h3>添加监控账号</h3><div class="hint">新增后会进入后端动态监控池</div></div><button class="modal-close" value="cancel" aria-label="关闭">×</button></div>
+    <div class="modal-body"><div class="form-group"><label for="newAccounts">TikTok 账号或主页链接</label><textarea class="field" id="newAccounts" rows="6" placeholder="一行一个，例如：&#10;loveshotsfans&#10;https://www.tiktok.com/@reelshortapp"></textarea><div class="hint">需要先验证后台任务密码。系统会自动去重，已经监控的账号不会重复添加。</div></div></div>
+    <div class="modal-foot"><span></span><div class="section-actions"><button class="btn" value="cancel">取消</button><button class="btn primary" id="saveAccountsBtn" value="default">添加到后端</button></div></div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script src="/admin.js?v=20260714-1"></script>
+</body>
+</html>

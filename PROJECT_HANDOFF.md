@@ -7,7 +7,7 @@
 
 ## 1. 项目目标
 
-批量监控 TikTok 短剧账号，通过 TikHub 抓取账号、短剧、集数、播放量、题材、简介和作品链接，生成可视化首页、账号汇总、账号明细及 CSV/JSON 报表。
+批量监控 TikTok 短剧账号，通过 TikHub 抓取账号、短剧、集数、播放量、题材、简介和作品链接，生成可视化首页、账号汇总、账号明细及 CSV/JSON 报表；同时由运营人员认领公司自有作品、合并多账号发布来源并维护主创资料，形成独立的公开公司短剧资产库。
 
 系统需要同时满足：
 
@@ -33,6 +33,8 @@ Render 的 `/` 会托管 `index.html`；GitHub Pages 也直接发布同一份静
 paqu/
 ├─ index.html                         # 正式前端入口，Render 与 GitHub Pages 使用
 ├─ tikhub-report-frontend.html        # 前端同步副本，修改界面时必须同步
+├─ admin.html / admin.js              # 公司短剧资产管理后台
+├─ catalog.html / catalog.js          # 公开公司短剧库、榜单、搜索和详情
 ├─ tikhub_proxy.py                    # Python 后端、TikHub 代理、抓取、报表、Supabase
 ├─ 启动代理.bat                       # Windows 本地一键启动
 ├─ render.yaml                        # Render Blueprint 与默认环境变量
@@ -71,6 +73,9 @@ paqu/
 - 近 30 天热度新增榜、热门题材占比、本月/本周题材播放增长、监控账号数、本周新增短剧和增长最多账号。
 - 初始加载先用轻量元数据校验浏览器缓存；旧缓存不再冒充最新数据，而是显示同步状态后重载完整报表。公开页每 1 分钟检查一次元数据，窗口重新获得焦点时也会立即检查。
 - 近 10 次历史报表最多同时加载 2 份，避免浏览器并发请求令 Render 512MB 实例出现内存和响应压力。
+- `/admin` 为公司短剧资产管理后台：支持作品认领、忽略、跨账号来源合并、主创资料、别名、内部备注、上下架、删除和手工排序。
+- `/catalog` 为公开公司短剧库：仅展示后台已上架作品，支持播放热度榜、剧名/主创/账号搜索、排序和来源详情。
+- 任务密码只保存在当前浏览器 `sessionStorage`，管理端写操作统一使用 `X-Schedule-Secret` 请求头。
 
 ### 后端与数据
 
@@ -78,6 +83,8 @@ paqu/
 - Render 定时抓取和 GitHub Actions 每日调度。
 - Supabase 持久化账号、短剧、报表运行记录和历史快照。
 - Supabase 最新报表缓存、按 ID 缓存、紧凑历史报表接口 `?compact=1`。
+- 公司短剧配置复用 Supabase `report_runs` 持久化，使用 `source=admin_catalog` 独立保存；普通报表查询与 30 天清理均排除此记录。
+- 公司短剧配置带递增 `revision`，多人或多页面同时编辑时使用乐观锁，旧版本保存返回 `409`，避免覆盖新数据。
 - GitHub `public_reports` 作为公开静态回退数据源。
 - Render、本地历史文件、剧集历史和 Supabase 快照统一执行最多 30 天保留策略。
 
@@ -91,14 +98,14 @@ paqu/
 
 ## 5. 正在开发或待继续功能
 
-当前工作区没有未提交的半成品功能。最近一次界面逻辑修改已经完成并上线：顶部四张卡统一使用“当前播放量最高的同一部剧”。
+公司短剧资产后台与公开剧库已完成开发和本地端到端验证。精确线上状态以 Render Events 最新成功部署提交为准。
 
 下一轮建议按优先级继续：
 
 1. 用更多连续 30 天快照复核 1/3/7/30 天增长口径，特别是新剧在基准日不存在时的显示。
 2. 给首页和账号明细补充小屏幕、不同缩放比例的回归截图。
-3. 把 `README.md`、`SCHEDULE.md` 中旧的查询参数鉴权示例统一改为请求头鉴权。
-4. 如要增加后台配置页，只显示状态和账号数量，不把密钥或完整敏感配置返回前端。
+3. 后续新增敏感接口时继续只使用 `X-Schedule-Secret` 请求头，不得恢复查询参数密钥。
+4. 后续可按公司内部权限体系增加多用户登录和角色划分；当前管理端使用统一 `SCHEDULE_SECRET`。
 
 ## 6. 关键技术与运行方式
 
@@ -137,6 +144,7 @@ GitHub Actions（每天 08:05）
 - `dramas`：短剧基础信息。
 - `drama_snapshots`：每次报表的短剧播放量和集数快照。
 - `report_runs`：报表批次及完整原始 JSON。
+- `report_runs` 中 `source=admin_catalog` 的一条记录：公司短剧认领、主创资料、来源绑定、上下架和排序配置；不会被普通历史报表清理。
 - 30 天以前的 `account_snapshots`、`drama_snapshots`、`report_runs` 会由定时抓取后的清理逻辑删除。
 
 ### Render
@@ -147,6 +155,7 @@ GitHub Actions（每天 08:05）
 ### 浏览器
 
 - 页面设置可能保存在浏览器 `localStorage`。
+- 资产管理后台的任务密码仅保存在当前标签会话的 `sessionStorage`；关闭浏览器会话后需重新输入。
 - 不要依赖浏览器保存线上密钥；正式密钥只放 Render Environment / GitHub Actions Secrets。
 
 ## 8. 环境变量与密钥
@@ -170,6 +179,7 @@ REPORT_RETENTION_DAYS=30
 DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS=30
 SUPABASE_REPORT_HISTORY_LIMIT=30
 SUPABASE_LATEST_CACHE_SECONDS=120
+ADMIN_CATALOG_CACHE_SECONDS=20
 SCHEDULE_MAX_RUNTIME_SECONDS=600
 SCHEDULE_DELAY_MS=300
 SCHEDULE_ACCOUNT_WORKERS=4
@@ -250,7 +260,7 @@ python -m unittest discover -s tests -v
 - TikHub API 余额、限流、字段变化或单个端点异常会影响抓取完整度。
 - 视频直链可能过期，且浏览器编解码器、来源防盗链或 CORS 会导致“有声音但画面停住”等播放差异。
 - Supabase 免费额度和平台政策不是项目代码能保证的永久服务，需要定期查看配额和项目状态。
-- `README.md` 与 `SCHEDULE.md` 部分内容早于最近的安全改造；敏感接口以本文件和当前代码的 `X-Schedule-Secret` 逻辑为准。
+- `SCHEDULE.md` 的手动调用示例已经统一为 `X-Schedule-Secret` 请求头；敏感接口不再接受查询参数密钥。
 - `public_reports/episode_history/*.json` 增长较快，当前按账号分片，并按 30 天和点数上限清理；不要再合并成单个 JSON，否则 Render 512MB 实例解析时容易内存溢出。
 
 ## 12. 不能随意改动/需要注意的约束

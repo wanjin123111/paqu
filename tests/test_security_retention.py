@@ -32,6 +32,12 @@ class PrivateAccessTests(unittest.TestCase):
             self.assertTrue(handler._require_private_access({}))
         self.assertEqual(handler.responses, [])
 
+    def test_query_parameter_secret_is_rejected(self):
+        handler = self.make_handler()
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"):
+            self.assertFalse(handler._require_private_access({"secret": ["expected-secret"]}))
+        self.assertEqual(handler.responses[0][0], 403)
+
     def test_loopback_request_stays_available_without_secret(self):
         handler = self.make_handler(client="127.0.0.1")
         with mock.patch.object(proxy, "SCHEDULE_SECRET", ""), \
@@ -162,6 +168,143 @@ class LocalDownloaderScriptTests(unittest.TestCase):
         self.assertIn('$folderPrefix + "-*"', script)
         self.assertIn("$existingDir.FullName", script)
         self.assertNotIn("$jobs += Start-Job", script)
+
+
+class AdminCatalogTests(unittest.TestCase):
+    def setUp(self):
+        self.original_cache = dict(proxy.ADMIN_CATALOG_CACHE)
+
+    def tearDown(self):
+        proxy.ADMIN_CATALOG_CACHE.clear()
+        proxy.ADMIN_CATALOG_CACHE.update(self.original_cache)
+
+    def sample_catalog(self):
+        return {
+            "version": 2,
+            "revision": 0,
+            "dramas": {
+                "drama-company-1": {
+                    "id": "drama-company-1",
+                    "chinese_title": "公司短剧",
+                    "english_title": "Company Drama",
+                    "writer": "编剧甲",
+                    "producer": "制片乙",
+                    "director": "导演丙",
+                    "cast": "演员丁",
+                    "aliases": ["旧剧名", "旧剧名"],
+                    "notes": "内部备注",
+                    "online": True,
+                    "order": 1,
+                },
+                "drama-offline": {
+                    "id": "drama-offline",
+                    "chinese_title": "未上架短剧",
+                    "english_title": "Offline Drama",
+                    "writer": "编剧",
+                    "producer": "制片",
+                    "online": False,
+                    "order": 2,
+                },
+            },
+            "sources": {
+                "account-a|100": {"status": "owned", "drama_id": "drama-company-1"},
+                "account-b|200": {"status": "owned", "drama_id": "drama-company-1"},
+                "account-c|300": {"status": "owned", "drama_id": "drama-offline"},
+                "account-d|400": {"status": "owned", "drama_id": "missing-drama"},
+            },
+        }
+
+    def test_sanitizer_deduplicates_aliases_and_repairs_dangling_sources(self):
+        catalog = proxy._sanitize_admin_catalog(self.sample_catalog())
+
+        self.assertEqual(catalog["dramas"]["drama-company-1"]["aliases"], ["旧剧名"])
+        self.assertEqual(catalog["sources"]["account-d|400"]["status"], "pending")
+        self.assertEqual(catalog["sources"]["account-d|400"]["drama_id"], "")
+
+    def test_runtime_file_persistence_increments_revision_and_rejects_stale_save(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = pathlib.Path(folder) / "admin_catalog.json"
+            proxy.ADMIN_CATALOG_CACHE.update({"catalog": None, "storage": "", "expires_at": 0})
+            with mock.patch.object(proxy, "ADMIN_CATALOG_FILE", str(target)), \
+                    mock.patch.object(proxy, "SUPABASE_ENABLED", False):
+                saved, storage = proxy._persist_admin_catalog(self.sample_catalog(), expected_revision=0)
+                self.assertEqual(storage, "runtime_file")
+                self.assertEqual(saved["revision"], 1)
+                self.assertTrue(target.is_file())
+                loaded, loaded_storage = proxy._load_admin_catalog(force=True)
+                self.assertEqual(loaded_storage, "runtime_file")
+                self.assertEqual(loaded["revision"], 1)
+                with self.assertRaises(proxy.AdminCatalogConflict):
+                    proxy._persist_admin_catalog(self.sample_catalog(), expected_revision=0)
+
+    def test_public_catalog_merges_accounts_and_hides_offline_and_internal_notes(self):
+        catalog = proxy._sanitize_admin_catalog(self.sample_catalog())
+        sources = [
+            {"key": "account-a|100", "account": "account-a", "nickname": "A", "episodes": 60, "views": 1200, "publish_time": "2026-07-10 10:00:00"},
+            {"key": "account-b|200", "account": "account-b", "nickname": "B", "episodes": 58, "views": 800, "publish_time": "2026-07-11 10:00:00"},
+            {"key": "account-c|300", "account": "account-c", "nickname": "C", "episodes": 40, "views": 500, "publish_time": "2026-07-12 10:00:00"},
+        ]
+        context = ({"generated_at": "2026-07-14 10:00:00"}, sources, {row["key"]: row for row in sources}, [])
+
+        with mock.patch.object(proxy, "_load_admin_catalog", return_value=(catalog, "runtime_file")), \
+                mock.patch.object(proxy, "_admin_catalog_context", return_value=context):
+            payload = proxy._curated_catalog_payload(include_offline=False)
+
+        self.assertEqual(payload["count"], 1)
+        drama = payload["dramas"][0]
+        self.assertEqual(drama["total_views"], 2000)
+        self.assertEqual(drama["episodes"], 60)
+        self.assertEqual(drama["accounts"], ["account-a", "account-b"])
+        self.assertEqual(drama["source_count"], 2)
+        self.assertEqual(drama["notes"], "")
+
+    def test_admin_catalog_endpoint_stops_before_read_without_secret(self):
+        handler = object.__new__(proxy.Handler)
+        handler.command = "GET"
+        handler.headers = {}
+        handler.responses = []
+        handler._send_json = lambda code, payload: handler.responses.append((code, payload))
+
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
+                mock.patch.object(proxy, "_load_admin_catalog") as load_catalog:
+            handler._admin_catalog_endpoint({})
+
+        self.assertEqual(handler.responses[0][0], 403)
+        load_catalog.assert_not_called()
+
+    def test_latest_report_query_excludes_admin_catalog_storage_row(self):
+        paths = []
+
+        def request(method, path, **_kwargs):
+            paths.append(path)
+            return [{
+                "id": 9,
+                "generated_at": "2026-07-14T10:00:00+08:00",
+                "accounts_count": 1,
+                "dramas_count": 1,
+                "raw": {"summary": [], "dramas_detail": []},
+            }]
+
+        proxy.SUPABASE_REPORT_CACHE.update({"latest": None, "latest_expires_at": 0, "by_id": {}})
+        with mock.patch.object(proxy, "_supabase_report_read_enabled", return_value=True), \
+                mock.patch.object(proxy, "_supabase_request", side_effect=request):
+            proxy._supabase_latest_report_payload()
+
+        self.assertIn("source=neq.admin_catalog", paths[0])
+
+    def test_admin_and_public_catalog_frontends_use_the_expected_security_boundary(self):
+        root = pathlib.Path(proxy.ROOT)
+        admin_js = (root / "admin.js").read_text(encoding="utf-8")
+        catalog_js = (root / "catalog.js").read_text(encoding="utf-8")
+        admin_html = (root / "admin.html").read_text(encoding="utf-8")
+
+        self.assertIn('headers["X-Schedule-Secret"]', admin_js)
+        self.assertIn("sessionStorage", admin_js)
+        self.assertNotIn("localStorage", admin_js)
+        self.assertNotIn("?secret=", admin_js)
+        self.assertIn("/curated-catalog", catalog_js)
+        self.assertNotIn("X-Schedule-Secret", catalog_js)
+        self.assertIn('href="/catalog"', admin_html)
 
 
 class DiscoveryWorksTests(unittest.TestCase):

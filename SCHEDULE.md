@@ -45,28 +45,34 @@ SCHEDULE_SECRET=和 Render 里完全一样的密码
 前端页面现在有“后端账号报表”区域。只需要在前端填 `SCHEDULE_SECRET` 的值，然后点“启动后端抓取”或“加载最新结果”。账号名单不会显示在前端，仍然只从 Render 的 `SCHEDULE_ACCOUNTS` 读取。
 前端报表页的“账号池”可以读取/保存后端账号池，并支持“保存并立即抓取”。
 
+敏感接口只接受 `X-Schedule-Secret` 请求头，不再接受网址中的 `?secret=`，避免密码进入浏览器历史、日志和分享链接。
+
 手动触发：
 
-```text
-https://paqu-tikhub-proxy.onrender.com/run-scheduled?wait=1&secret=你的SCHEDULE_SECRET
+```bash
+curl "https://paqu-tikhub-proxy.onrender.com/run-scheduled?wait=1" \
+  -H "X-Schedule-Secret: 你的SCHEDULE_SECRET"
 ```
 
 查看状态：
 
-```text
-https://paqu-tikhub-proxy.onrender.com/schedule-status?secret=你的SCHEDULE_SECRET
+```bash
+curl "https://paqu-tikhub-proxy.onrender.com/schedule-status" \
+  -H "X-Schedule-Secret: 你的SCHEDULE_SECRET"
 ```
 
 查看账号池：
 
-```text
-https://paqu-tikhub-proxy.onrender.com/schedule-accounts?secret=你的SCHEDULE_SECRET
+```bash
+curl "https://paqu-tikhub-proxy.onrender.com/schedule-accounts" \
+  -H "X-Schedule-Secret: 你的SCHEDULE_SECRET"
 ```
 
 保存账号池：
 
 ```bash
-curl -X POST "https://paqu-tikhub-proxy.onrender.com/schedule-accounts?secret=你的SCHEDULE_SECRET" \
+curl -X POST "https://paqu-tikhub-proxy.onrender.com/schedule-accounts" \
+  -H "X-Schedule-Secret: 你的SCHEDULE_SECRET" \
   -H "Content-Type: application/json" \
   -d '{"accounts":["account1","account2"]}'
 ```
@@ -74,13 +80,13 @@ curl -X POST "https://paqu-tikhub-proxy.onrender.com/schedule-accounts?secret=�
 查看报告列表：
 
 ```text
-https://paqu-tikhub-proxy.onrender.com/reports?secret=你的SCHEDULE_SECRET
+https://paqu-tikhub-proxy.onrender.com/reports
 ```
 
 下载最近一次汇总：
 
 ```text
-https://paqu-tikhub-proxy.onrender.com/reports/latest_report.csv?secret=你的SCHEDULE_SECRET
+https://paqu-tikhub-proxy.onrender.com/reports/latest_report.csv
 ```
 
 注意：Render 免费服务的本地文件不是永久存储，服务重启或重新部署后 `reports/` 里的历史报告和 `reports/schedule_accounts.json` 可能会丢。账号池适合日常在线调整；长期稳定建议继续把 `SCHEDULE_ACCOUNTS` 放在 Render Environment 里作为兜底，或后续接 Google Sheets、数据库、对象存储。

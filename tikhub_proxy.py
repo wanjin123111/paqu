@@ -39,6 +39,8 @@ SCHEDULE_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "schedule_accounts.json")
 SCHEDULE_ACCOUNTS_SEED_FILE = os.path.join(ROOT, "schedule_accounts.seed.json")
 DISCOVERED_ACCOUNTS_FILE = os.path.join(REPORTS_DIR, "discovered_accounts.json")
 DISCOVERED_WORKS_FILE = os.path.join(REPORTS_DIR, "discovered_works.json")
+ADMIN_CATALOG_FILE = os.path.join(REPORTS_DIR, "admin_catalog.json")
+ADMIN_CATALOG_SOURCE = "admin_catalog"
 BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 FORWARD_HEADERS = ("Authorization", "Content-Type", "Accept", "User-Agent", "Accept-Language")
 ALLOW_HEADERS = "Authorization, Content-Type, Accept, X-Schedule-Secret"
@@ -164,6 +166,13 @@ SUPABASE_REPORT_CACHE_MAX_ITEMS = _env_int("SUPABASE_REPORT_CACHE_MAX_ITEMS", 12
 SUPABASE_LATEST_CACHE_SECONDS = _env_int("SUPABASE_LATEST_CACHE_SECONDS", 120, 0, 3600)
 SUPABASE_REPORT_CACHE = {"latest": None, "latest_expires_at": 0, "by_id": {}}
 SUPABASE_REPORT_CACHE_LOCK = threading.Lock()
+ADMIN_CATALOG_CACHE_SECONDS = _env_int("ADMIN_CATALOG_CACHE_SECONDS", 20, 0, 300)
+ADMIN_CATALOG_CACHE = {"expires_at": 0, "catalog": None, "storage": ""}
+ADMIN_CATALOG_LOCK = threading.RLock()
+
+
+class AdminCatalogConflict(RuntimeError):
+    pass
 
 
 class _EvenRateLimiter:
@@ -3258,6 +3267,370 @@ def _supabase_request(method, path, payload=None, prefer="", timeout=45):
         raise RuntimeError("Supabase %s %s failed with HTTP %s: %s" % (method, path, exc.code, detail))
 
 
+def _catalog_now():
+    return datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds")
+
+
+def _empty_admin_catalog():
+    return {
+        "version": 2,
+        "revision": 0,
+        "updated_at": "",
+        "dramas": {},
+        "sources": {},
+    }
+
+
+def _catalog_copy(value):
+    return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _catalog_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _catalog_identifier(value, prefix="drama"):
+    value = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip()).strip("-")[:80]
+    return value or ((prefix + "-") if prefix else "") + uuid.uuid4().hex[:12]
+
+
+def _catalog_aliases(value):
+    if isinstance(value, list):
+        parts = value
+    else:
+        parts = re.split(r"[\n,，;；]+", str(value or ""))
+    aliases, seen = [], set()
+    for part in parts:
+        alias = _to_text(part, 300).strip()
+        key = alias.lower()
+        if alias and key not in seen:
+            seen.add(key)
+            aliases.append(alias)
+        if len(aliases) >= 30:
+            break
+    return aliases
+
+
+def _sanitize_admin_catalog(payload):
+    source = payload if isinstance(payload, dict) else {}
+    result = _empty_admin_catalog()
+    result["revision"] = max(0, _to_int(source.get("revision")))
+    result["updated_at"] = _to_text(source.get("updated_at"), 60)
+
+    raw_dramas = source.get("dramas") if isinstance(source.get("dramas"), dict) else {}
+    dramas = {}
+    for raw_id, raw in list(raw_dramas.items())[:10000]:
+        if not isinstance(raw, dict):
+            continue
+        drama_id = _catalog_identifier(raw.get("id") or raw_id)
+        if drama_id in dramas:
+            continue
+        created_at = _to_text(raw.get("created_at"), 60) or _catalog_now()
+        dramas[drama_id] = {
+            "id": drama_id,
+            "chinese_title": _to_text(raw.get("chinese_title") or raw.get("cn"), 300),
+            "english_title": _to_text(raw.get("english_title") or raw.get("en"), 300),
+            "writer": _to_text(raw.get("writer"), 160),
+            "producer": _to_text(raw.get("producer"), 160),
+            "director": _to_text(raw.get("director"), 160),
+            "cast": _to_text(raw.get("cast"), 500),
+            "aliases": _catalog_aliases(raw.get("aliases")),
+            "notes": _to_text(raw.get("notes"), 2000),
+            "online": _catalog_bool(raw.get("online")),
+            "order": max(1, min(_to_int(raw.get("order")) or len(dramas) + 1, 1000000)),
+            "created_at": created_at,
+            "updated_at": _to_text(raw.get("updated_at"), 60) or created_at,
+        }
+    result["dramas"] = dramas
+
+    raw_sources = source.get("sources") if isinstance(source.get("sources"), dict) else {}
+    sources = {}
+    for raw_key, raw in list(raw_sources.items())[:50000]:
+        if not isinstance(raw, dict):
+            continue
+        source_key = _to_text(raw_key, 500).strip()
+        if not source_key:
+            continue
+        status = str(raw.get("status") or "pending").strip().lower()
+        if status not in ("pending", "owned", "ignored"):
+            status = "pending"
+        drama_id = _catalog_identifier(raw.get("drama_id"), prefix="") if raw.get("drama_id") else ""
+        if status == "owned" and drama_id not in dramas:
+            status, drama_id = "pending", ""
+        if status != "owned":
+            drama_id = ""
+        sources[source_key] = {
+            "status": status,
+            "drama_id": drama_id,
+            "updated_at": _to_text(raw.get("updated_at"), 60) or _catalog_now(),
+        }
+    result["sources"] = sources
+    return result
+
+
+def _read_admin_catalog_file():
+    try:
+        with open(ADMIN_CATALOG_FILE, "r", encoding="utf-8-sig") as handle:
+            return _sanitize_admin_catalog(json.load(handle))
+    except Exception:
+        return _empty_admin_catalog()
+
+
+def _write_admin_catalog_file(catalog):
+    os.makedirs(os.path.dirname(ADMIN_CATALOG_FILE), exist_ok=True)
+    tmp = ADMIN_CATALOG_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(catalog, handle, ensure_ascii=False, indent=2)
+    os.replace(tmp, ADMIN_CATALOG_FILE)
+
+
+def _read_admin_catalog_supabase():
+    rows = _supabase_request(
+        "GET",
+        "/report_runs?select=id,raw,generated_at,created_at&source=eq.%s&order=id.desc&limit=1"
+        % urllib.parse.quote(ADMIN_CATALOG_SOURCE, safe=""),
+        timeout=20,
+    )
+    if not isinstance(rows, list) or not rows:
+        return _empty_admin_catalog(), 0
+    raw = rows[0].get("raw") if isinstance(rows[0], dict) else {}
+    catalog = raw.get("catalog") if isinstance(raw, dict) and isinstance(raw.get("catalog"), dict) else raw
+    return _sanitize_admin_catalog(catalog), _to_int(rows[0].get("id"))
+
+
+def _load_admin_catalog(force=False):
+    now = time.time()
+    with ADMIN_CATALOG_LOCK:
+        cached = ADMIN_CATALOG_CACHE.get("catalog")
+        if not force and cached is not None and now < ADMIN_CATALOG_CACHE.get("expires_at", 0):
+            return _catalog_copy(cached), ADMIN_CATALOG_CACHE.get("storage") or "cache"
+
+        storage = "runtime_file"
+        catalog = None
+        if SUPABASE_ENABLED and _supabase_configured():
+            try:
+                catalog, _row_id = _read_admin_catalog_supabase()
+                storage = "supabase"
+                if catalog.get("revision") or catalog.get("dramas") or catalog.get("sources"):
+                    _write_admin_catalog_file(catalog)
+                elif os.path.isfile(ADMIN_CATALOG_FILE):
+                    local_catalog = _read_admin_catalog_file()
+                    if local_catalog.get("revision") or local_catalog.get("dramas") or local_catalog.get("sources"):
+                        catalog = local_catalog
+                        storage = "runtime_file"
+            except Exception:
+                catalog = None
+                storage = "runtime_file"
+        if catalog is None:
+            catalog = _read_admin_catalog_file()
+
+        ADMIN_CATALOG_CACHE.update({
+            "catalog": _catalog_copy(catalog),
+            "storage": storage,
+            "expires_at": now + ADMIN_CATALOG_CACHE_SECONDS,
+        })
+        return _catalog_copy(catalog), storage
+
+
+def _persist_admin_catalog(payload, expected_revision=None):
+    with ADMIN_CATALOG_LOCK:
+        current, _storage = _load_admin_catalog(force=True)
+        current_revision = _to_int(current.get("revision"))
+        if expected_revision is not None and _to_int(expected_revision) != current_revision:
+            raise AdminCatalogConflict(
+                "catalog changed on the server (expected revision %s, current revision %s)"
+                % (_to_int(expected_revision), current_revision)
+            )
+        catalog = _sanitize_admin_catalog(payload)
+        catalog["revision"] = current_revision + 1
+        catalog["updated_at"] = _catalog_now()
+        storage = "runtime_file"
+
+        if SUPABASE_ENABLED and _supabase_configured():
+            _existing, row_id = _read_admin_catalog_supabase()
+            row = {
+                "generated_at": catalog["updated_at"],
+                "source": ADMIN_CATALOG_SOURCE,
+                "accounts_count": 0,
+                "dramas_count": len(catalog["dramas"]),
+                "raw": {"kind": ADMIN_CATALOG_SOURCE, "catalog": catalog},
+            }
+            if row_id:
+                _supabase_request(
+                    "PATCH",
+                    "/report_runs?id=eq.%s" % row_id,
+                    row,
+                    prefer="return=minimal",
+                    timeout=20,
+                )
+            else:
+                _supabase_request("POST", "/report_runs", row, prefer="return=minimal", timeout=20)
+            storage = "supabase"
+
+        _write_admin_catalog_file(catalog)
+        ADMIN_CATALOG_CACHE.update({
+            "catalog": _catalog_copy(catalog),
+            "storage": storage,
+            "expires_at": time.time() + ADMIN_CATALOG_CACHE_SECONDS,
+        })
+        return _catalog_copy(catalog), storage
+
+
+def _latest_catalog_report():
+    if _supabase_report_read_enabled():
+        try:
+            return _supabase_latest_report_payload()
+        except Exception:
+            pass
+    for path in (
+        os.path.join(REPORTS_DIR, "latest_report.json"),
+        os.path.join(PUBLIC_REPORTS_DIR, "latest_report.json"),
+    ):
+        try:
+            with open(path, "r", encoding="utf-8-sig") as handle:
+                payload = json.load(handle)
+            if isinstance(payload, dict):
+                return payload
+        except Exception:
+            continue
+    return {"generated_at": "", "summary": [], "dramas_detail": []}
+
+
+def _admin_source_row(row):
+    if not isinstance(row, dict):
+        return None
+    account = _to_text(row.get("Account / 账号") or row.get("账号") or row.get("a"), 100).strip().lstrip("@")
+    english_title = _to_text(
+        row.get("English Title / 英文剧名") or row.get("短剧名") or row.get("en"),
+        300,
+    )
+    chinese_title = _to_text(row.get("Chinese Title / 中文剧名") or row.get("cn"), 300)
+    drama_id = _clean_drama_id(row.get("Drama ID / 短剧ID") or row.get("短剧ID") or row.get("id"))
+    source_key = _drama_cache_key(account, drama_id, english_title or chinese_title)
+    if not account or not source_key:
+        return None
+    return {
+        "key": source_key,
+        "account": account,
+        "nickname": _to_text(row.get("Nickname / 昵称") or row.get("昵称") or row.get("n"), 160) or account,
+        "drama_id": drama_id,
+        "english_title": english_title,
+        "chinese_title": chinese_title,
+        "publish_time": _to_text(row.get("Publish Time / 发布时间") or row.get("发布时间") or row.get("p"), 60),
+        "episodes": _to_int(row.get("Episodes / 集数") or row.get("集数") or row.get("e")),
+        "views": _to_int(row.get("Views / 观看数") or row.get("累计观看") or row.get("v")),
+        "themes": _to_text(
+            row.get("Chinese Themes / 中文题材") or row.get("English Themes / 英文题材")
+            or row.get("ct") or row.get("et"),
+            500,
+        ),
+        "description": _to_text(
+            row.get("Chinese Description / 中文简介") or row.get("English Description Preview / 英文简介预览"),
+            2000,
+        ),
+        "link": _to_text(row.get("Drama Link / 短剧链接") or row.get("短剧链接"), 800),
+        "profile_url": _to_text(row.get("Source Profile URL / 来源主页") or row.get("主页链接"), 800),
+    }
+
+
+def _admin_catalog_context():
+    report = _latest_catalog_report()
+    source_rows = []
+    source_map = {}
+    for raw in report.get("dramas_detail") or []:
+        row = _admin_source_row(raw)
+        if not row or row["key"] in source_map:
+            continue
+        source_map[row["key"]] = row
+        source_rows.append(row)
+
+    accounts = []
+    for raw in report.get("summary") or []:
+        if not isinstance(raw, dict):
+            continue
+        account = _to_text(raw.get("账号") or raw.get("Account / 账号") or raw.get("a"), 100).strip().lstrip("@")
+        if not account:
+            continue
+        accounts.append({
+            "account": account,
+            "nickname": _to_text(raw.get("昵称") or raw.get("Nickname / 昵称") or raw.get("n"), 160) or account,
+            "followers": _to_int(raw.get("粉丝")),
+            "dramas": _to_int(raw.get("短剧数") or raw.get("d")),
+            "views": _to_int(raw.get("累计观看") or raw.get("v")),
+            "profile_url": _to_text(raw.get("主页链接"), 800),
+        })
+    return report, source_rows, source_map, accounts
+
+
+def _curated_catalog_payload(include_offline=False):
+    catalog, storage = _load_admin_catalog()
+    report, _source_rows, source_map, _accounts = _admin_catalog_context()
+    grouped_keys = {}
+    for source_key, relation in catalog.get("sources", {}).items():
+        if relation.get("status") != "owned" or not relation.get("drama_id"):
+            continue
+        grouped_keys.setdefault(relation["drama_id"], []).append(source_key)
+
+    dramas = []
+    for drama_id, drama in catalog.get("dramas", {}).items():
+        if not include_offline and not drama.get("online"):
+            continue
+        keys = grouped_keys.get(drama_id, [])
+        sources = [source_map[key] for key in keys if key in source_map]
+        accounts = sorted({item.get("account") for item in sources if item.get("account")})
+        total_views = sum(_to_int(item.get("views")) for item in sources)
+        episodes = max([_to_int(item.get("episodes")) for item in sources] or [0])
+        latest_publish_time = max([item.get("publish_time") or "" for item in sources] or [""])
+        themes = []
+        for item in sources:
+            theme = _to_text(item.get("themes"), 500)
+            if theme and theme not in themes:
+                themes.append(theme)
+        dramas.append({
+            "id": drama_id,
+            "chinese_title": drama.get("chinese_title") or "",
+            "english_title": drama.get("english_title") or "",
+            "writer": drama.get("writer") or "",
+            "producer": drama.get("producer") or "",
+            "director": drama.get("director") or "",
+            "cast": drama.get("cast") or "",
+            "aliases": drama.get("aliases") or [],
+            "notes": (drama.get("notes") or "") if include_offline else "",
+            "online": bool(drama.get("online")),
+            "order": _to_int(drama.get("order")),
+            "created_at": drama.get("created_at") or "",
+            "updated_at": drama.get("updated_at") or "",
+            "accounts": accounts,
+            "source_count": len(keys),
+            "active_source_count": len(sources),
+            "total_views": total_views,
+            "episodes": episodes,
+            "latest_publish_time": latest_publish_time,
+            "themes": themes,
+            "sources": sources,
+        })
+
+    ranking = sorted(dramas, key=lambda item: (-_to_int(item.get("total_views")), item.get("order") or 1000000))
+    for index, item in enumerate(ranking, 1):
+        item["rank"] = index
+    by_manual_order = sorted(
+        dramas,
+        key=lambda item: (item.get("order") or 1000000, item.get("created_at") or "", item.get("id") or ""),
+    )
+    return {
+        "ok": True,
+        "generated_at": report.get("generated_at") or "",
+        "updated_at": catalog.get("updated_at") or "",
+        "revision": catalog.get("revision") or 0,
+        "storage": storage,
+        "count": len(by_manual_order),
+        "dramas": by_manual_order,
+        "ranking": ranking,
+    }
+
+
 def _supabase_timestamp(value, fallback_now=False):
     epoch = _publish_epoch(value)
     if epoch is not None:
@@ -3574,7 +3947,8 @@ def _supabase_latest_report_payload():
         return cached
     rows = _supabase_request(
         "GET",
-        "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at,raw&order=generated_at.desc&limit=1",
+        "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at,raw"
+        "&source=neq.%s&order=generated_at.desc&limit=1" % urllib.parse.quote(ADMIN_CATALOG_SOURCE, safe=""),
         timeout=20,
     )
     if not isinstance(rows, list) or not rows:
@@ -3595,7 +3969,9 @@ def _supabase_report_payload_by_id(run_id):
         return cached
     rows = _supabase_request(
         "GET",
-        "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at,raw&id=eq.%s&limit=1" % run_id,
+        "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at,raw"
+        "&source=neq.%s&id=eq.%s&limit=1"
+        % (urllib.parse.quote(ADMIN_CATALOG_SOURCE, safe=""), run_id),
         timeout=20,
     )
     if not isinstance(rows, list) or not rows:
@@ -3613,7 +3989,8 @@ def _supabase_report_history(limit=None):
     rows = _supabase_request(
         "GET",
         "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at"
-        "&generated_at=gte.%s&order=generated_at.desc&limit=%s" % (cutoff, limit),
+        "&source=neq.%s&generated_at=gte.%s&order=generated_at.desc&limit=%s"
+        % (urllib.parse.quote(ADMIN_CATALOG_SOURCE, safe=""), cutoff, limit),
         timeout=20,
     )
     reports = []
@@ -3653,8 +4030,8 @@ def _cleanup_supabase_report_history(now=None):
         while True:
             rows = _supabase_request(
                 "GET",
-                "/report_runs?select=id&generated_at=lt.%s&order=id.asc&limit=%s"
-                % (cutoff, SUPABASE_BATCH_SIZE),
+                "/report_runs?select=id&source=neq.%s&generated_at=lt.%s&order=id.asc&limit=%s"
+                % (urllib.parse.quote(ADMIN_CATALOG_SOURCE, safe=""), cutoff, SUPABASE_BATCH_SIZE),
                 timeout=20,
             )
             run_ids = [_to_int(row.get("id")) for row in (rows or []) if isinstance(row, dict)]
@@ -5042,6 +5419,10 @@ class Handler(BaseHTTPRequestHandler):
             self._schedule_accounts_endpoint(qs)
         elif parsed.path == "/discover-accounts":
             self._discover_accounts_endpoint(qs)
+        elif parsed.path == "/admin/catalog":
+            self._admin_catalog_endpoint(qs)
+        elif parsed.path == "/curated-catalog":
+            self._curated_catalog_endpoint(qs)
         elif parsed.path == "/drama-link":
             self._resolve_drama_link(qs)
         elif parsed.path == "/supabase/latest":
@@ -5054,6 +5435,10 @@ class Handler(BaseHTTPRequestHandler):
             self._list_reports(qs)
         elif parsed.path.startswith("/reports/"):
             self._serve_report(parsed.path, qs)
+        elif parsed.path in ("/admin", "/admin/"):
+            self._serve_static("/admin.html")
+        elif parsed.path in ("/catalog", "/catalog/"):
+            self._serve_static("/catalog.html")
         elif "url" in qs:
             if self._require_private_access(qs):
                 self._proxy("GET", qs["url"][0])
@@ -5068,6 +5453,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/discover-accounts":
             self._discover_accounts_endpoint(qs)
+            return
+        if parsed.path == "/admin/catalog":
+            self._admin_catalog_endpoint(qs)
             return
         if parsed.path == "/save":
             if self._require_private_access(qs):
@@ -5095,7 +5483,7 @@ class Handler(BaseHTTPRequestHandler):
     def _schedule_secret_matches(self, qs):
         if not SCHEDULE_SECRET:
             return False
-        supplied = qs.get("secret", [""])[0] or self.headers.get("X-Schedule-Secret", "")
+        supplied = self.headers.get("X-Schedule-Secret", "")
         return hmac.compare_digest(str(supplied), SCHEDULE_SECRET)
 
     def _allow_report_read(self, qs):
@@ -5509,6 +5897,65 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_json(500, {"ok": False, "error": str(exc)})
 
+    def _admin_catalog_endpoint(self, qs):
+        if not self._require_schedule_secret(qs):
+            return
+        if self.command == "GET":
+            try:
+                catalog, storage = _load_admin_catalog(force=True)
+                report, sources, _source_map, accounts = _admin_catalog_context()
+                self._send_json(200, {
+                    "ok": True,
+                    "catalog": catalog,
+                    "storage": storage,
+                    "generated_at": report.get("generated_at") or "",
+                    "sources": sources,
+                    "source_count": len(sources),
+                    "accounts": accounts,
+                    "account_count": len(accounts),
+                    "curated": _curated_catalog_payload(include_offline=True),
+                })
+            except Exception as exc:
+                self._send_json(500, {"ok": False, "error": str(exc)})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            if length > 8 * 1024 * 1024:
+                self._send_json(413, {"ok": False, "error": "catalog payload is too large"})
+                return
+            payload = json.loads(self.rfile.read(length) or b"{}")
+            catalog = payload.get("catalog") if isinstance(payload, dict) else None
+            if not isinstance(catalog, dict):
+                self._send_json(400, {"ok": False, "error": "catalog must be an object"})
+                return
+            expected_revision = payload.get("expected_revision")
+            saved, storage = _persist_admin_catalog(catalog, expected_revision=expected_revision)
+            self._send_json(200, {
+                "ok": True,
+                "catalog": saved,
+                "storage": storage,
+                "curated": _curated_catalog_payload(include_offline=True),
+            })
+        except AdminCatalogConflict as exc:
+            current, storage = _load_admin_catalog(force=True)
+            self._send_json(409, {
+                "ok": False,
+                "error": str(exc),
+                "catalog": current,
+                "storage": storage,
+            })
+        except Exception as exc:
+            self._send_json(500, {"ok": False, "error": str(exc)})
+
+    def _curated_catalog_endpoint(self, qs):
+        if self.command != "GET":
+            self._send_json(405, {"ok": False, "error": "method not allowed"})
+            return
+        try:
+            self._send_json(200, _curated_catalog_payload(include_offline=False))
+        except Exception as exc:
+            self._send_json(500, {"ok": False, "error": str(exc)})
+
     def _run_scheduled_endpoint(self, qs):
         if not self._require_schedule_secret(qs):
             return
@@ -5693,6 +6140,10 @@ class Handler(BaseHTTPRequestHandler):
     # ---- 静态托管 ----
     def _serve_static(self, path):
         path = path.split("?", 1)[0]
+        if path in ("/admin", "/admin/"):
+            path = "/admin.html"
+        if path in ("/catalog", "/catalog/"):
+            path = "/catalog.html"
         if path in ("", "/"):
             path = "/" + DEFAULT_PAGE if os.path.isfile(os.path.join(ROOT, DEFAULT_PAGE)) else "/index.html"
         rel = posixpath.normpath(urllib.parse.unquote(path)).lstrip("/")
