@@ -51,35 +51,48 @@
   .key-pill.set .key-dot{background:var(--ok)}
 
   .wrap{max-width:1180px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:16px}
-  .dashboard-page,.monitor-page,.report-page{display:block}
+  .dashboard-page,.catalog-page,.monitor-page,.report-page{display:block}
   .page-switch{display:none}
   body.public-mode .wrap{max-width:none;padding:0;gap:0}
   body.public-mode.dashboard-view,
   body.public-mode.monitor-view{overflow:hidden}
+  body.public-mode.catalog-view,
   body.public-mode.report-view{overflow:auto}
   body.public-mode.dashboard-view .topbar,
   body.public-mode.monitor-view .topbar{display:none}
   body.public-mode .dashboard-page[hidden],
+  body.public-mode .catalog-page[hidden],
   body.public-mode .monitor-page[hidden],
   body.public-mode .report-page[hidden]{display:none!important}
   body.public-mode.dashboard-view .monitor-page,
+  body.public-mode.dashboard-view .catalog-page,
   body.public-mode.dashboard-view .report-page,
   body.public-mode.monitor-view .dashboard-page,
+  body.public-mode.monitor-view .catalog-page,
   body.public-mode.monitor-view .report-page,
   body.public-mode.report-view .dashboard-page,
-  body.public-mode.report-view .monitor-page{display:none!important}
+  body.public-mode.report-view .catalog-page,
+  body.public-mode.report-view .monitor-page,
+  body.public-mode.catalog-view .dashboard-page,
+  body.public-mode.catalog-view .monitor-page,
+  body.public-mode.catalog-view .report-page{display:none!important}
   body.public-mode .dashboard-page,
   body.public-mode .monitor-page{width:100vw;height:100vh;min-height:100vh;display:flex;align-items:stretch;justify-content:stretch;padding:0;overflow:hidden}
+  body.public-mode .catalog-page{min-height:100vh;padding:18px 16px 82px}
   body.public-mode .report-page{min-height:100vh;padding:18px 16px 26px}
+  .catalog-frame{display:block;width:100%;height:calc(100vh - 108px);min-height:620px;border:1px solid var(--line);border-radius:16px;background:var(--paper);box-shadow:var(--shadow)}
   body.public-mode .report-page .foot-note{width:calc(100vw - 32px);max-width:none;margin:14px auto 0}
   body.public-mode .page-switch{display:flex;position:fixed;right:28px;z-index:60;gap:10px}
   body.public-mode .dashboard-page-switch,
   body.public-mode .monitor-page-switch{top:34px}
+  body.public-mode .catalog-page-switch,
   body.public-mode .report-page-switch{bottom:24px}
   body.public-mode .page-switch .mini-btn{box-shadow:0 10px 24px rgba(15,23,42,.14)}
   body.public-mode .dashboard-next-btn,
+  body.public-mode .catalog-next-btn,
   body.public-mode .monitor-next-btn{background:var(--accent);color:#fff;border-color:var(--accent)}
   body.public-mode .dashboard-next-btn:hover,
+  body.public-mode .catalog-next-btn:hover,
   body.public-mode .monitor-next-btn:hover{background:var(--accent-press);color:#fff;border-color:var(--accent-press);text-decoration:none}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
   .card-head{display:flex;align-items:center;justify-content:space-between;padding:15px 18px 12px;border-bottom:1px solid var(--line)}
@@ -458,6 +471,7 @@
   body.public-mode #schedCard,
   body.public-mode #settingsCard{display:none!important}
   body:not(.admin-mode) .admin-only{display:none!important}
+  body.admin-mode .public-only{display:none!important}
   .backend-admin{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:10px;align-items:end;margin-bottom:12px}
   .report-cloud-admin{display:grid;grid-template-columns:minmax(240px,1fr) auto auto auto minmax(180px,1fr);gap:10px;align-items:end;margin:0 0 14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(180deg,#fff,#fbfcff)}
   .backend-admin .tf,.report-cloud-admin .tf{width:100%;border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:var(--card)}
@@ -527,7 +541,7 @@
     </div>
   </div>
   <div class="topbar-right">
-    <a class="mini-btn" href="/catalog" style="text-decoration:none">公司短剧榜单</a>
+    <button class="mini-btn public-only" id="catalogPageBtn" type="button">公司短剧榜单</button>
     <a class="mini-btn admin-only" href="/admin" style="text-decoration:none">资产管理</a>
     <div class="history-menu" id="historyMenu">
       <button class="history-menu-btn" id="historyMenuBtn" type="button" aria-label="历史抓取记录" aria-expanded="false">...</button>
@@ -696,7 +710,15 @@ shortdramatime"></textarea>
       <div class="dashboard-loading">正在加载运营看板...</div>
     </div>
     <div class="page-switch dashboard-page-switch">
-      <button class="mini-btn dashboard-next-btn" id="dashboardNextBtn" type="button">下一页：监控账号</button>
+      <button class="mini-btn dashboard-next-btn" id="dashboardNextBtn" type="button">下一页：公司短剧榜单</button>
+    </div>
+  </section>
+
+  <section class="catalog-page" id="catalogPage" hidden>
+    <iframe class="catalog-frame" id="catalogFrame" title="公司短剧榜单" data-src="/catalog?embed=1" loading="lazy"></iframe>
+    <div class="page-switch catalog-page-switch">
+      <button class="mini-btn" id="catalogBackBtn" type="button">上一页：运营看板</button>
+      <button class="mini-btn catalog-next-btn" id="catalogNextBtn" type="button">下一页：监控账号</button>
     </div>
   </section>
 
@@ -705,7 +727,7 @@ shortdramatime"></textarea>
       <div class="dashboard-loading">正在加载监控账号看板...</div>
     </div>
     <div class="page-switch monitor-page-switch">
-      <button class="mini-btn" id="monitorBackBtn" type="button">上一页：运营看板</button>
+      <button class="mini-btn" id="monitorBackBtn" type="button">上一页：公司短剧榜单</button>
       <button class="mini-btn monitor-next-btn" id="monitorNextBtn" type="button">下一页：报表</button>
     </div>
   </section>
@@ -824,9 +846,9 @@ shortdramatime"></textarea>
 
 /* ---------- 安全存储(沙箱里自动退化为内存) ---------- */
 const store=(()=>{let ok=false;try{localStorage.setItem("__t","1");localStorage.removeItem("__t");ok=true;}catch(e){}const mem={};
-  return{get:k=>{try{return ok?localStorage.getItem(k):(k in mem?mem[k]:null);}catch(e){return null;}},
-         set:(k,v)=>{try{ok?localStorage.setItem(k,v):(mem[k]=v);}catch(e){mem[k]=v;}},
-         del:k=>{try{ok?localStorage.removeItem(k):delete mem[k];}catch(e){}}};})();
+  return{get:k=>{try{const value=ok?localStorage.getItem(k):null;return value!==null?value:(k in mem?mem[k]:null);}catch(e){return k in mem?mem[k]:null;}},
+         set:(k,v)=>{try{if(ok){localStorage.setItem(k,v);delete mem[k];}else mem[k]=v;}catch(e){mem[k]=v;}},
+         del:k=>{try{if(ok)localStorage.removeItem(k);delete mem[k];}catch(e){delete mem[k];}}};})();
 
 const $=id=>document.getElementById(id);
 
@@ -898,8 +920,10 @@ let scheduleAccountSource="";
 const DASHBOARD_CACHE_MAX_AGE=7*24*60*60*1000;
 const PUBLIC_REPORT_REFRESH_MS=60*1000;
 const DASHBOARD_HISTORY_WORKERS=2;
-const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v2";
-const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v2";
+const DASHBOARD_CACHE_STORAGE="tikhub-dashboard-cache-v3";
+const DASHBOARD_LOCAL_CACHE_LIMIT=700000;
+const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v3";
+const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v3";
 function dashboardCacheGet(key,maxAgeMs){
   try{
     const raw=store.get(key);
@@ -910,8 +934,34 @@ function dashboardCacheGet(key,maxAgeMs){
     return item.value;
   }catch(_){return null;}
 }
-function dashboardCacheSet(key,value){
-  try{store.set(key,JSON.stringify({t:Date.now(),value:value}));}catch(_){}
+function dashboardCacheRequest(key){
+  return new Request(new URL("/__dashboard_cache__/"+encodeURIComponent(key),location.origin).href);
+}
+async function dashboardCacheSet(key,value){
+  let raw="";
+  try{raw=JSON.stringify({t:Date.now(),value:value});}catch(_){return false;}
+  if(raw.length<=DASHBOARD_LOCAL_CACHE_LIMIT)store.set(key,raw);
+  else store.del(key);
+  if(!("caches" in window))return raw.length<=DASHBOARD_LOCAL_CACHE_LIMIT;
+  try{
+    const cache=await caches.open(DASHBOARD_CACHE_STORAGE);
+    await cache.put(dashboardCacheRequest(key),new Response(raw,{headers:{"Content-Type":"application/json"}}));
+    return true;
+  }catch(_){return raw.length<=DASHBOARD_LOCAL_CACHE_LIMIT;}
+}
+async function dashboardCacheGetAsync(key,maxAgeMs){
+  if("caches" in window){
+    try{
+      const cache=await caches.open(DASHBOARD_CACHE_STORAGE);
+      const response=await cache.match(dashboardCacheRequest(key));
+      if(response){
+        const item=JSON.parse(await response.text());
+        if(item&&item.value&&(!maxAgeMs||Date.now()-Number(item.t||0)<=maxAgeMs))return item.value;
+        await cache.delete(dashboardCacheRequest(key));
+      }
+    }catch(_){}
+  }
+  return dashboardCacheGet(key,maxAgeMs);
 }
 function readCachedDashboardState(){
   if(!isPublicMode())return null;
@@ -919,6 +969,16 @@ function readCachedDashboardState(){
   if(!payload)return null;
   const history=dashboardCacheGet(DASHBOARD_HISTORY_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE);
   return {payload,history:Array.isArray(history)?history:[]};
+}
+async function readCachedDashboardStateAsync(){
+  if(!isPublicMode())return null;
+  const values=await Promise.all([
+    dashboardCacheGetAsync(DASHBOARD_LATEST_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE),
+    dashboardCacheGetAsync(DASHBOARD_HISTORY_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE)
+  ]);
+  const payload=values[0];
+  if(!payload)return null;
+  return {payload,history:Array.isArray(values[1])?values[1]:[]};
 }
 function applyCachedDashboardState(state){
   if(!state||!state.payload)return false;
@@ -1332,11 +1392,13 @@ function clearResults(){
   resetDetailPage();
   currentReportPayload=null;
   const dashboardPage=$("dashboardPage");
+  const catalogPage=$("catalogPage");
   const monitorPage=$("monitorPage");
   const reportPage=$("reportPage");
   const dashboard=$("dashboardCard");
   const monitor=$("monitorDashboardCard");
   if(dashboardPage)dashboardPage.hidden=true;
+  if(catalogPage)catalogPage.hidden=true;
   if(monitorPage)monitorPage.hidden=true;
   if(reportPage)reportPage.hidden=true;
   if(dashboard){dashboard.style.display="none";dashboard.innerHTML='<div class="dashboard-loading">正在加载运营看板...</div>';}
@@ -1351,18 +1413,26 @@ function clearResults(){
 }
 function setPublicPageView(view){
   if(!isPublicMode())return;
-  publicPageView=view==="report"?"report":(view==="monitor"?"monitor":"dashboard");
+  publicPageView=view==="report"?"report":(view==="monitor"?"monitor":(view==="catalog"?"catalog":"dashboard"));
   const dashboardPage=$("dashboardPage");
+  const catalogPage=$("catalogPage");
   const monitorPage=$("monitorPage");
   const reportPage=$("reportPage");
   const hasDashboard=!!(rows.length||dramaRows.length);
   document.body.classList.toggle("dashboard-view",publicPageView==="dashboard");
+  document.body.classList.toggle("catalog-view",publicPageView==="catalog");
   document.body.classList.toggle("monitor-view",publicPageView==="monitor");
   document.body.classList.toggle("report-view",publicPageView==="report");
   if(dashboardPage)dashboardPage.hidden=publicPageView!=="dashboard"||!hasDashboard;
+  if(catalogPage)catalogPage.hidden=publicPageView!=="catalog";
   if(monitorPage)monitorPage.hidden=publicPageView!=="monitor"||!hasDashboard;
   if(reportPage)reportPage.hidden=publicPageView!=="report";
+  if(publicPageView==="catalog")ensureCatalogFrame();
   window.scrollTo({top:0,left:0,behavior:"auto"});
+}
+function ensureCatalogFrame(){
+  const frame=$("catalogFrame");
+  if(frame&&!frame.getAttribute("src"))frame.setAttribute("src",frame.dataset.src||"/catalog?embed=1");
 }
 function valueOf(row,keys,fallback){
   for(const k of keys){if(row&&row[k]!=null&&row[k]!=="")return row[k];}
@@ -2588,10 +2658,13 @@ function renderDashboardLoading(message){
   }
   if(isPublicMode()){
     const reportPage=$("reportPage");
+    const catalogPage=$("catalogPage");
     document.body.classList.toggle("dashboard-view",publicPageView==="dashboard");
+    document.body.classList.toggle("catalog-view",publicPageView==="catalog");
     document.body.classList.toggle("monitor-view",publicPageView==="monitor");
     document.body.classList.toggle("report-view",publicPageView==="report");
     if(page)page.hidden=publicPageView!=="dashboard";
+    if(catalogPage)catalogPage.hidden=publicPageView!=="catalog";
     if(monitorPage)monitorPage.hidden=publicPageView!=="monitor";
     if(reportPage)reportPage.hidden=publicPageView!=="report";
   }else{
@@ -2634,7 +2707,7 @@ async function refreshDashboardHistory(opts){
   const payloads=orderedPayloads.filter(Boolean);
   if(run!==dashboardHistoryRun)return;
   if(payloads.length||!quiet||opts.initial)dashboardHistoryPayloads=payloads;
-  if(payloads.length)dashboardCacheSet(DASHBOARD_HISTORY_CACHE_KEY,payloads);
+  if(payloads.length)await dashboardCacheSet(DASHBOARD_HISTORY_CACHE_KEY,payloads);
   dashboardHistoryLoading=false;
   dashboardHistoryReady=true;
   if(payloads.length||!quiet||opts.initial){
@@ -3727,7 +3800,7 @@ function loadBackendPayload(payload,opts){
     hydrateThemeLabels(dramaRows);
   }
   if(summary.length&&!window.__quietRefresh&&!opts.quiet)toast("已加载最新结果");
-  if(!opts.skipCache&&currentReportSource==="latest")dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,payload);
+  if(!opts.skipCache&&currentReportSource==="latest")void dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,payload);
 }
 async function loadBackendLatest(opts){
   opts=opts||{};
@@ -3760,7 +3833,7 @@ async function loadBackendLatest(opts){
       payload=await fetchJsonUrl("public_reports/latest_report.json");
     }
   }
-  loadBackendPayload(payload,{source:"latest", quiet:opts.quiet});
+  loadBackendPayload(payload,{source:"latest", quiet:opts.quiet, skipCache:opts.skipCache});
   return payload;
 }
 function reportStamp(name){
@@ -3873,8 +3946,10 @@ async function loadBackendReports(opts){
   backendSetStatus("正在刷新历史记录…");
   let supabase=[], published=[], render=[], lastErr=null;
   try{supabase=await loadSupabaseHistory();}catch(e){lastErr=e;}
-  try{published=await loadPublishedHistory();}catch(e){lastErr=e;}
-  try{render=await loadRenderHistory();}catch(e){lastErr=e;}
+  if(!isPublicMode()||!supabase.length){
+    try{published=await loadPublishedHistory();}catch(e){lastErr=e;}
+    try{render=await loadRenderHistory();}catch(e){lastErr=e;}
+  }
   const items=mergeReportHistoryItems(supabase,published,render);
   reportHistoryItems=items;
   updateGrowthFilterControls();
@@ -3915,24 +3990,23 @@ async function loadPublicLatestMeta(){
   return (data.reports||[])[0]||null;
 }
 async function loadPublicDashboard(){
-  const cachedState=readCachedDashboardState();
+  const cachedStatePromise=readCachedDashboardStateAsync();
+  const latestMetaPromise=loadPublicLatestMeta().catch(()=>null);
+  const cachedState=await cachedStatePromise;
   const cachedMs=cachedState?dashboardPayloadTime(cachedState.payload):0;
   dashboardHistoryLoading=true;
   dashboardHistoryReady=false;
   renderDashboardLoading("正在检查最新数据...");
-  let latestMeta=null;
-  try{
-    latestMeta=await loadPublicLatestMeta();
-  }catch(e){
-  }
+  const latestMeta=await latestMetaPromise;
   const latestMetaMs=reportItemMs(latestMeta);
-  let cacheReady=!!(cachedState&&latestMetaMs&&cachedMs>=latestMetaMs-1000);
+  let cacheReady=!!(cachedState&&(!latestMetaMs||cachedMs>=latestMetaMs-1000));
   if(cacheReady){
     applyCachedDashboardState(cachedState);
   }else{
     renderDashboardLoading("正在同步最新数据...");
     try{
-      await loadBackendLatest({quiet:true});
+      const latestPayload=await loadBackendLatest({quiet:true,skipCache:true});
+      await dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,latestPayload);
       if(cachedState&&cachedState.history.length)dashboardHistoryPayloads=cachedState.history;
       dashboardHistoryLoading=false;
       dashboardHistoryReady=true;
@@ -4294,9 +4368,12 @@ function init(){
     document.addEventListener("click",closeHistoryMenu);
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeHistoryMenu();});
   }
-  const dashboardNext=$("dashboardNextBtn"), monitorBack=$("monitorBackBtn"), monitorNext=$("monitorNextBtn"), dashboardBack=$("dashboardBackBtn"), reportBackTop=$("reportBackTopBtn");
-  if(dashboardNext)dashboardNext.addEventListener("click",()=>setPublicPageView("monitor"));
-  if(monitorBack)monitorBack.addEventListener("click",()=>setPublicPageView("dashboard"));
+  const catalogPageBtn=$("catalogPageBtn"), dashboardNext=$("dashboardNextBtn"), catalogBack=$("catalogBackBtn"), catalogNext=$("catalogNextBtn"), monitorBack=$("monitorBackBtn"), monitorNext=$("monitorNextBtn"), dashboardBack=$("dashboardBackBtn"), reportBackTop=$("reportBackTopBtn");
+  if(catalogPageBtn)catalogPageBtn.addEventListener("click",()=>setPublicPageView("catalog"));
+  if(dashboardNext)dashboardNext.addEventListener("click",()=>setPublicPageView("catalog"));
+  if(catalogBack)catalogBack.addEventListener("click",()=>setPublicPageView("dashboard"));
+  if(catalogNext)catalogNext.addEventListener("click",()=>setPublicPageView("monitor"));
+  if(monitorBack)monitorBack.addEventListener("click",()=>setPublicPageView("catalog"));
   if(monitorNext)monitorNext.addEventListener("click",()=>setPublicPageView("report"));
   if(dashboardBack)dashboardBack.addEventListener("click",()=>setPublicPageView("monitor"));
   if(reportBackTop)reportBackTop.addEventListener("click",()=>setPublicPageView("monitor"));

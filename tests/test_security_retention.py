@@ -307,6 +307,12 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertIn('id="rankingTableBody"', (root / "catalog.html").read_text(encoding="utf-8"))
         self.assertIn('id="rankingSection"', (root / "catalog.html").read_text(encoding="utf-8"))
         self.assertIn('href="/catalog"', admin_html)
+        for name in ("index.html", "tikhub-report-frontend.html"):
+            public_html = (root / name).read_text(encoding="utf-8")
+            self.assertIn('id="catalogPage"', public_html)
+            self.assertIn('id="catalogPageBtn"', public_html)
+            self.assertIn('data-src="/catalog?embed=1"', public_html)
+            self.assertNotIn('<a class="mini-btn" href="/catalog"', public_html)
 
 
 class DiscoveryWorksTests(unittest.TestCase):
@@ -411,9 +417,12 @@ class DiscoveryWorksTests(unittest.TestCase):
             page = (root / name).read_text(encoding="utf-8")
             self.assertIn("const PUBLIC_REPORT_REFRESH_MS=60*1000;", page)
             self.assertIn("const DASHBOARD_HISTORY_WORKERS=2;", page)
-            self.assertIn("const cachedState=readCachedDashboardState();", page)
-            self.assertIn("latestMeta=await loadPublicLatestMeta();", page)
+            self.assertIn('const DASHBOARD_CACHE_STORAGE="tikhub-dashboard-cache-v3";', page)
+            self.assertIn("const cachedStatePromise=readCachedDashboardStateAsync();", page)
+            self.assertIn("const latestMetaPromise=loadPublicLatestMeta().catch(()=>null);", page)
             self.assertIn("cachedMs>=latestMetaMs-1000", page)
+            self.assertIn("await dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,latestPayload);", page)
+            self.assertIn("if(!isPublicMode()||!supabase.length)", page)
             self.assertIn('document.addEventListener("visibilitychange"', page)
             self.assertIn('window.addEventListener("focus",refreshPublicDashboardQuiet)', page)
 
