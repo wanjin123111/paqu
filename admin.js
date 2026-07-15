@@ -46,7 +46,7 @@
     dashboard: ["运营工作台", "管理监控账号、认领公司作品并维护短剧资料"],
     accounts: ["监控账号", "查看最新抓取状态并向后端监控池添加账号"],
     review: ["作品认领", "判断抓取作品的公司归属，并支持跨账号合并"],
-    claimed: ["已认领作品", "查看已归入公司的作品，并随时进行二次编辑"],
+    claimed: ["已认领作品", "查看已归入公司的作品，并随时调整归属"],
     dramas: ["公司短剧", "维护主创资料、来源绑定、上架状态和展示顺序"],
     settings: ["后台设置", "查看数据连接与正式配置的保存状态"],
   };
@@ -563,8 +563,7 @@
         <td><div class="account-name">${escapeHtml(row.nickname || row.account)}</div><div class="account-handle">@${escapeHtml(row.account)}</div></td>
         <td>${escapeHtml(formatTime(row.publish_time))}</td><td class="metric">${number(row.episodes)}</td><td class="metric">${formatNumber(row.views)}</td>
         <td>${escapeHtml(formatTime(updatedAt))}</td><td><div class="action-row">
-        ${row.drama_id ? `<button class="btn small primary" data-edit-drama="${escapeHtml(row.drama_id)}">二次编辑</button>` : ""}
-        <button class="btn small" data-edit-source="${escapeHtml(row.key)}">调整归属</button></div></td></tr>`;
+        <button class="btn small primary" data-edit-source="${escapeHtml(row.key)}">调整归属</button></div></td></tr>`;
     }).join("") : `<tr><td colspan="8"><div class="empty"><strong>还没有已认领作品</strong>请先到“作品认领”页面认领，公司作品会自动出现在这里</div></td></tr>`;
   }
 
