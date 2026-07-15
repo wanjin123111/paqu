@@ -181,15 +181,23 @@
 
   async function loadPublicReport() {
     try {
-      const report = await api(`/public_reports/latest_report.json?t=${Date.now()}`);
+      let report;
+      let reportSource = "线上最新报表";
+      try {
+        report = await api(`/supabase/latest?t=${Date.now()}`);
+      } catch (latestError) {
+        reportSource = "静态备用报表";
+        report = await api(`/public_reports/latest_report.json?t=${Date.now()}`);
+      }
       const normalized = normalizePublicReport(report);
       if (!state.verified) {
         setSourceRows(normalized.sources);
         state.accounts = normalized.accounts;
         state.generatedAt = normalized.generatedAt;
+        $("accountSource").textContent = `来源：${reportSource} ${normalized.accounts.length} 个账号`;
         renderAll();
       }
-      setSync("公开抓取数据已载入");
+      setSync(`${reportSource}已载入`);
     } catch (error) {
       setSync("公开报表读取失败", false);
       toast(error.message, true);
@@ -206,6 +214,7 @@
       state.generatedAt = payload.generated_at || "";
       setSourceRows(payload.sources || []);
       state.accounts = payload.accounts || [];
+      $("accountSource").textContent = `来源：线上最新报表 ${state.accounts.length} 个账号`;
       state.verified = true;
       $("authStatus").textContent = `验证成功 · 配置版本 ${state.catalog.revision}`;
       $("settingBackendState").textContent = "已验证";

@@ -307,6 +307,11 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertIn('id="rankingTableBody"', (root / "catalog.html").read_text(encoding="utf-8"))
         self.assertIn('id="rankingSection"', (root / "catalog.html").read_text(encoding="utf-8"))
         self.assertIn('href="/catalog"', admin_html)
+        admin_js = (root / "admin.js").read_text(encoding="utf-8")
+        self.assertIn('report = await api(`/supabase/latest?t=${Date.now()}`);', admin_js)
+        self.assertIn('report = await api(`/public_reports/latest_report.json?t=${Date.now()}`);', admin_js)
+        self.assertLess(admin_js.index('/supabase/latest?t='), admin_js.index('/public_reports/latest_report.json?t='))
+        self.assertIn('来源：${reportSource} ${normalized.accounts.length} 个账号', admin_js)
         for name in ("index.html", "tikhub-report-frontend.html"):
             public_html = (root / name).read_text(encoding="utf-8")
             self.assertIn('id="catalogPage"', public_html)
