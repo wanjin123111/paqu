@@ -1131,6 +1131,28 @@ def _read_pagination(data):
     return has_more, cursor
 
 
+def _normalize_schedule_account(value):
+    raw = urllib.parse.unquote(str(value or "")).strip().strip("\"'")
+    if not raw:
+        return ""
+    candidate = raw
+    if "://" in raw or re.match(r"^(?:www\.|m\.)?tiktok\.com/", raw, flags=re.I):
+        try:
+            parsed = urllib.parse.urlparse(raw if "://" in raw else "https://" + raw)
+        except Exception:
+            return ""
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if host != "tiktok.com" and not host.endswith(".tiktok.com"):
+            return ""
+        match = re.search(r"(?:^|/)@([^/?#]+)", parsed.path or "", flags=re.I)
+        if not match:
+            return ""
+        candidate = urllib.parse.unquote(match.group(1))
+    candidate = candidate.strip().lstrip("@").rstrip("/")
+    candidate = candidate.split("?", 1)[0].split("#", 1)[0].strip()
+    return candidate if re.fullmatch(r"[A-Za-z0-9._-]{1,80}", candidate) else ""
+
+
 def _parse_accounts(text):
     text = (text or "").strip()
     if not text:
@@ -1144,7 +1166,7 @@ def _parse_accounts(text):
         raw_items = re.split(r"[\s,;，；]+", text)
     accounts, seen = [], set()
     for item in raw_items:
-        uid = str(item).strip().lstrip("@")
+        uid = _normalize_schedule_account(item)
         if uid and uid.lower() not in seen:
             seen.add(uid.lower())
             accounts.append(uid)
@@ -5912,6 +5934,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             ln = int(self.headers.get("Content-Length", 0) or 0)
             payload = json.loads(self.rfile.read(ln) or b"{}")
+            mode = str(payload.get("mode", "replace") or "replace").strip().lower()
+            if mode not in ("append", "replace"):
+                self._send_json(400, {"ok": False, "error": "mode must be append or replace"})
+                return
             accounts = payload.get("accounts", payload.get("text", ""))
             if isinstance(accounts, str):
                 accounts = _parse_accounts(accounts)
@@ -5919,10 +5945,20 @@ class Handler(BaseHTTPRequestHandler):
                 accounts = _parse_accounts("\n".join(str(item) for item in accounts))
             else:
                 accounts = []
-            saved = _write_schedule_account_pool(accounts)
-            supabase = _store_schedule_accounts_in_supabase(saved["accounts"])
+            if mode == "append":
+                result = _append_schedule_accounts(accounts)
+                saved = result["saved"]
+                added = result["added"]
+                supabase = result.get("supabase")
+            else:
+                saved = _write_schedule_account_pool(accounts)
+                added = []
+                supabase = _store_schedule_accounts_in_supabase(saved["accounts"])
             self._send_json(200, {
                 "ok": True,
+                "mode": mode,
+                "added": added,
+                "added_count": len(added),
                 "accounts": saved["accounts"],
                 "count": len(saved["accounts"]),
                 "source": "backend_pool",

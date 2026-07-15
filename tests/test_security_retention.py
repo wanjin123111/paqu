@@ -297,6 +297,43 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertEqual(handler.responses[0][0], 403)
         load_catalog.assert_not_called()
 
+    def test_schedule_account_parser_accepts_handles_and_tiktok_profile_links(self):
+        accounts = proxy._parse_accounts(
+            "demo.one\n@demo_two\nhttps://www.tiktok.com/@demo.three/?lang=en\n"
+            "https://m.tiktok.com/@demo_four/video/7653132293346692365\n"
+            "https://example.com/@not-tiktok"
+        )
+
+        self.assertEqual(accounts, ["demo.one", "demo_two", "demo.three", "demo_four"])
+
+    def test_schedule_accounts_append_mode_uses_authoritative_pool_append(self):
+        body = json.dumps({
+            "accounts": "https://www.tiktok.com/@demo.author",
+            "mode": "append",
+        }).encode("utf-8")
+        handler = object.__new__(proxy.Handler)
+        handler.command = "POST"
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        handler._require_schedule_secret = mock.Mock(return_value=True)
+        handler.responses = []
+        handler._send_json = lambda code, payload: handler.responses.append((code, payload))
+        appended = {
+            "saved": {"accounts": ["demo.author"], "updated_at": "2026-07-15T15:00:00+08:00"},
+            "added": ["demo.author"],
+            "supabase": {"ok": True},
+        }
+
+        with mock.patch.object(proxy, "_append_schedule_accounts", return_value=appended) as append:
+            handler._schedule_accounts_endpoint({})
+
+        append.assert_called_once_with(["demo.author"])
+        code, payload = handler.responses[0]
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["mode"], "append")
+        self.assertEqual(payload["added_count"], 1)
+        self.assertEqual(payload["accounts"], ["demo.author"])
+
     def test_admin_access_grants_the_complete_super_admin_permission_set(self):
         handler = object.__new__(proxy.Handler)
         handler.command = "GET"
@@ -391,6 +428,9 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertIn('data-edit-drama="${escapeHtml(drama.id)}">编辑</button>', admin_js)
         self.assertIn('$("editForm").addEventListener("submit", (event) => event.preventDefault());', admin_js)
         self.assertIn('$("accountForm").addEventListener("submit", (event) => event.preventDefault());', admin_js)
+        self.assertIn('api("/schedule-accounts", {', admin_js)
+        self.assertIn('JSON.stringify({ accounts: raw, mode: "append" })', admin_js)
+        self.assertIn('loadingMessage: "正在确认账号已进入监控池"', admin_js)
         admin_js = (root / "admin.js").read_text(encoding="utf-8")
         self.assertIn('report = await api(`/supabase/latest?t=${Date.now()}`', admin_js)
         self.assertIn('report = await api(`/public_reports/latest_report.json?t=${Date.now()}`', admin_js)

@@ -757,11 +757,15 @@
     const raw = text($("newAccounts").value);
     if (!raw) return toast("请输入至少一个 TikTok 账号或主页链接", true);
     try {
-      const payload = await api("/discover-accounts", {
-        method: "POST", headers: adminHeaders(true), body: JSON.stringify({ accounts: raw }),
+      const payload = await api("/schedule-accounts", {
+        method: "POST", headers: adminHeaders(true), body: JSON.stringify({ accounts: raw, mode: "append" }),
         loadingMessage: "正在添加监控账号",
       });
-      state.backendAccounts = payload.accounts || [];
+      const verified = await api(`/schedule-accounts?t=${Date.now()}`, {
+        headers: adminHeaders(), loadingMessage: "正在确认账号已进入监控池",
+      });
+      state.backendAccounts = verified.accounts || [];
+      $("accountSource").textContent = `来源：后端监控池 ${state.backendAccounts.length} 个账号`;
       $("newAccounts").value = "";
       $("accountDialog").close();
       renderAll();
