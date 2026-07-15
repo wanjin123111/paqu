@@ -3,6 +3,11 @@
 
   const PAGE_SIZE = 18;
   const SESSION_KEY = "paqu_schedule_secret";
+  const DEFAULT_PERMISSION_LABELS = [
+    "查看后台正式数据", "认领、忽略与恢复作品", "合并多账号发布的同一短剧",
+    "新建、编辑与删除公司短剧", "上架、下架与调整前台顺序", "读取、添加与更新监控账号池",
+    "手动执行监控抓取任务", "访问受保护的播放源与下载", "导出后台配置与报表",
+  ];
   const $ = (id) => document.getElementById(id);
   const number = (value) => Number(value || 0);
   const text = (value) => String(value ?? "").trim();
@@ -27,6 +32,10 @@
     storage: "",
     reviewPage: 1,
     verified: false,
+    role: "",
+    roleLabel: "",
+    permissions: [],
+    services: {},
     saving: false,
     activeView: "dashboard",
     editorSourceKeys: [],
@@ -77,6 +86,68 @@
     $("syncText").textContent = message;
     const dot = document.querySelector(".status-pill .dot");
     if (dot) dot.style.background = ok ? "var(--green)" : "var(--red)";
+  }
+
+  function renderAdminAccess() {
+    const permissions = Array.isArray(state.permissions) ? state.permissions : [];
+    const granted = permissions.filter((item) => item && item.granted !== false);
+    const authorized = state.verified && granted.length > 0;
+    $("authBtnLabel").textContent = authorized ? (state.roleLabel || "超级管理员") : "后台密码";
+    $("authTitle").textContent = authorized ? `${state.roleLabel || "超级管理员"}已授权` : "验证超级管理员权限";
+    $("permissionSummary").textContent = authorized ? `已获得 ${granted.length} 项完整后台权限` : "验证后授予全部后台权限";
+    $("permissionBadge").textContent = authorized ? "全部已授权" : "未授权";
+    $("permissionBadge").className = `badge ${authorized ? "owned" : "pending"}`;
+    $("settingPermissionState").textContent = authorized ? "全部已授权" : "未授权";
+    $("settingPermissionState").className = `badge ${authorized ? "owned" : "pending"}`;
+    $("permissionDetail").textContent = authorized
+      ? `${state.roleLabel || "超级管理员"} · ${granted.length} 项权限 · 当前浏览器会话有效`
+      : "验证 SCHEDULE_SECRET 后授予全部后台权限";
+    const displayPermissions = permissions.length
+      ? permissions
+      : DEFAULT_PERMISSION_LABELS.map((label) => ({ label, granted: false }));
+    $("permissionList").innerHTML = displayPermissions.map((item) =>
+      `<div class="permission-item ${authorized && item.granted !== false ? "granted" : ""}" title="${escapeHtml(item.id || "")}">${escapeHtml(item.label || item.id || "后台权限")}</div>`
+    ).join("");
+  }
+
+  function clearAdminAccess(message = "未验证时仍可查看公开报表，不能修改后台数据。") {
+    state.verified = false;
+    state.role = "";
+    state.roleLabel = "";
+    state.permissions = [];
+    state.services = {};
+    $("authStatus").textContent = message;
+    $("settingBackendState").textContent = "未验证";
+    $("settingBackendState").className = "badge pending";
+    renderAdminAccess();
+  }
+
+  function applyAdminAccess(payload) {
+    state.verified = true;
+    state.role = text(payload.role) || "super_admin";
+    state.roleLabel = text(payload.role_label) || "超级管理员";
+    state.permissions = Array.isArray(payload.permissions) ? payload.permissions : [];
+    state.services = payload.services && typeof payload.services === "object" ? payload.services : {};
+    $("authStatus").textContent = `验证成功 · ${state.roleLabel} · ${state.permissions.length} 项权限全部授予`;
+    $("settingBackendState").textContent = "已验证";
+    $("settingBackendState").className = "badge owned";
+    $("authBox").classList.remove("open");
+    renderAdminAccess();
+  }
+
+  async function verifyAdminAccess(showMessage = false) {
+    if (!secret()) return false;
+    try {
+      const payload = await api(`/admin/access?t=${Date.now()}`, { headers: authHeaders() });
+      applyAdminAccess(payload);
+      return true;
+    } catch (error) {
+      if (error.status === 403) sessionStorage.removeItem(SESSION_KEY);
+      clearAdminAccess(error.status === 403 ? "密码不正确，请重新输入" : `权限验证失败：${error.message}`);
+      setSync("后台权限验证失败", false);
+      if (showMessage) toast(error.status === 403 ? "后台密码不正确" : error.message, true);
+      return false;
+    }
   }
 
   function formatNumber(value) {
@@ -206,6 +277,7 @@
 
   async function loadAdminCatalog(showMessage = false) {
     if (!secret()) return false;
+    if (!await verifyAdminAccess(showMessage)) return false;
     setSync("正在读取后台正式数据");
     try {
       const payload = await api(`/admin/catalog?t=${Date.now()}`, { headers: authHeaders() });
@@ -215,23 +287,19 @@
       setSourceRows(payload.sources || []);
       state.accounts = payload.accounts || [];
       $("accountSource").textContent = `来源：线上最新报表 ${state.accounts.length} 个账号`;
-      state.verified = true;
-      $("authStatus").textContent = `验证成功 · 配置版本 ${state.catalog.revision}`;
-      $("settingBackendState").textContent = "已验证";
-      $("settingBackendState").className = "badge owned";
+      $("authStatus").textContent = `验证成功 · ${state.roleLabel} · ${state.permissions.length} 项权限 · 配置版本 ${state.catalog.revision}`;
       updateStorageState();
-      $("authBox").classList.remove("open");
       setSync("后台正式数据已同步");
       renderAll();
       loadBackendAccounts(false);
       if (showMessage) toast("后台数据已重新读取");
       return true;
     } catch (error) {
-      state.verified = false;
-      $("authStatus").textContent = error.status === 403 ? "密码不正确，请重新输入" : error.message;
-      $("settingBackendState").textContent = "验证失败";
-      $("settingBackendState").className = "badge pending";
-      setSync("后台验证失败", false);
+      if (error.status === 403) {
+        sessionStorage.removeItem(SESSION_KEY);
+        clearAdminAccess("密码不正确，请重新输入");
+      }
+      setSync("后台数据读取失败", false);
       if (showMessage) toast(error.message, true);
       return false;
     }
@@ -457,6 +525,7 @@
     renderReview();
     renderDramas();
     updateStorageState();
+    renderAdminAccess();
   }
 
   function nextOrder() {

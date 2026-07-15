@@ -79,6 +79,17 @@ TIKTOK_AID = os.environ.get("TIKTOK_AID", "1233").strip() or "1233"
 TIKTOK_REGION = os.environ.get("TIKTOK_REGION", "US").strip() or "US"
 TIKTOK_LANGUAGE = os.environ.get("TIKTOK_LANGUAGE", "en").strip() or "en"
 SCHEDULE_SECRET = os.environ.get("SCHEDULE_SECRET", "").strip()
+ADMIN_PERMISSION_DEFINITIONS = (
+    ("catalog.read", "查看后台正式数据"),
+    ("catalog.review", "认领、忽略与恢复作品"),
+    ("catalog.merge", "合并多账号发布的同一短剧"),
+    ("dramas.manage", "新建、编辑与删除公司短剧"),
+    ("dramas.publish", "上架、下架与调整前台顺序"),
+    ("accounts.manage", "读取、添加与更新监控账号池"),
+    ("schedule.run", "手动执行监控抓取任务"),
+    ("media.private", "访问受保护的播放源与下载"),
+    ("reports.export", "导出后台配置与报表"),
+)
 SCHEDULE_ACCOUNTS = os.environ.get("SCHEDULE_ACCOUNTS", "")
 SCHEDULE_MAX_VIDEOS = _env_int("SCHEDULE_MAX_VIDEOS", 100, 0, 20000)
 SCHEDULE_MAX_PAGES = _env_int("SCHEDULE_MAX_PAGES", 80, 1, 20000)
@@ -5421,6 +5432,8 @@ class Handler(BaseHTTPRequestHandler):
             self._discover_accounts_endpoint(qs)
         elif parsed.path == "/admin/catalog":
             self._admin_catalog_endpoint(qs)
+        elif parsed.path == "/admin/access":
+            self._admin_access_endpoint(qs)
         elif parsed.path == "/curated-catalog":
             self._curated_catalog_endpoint(qs)
         elif parsed.path == "/drama-link":
@@ -5946,6 +5959,29 @@ class Handler(BaseHTTPRequestHandler):
             })
         except Exception as exc:
             self._send_json(500, {"ok": False, "error": str(exc)})
+
+    def _admin_access_endpoint(self, qs):
+        if not self._require_schedule_secret(qs):
+            return
+        if self.command != "GET":
+            self._send_json(405, {"ok": False, "error": "method not allowed"})
+            return
+        permissions = [
+            {"id": permission_id, "label": label, "granted": True}
+            for permission_id, label in ADMIN_PERMISSION_DEFINITIONS
+        ]
+        self._send_json(200, {
+            "ok": True,
+            "role": "super_admin",
+            "role_label": "超级管理员",
+            "permissions": permissions,
+            "permission_count": len(permissions),
+            "services": {
+                "schedule_secret": True,
+                "tikhub_api": bool(SERVER_API_KEY),
+                "supabase": bool(SUPABASE_ENABLED and _supabase_configured()),
+            },
+        })
 
     def _curated_catalog_endpoint(self, qs):
         if self.command != "GET":

@@ -272,6 +272,37 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertEqual(handler.responses[0][0], 403)
         load_catalog.assert_not_called()
 
+    def test_admin_access_grants_the_complete_super_admin_permission_set(self):
+        handler = object.__new__(proxy.Handler)
+        handler.command = "GET"
+        handler.headers = {"X-Schedule-Secret": "expected-secret"}
+        handler.responses = []
+        handler._send_json = lambda code, payload: handler.responses.append((code, payload))
+
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
+                mock.patch.object(proxy, "SERVER_API_KEY", "configured"), \
+                mock.patch.object(proxy, "SUPABASE_ENABLED", True), \
+                mock.patch.object(proxy, "_supabase_configured", return_value=True):
+            handler._admin_access_endpoint({})
+
+        code, payload = handler.responses[0]
+        permission_ids = {item["id"] for item in payload["permissions"]}
+        self.assertEqual(code, 200)
+        self.assertEqual(payload["role"], "super_admin")
+        self.assertEqual(payload["role_label"], "超级管理员")
+        self.assertEqual(payload["permission_count"], len(proxy.ADMIN_PERMISSION_DEFINITIONS))
+        self.assertTrue(all(item["granted"] for item in payload["permissions"]))
+        self.assertTrue({
+            "catalog.read", "catalog.review", "catalog.merge", "dramas.manage",
+            "dramas.publish", "accounts.manage", "schedule.run", "media.private",
+            "reports.export",
+        }.issubset(permission_ids))
+        self.assertEqual(payload["services"], {
+            "schedule_secret": True,
+            "tikhub_api": True,
+            "supabase": True,
+        })
+
     def test_latest_report_query_excludes_admin_catalog_storage_row(self):
         paths = []
 
@@ -299,6 +330,8 @@ class AdminCatalogTests(unittest.TestCase):
         admin_html = (root / "admin.html").read_text(encoding="utf-8")
 
         self.assertIn('headers["X-Schedule-Secret"]', admin_js)
+        self.assertIn('/admin/access?t=${Date.now()}', admin_js)
+        self.assertIn("超级管理员", admin_js)
         self.assertIn("sessionStorage", admin_js)
         self.assertNotIn("localStorage", admin_js)
         self.assertNotIn("?secret=", admin_js)
@@ -307,6 +340,8 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertIn('id="rankingTableBody"', (root / "catalog.html").read_text(encoding="utf-8"))
         self.assertIn('id="rankingSection"', (root / "catalog.html").read_text(encoding="utf-8"))
         self.assertIn('href="/catalog"', admin_html)
+        self.assertIn('id="permissionList"', admin_html)
+        self.assertIn('id="settingPermissionState"', admin_html)
         admin_js = (root / "admin.js").read_text(encoding="utf-8")
         self.assertIn('report = await api(`/supabase/latest?t=${Date.now()}`);', admin_js)
         self.assertIn('report = await api(`/public_reports/latest_report.json?t=${Date.now()}`);', admin_js)
