@@ -924,6 +924,8 @@ const DASHBOARD_CACHE_STORAGE="tikhub-dashboard-cache-v3";
 const DASHBOARD_LOCAL_CACHE_LIMIT=700000;
 const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v3";
 const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v3";
+const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v1";
+const DASHBOARD_VALIDATION_MAX_AGE=2*PUBLIC_REPORT_REFRESH_MS;
 function dashboardCacheGet(key,maxAgeMs){
   try{
     const raw=store.get(key);
@@ -979,6 +981,17 @@ async function readCachedDashboardStateAsync(){
   const payload=values[0];
   if(!payload)return null;
   return {payload,history:Array.isArray(values[1])?values[1]:[]};
+}
+function dashboardValidationIsFresh(cachedMs){
+  if(!cachedMs)return false;
+  try{
+    const item=JSON.parse(store.get(DASHBOARD_VALIDATION_CACHE_KEY)||"null");
+    return !!(item&&Date.now()-Number(item.t||0)<=DASHBOARD_VALIDATION_MAX_AGE&&Number(item.generated_at_ms||0)>=cachedMs-1000);
+  }catch(_){return false;}
+}
+function dashboardValidationSet(generatedAtMs){
+  if(!generatedAtMs)return;
+  store.set(DASHBOARD_VALIDATION_CACHE_KEY,JSON.stringify({t:Date.now(),generated_at_ms:Number(generatedAtMs)||0}));
 }
 function applyCachedDashboardState(state){
   if(!state||!state.payload)return false;
@@ -3996,17 +4009,21 @@ async function loadPublicDashboard(){
   const cachedMs=cachedState?dashboardPayloadTime(cachedState.payload):0;
   dashboardHistoryLoading=true;
   dashboardHistoryReady=false;
-  renderDashboardLoading("正在检查最新数据...");
+  const cacheTrusted=!!(cachedState&&dashboardValidationIsFresh(cachedMs));
+  if(cacheTrusted)applyCachedDashboardState(cachedState);
+  else renderDashboardLoading("正在检查最新数据...");
   const latestMeta=await latestMetaPromise;
   const latestMetaMs=reportItemMs(latestMeta);
   let cacheReady=!!(cachedState&&(!latestMetaMs||cachedMs>=latestMetaMs-1000));
   if(cacheReady){
-    applyCachedDashboardState(cachedState);
+    if(!cacheTrusted)applyCachedDashboardState(cachedState);
+    if(latestMetaMs)dashboardValidationSet(latestMetaMs);
   }else{
     renderDashboardLoading("正在同步最新数据...");
     try{
       const latestPayload=await loadBackendLatest({quiet:true,skipCache:true});
       await dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,latestPayload);
+      dashboardValidationSet(currentReportMs());
       if(cachedState&&cachedState.history.length)dashboardHistoryPayloads=cachedState.history;
       dashboardHistoryLoading=false;
       dashboardHistoryReady=true;
@@ -4043,8 +4060,13 @@ async function refreshPublicDashboardQuiet(){
   window.__quietRefresh=true;
   try{
     const latestMeta=await loadPublicLatestMeta();
-    if(!latestMeta||(currentReportGeneratedAt&&reportItemMs(latestMeta)<=currentReportMs()+1000))return;
+    if(!latestMeta)return;
+    if(currentReportGeneratedAt&&reportItemMs(latestMeta)<=currentReportMs()+1000){
+      dashboardValidationSet(reportItemMs(latestMeta));
+      return;
+    }
     await loadBackendLatest({quiet:true});
+    dashboardValidationSet(currentReportMs());
     await loadBackendReports({quiet:true,refreshPayloads:true});
   }catch(_){
   }finally{
