@@ -9,6 +9,7 @@
 - `catalog.html` / `catalog.js`: 对外公司短剧库，访问 `/catalog`。
 - `tikhub_proxy.py`: 本地 Python 代理，用来解决浏览器 CORS，并托管页面。
 - `启动代理.bat`: Windows 一键启动脚本。
+- `docs/ENTERPRISE_WECHAT_API.md`: 企业微信前端接入所需的页面与接口文档。
 
 ## 本地使用
 
@@ -19,7 +20,7 @@
 
 ## 公司短剧资产管理
 
-- 访问 `/admin`，输入 Render 中配置的 `SCHEDULE_SECRET` 后，可以从最新抓取结果认领公司作品。
+- 访问 `/admin` 后，后端会通过 HttpOnly 管理会话开放公司资产管理能力，可以从最新抓取结果认领公司作品；外部系统调用管理接口时仍必须在服务端发送 `X-Schedule-Secret`。
 - 同一部短剧在多个 TikTok 账号发布时，可以勾选多条来源并合并为同一部短剧。
 - 后台支持中文/英文剧名、编剧、制作/制片、导演、主演、历史别名、内部备注、上下架和前台顺序。
 - 正式配置优先保存到 Supabase；公开 `/catalog` 只显示已上架内容，不返回内部备注或任务密码。
