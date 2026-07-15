@@ -174,7 +174,7 @@
   .detail-pager.show{display:flex}
   .discover-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;grid-column:1/-1;width:100%}
   .discover-toolbar[hidden]{display:none}
-  .discover-toolbar .search-field{width:min(440px,100%);max-width:440px}
+  .discover-toolbar .search-field{width:min(720px,100%);max-width:720px;flex:1}
   .discover-mini{display:flex;align-items:center;gap:6px;border:1px solid var(--line-strong);background:var(--card);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--ink-soft)}
   .discover-mini input{width:74px;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;text-align:right}
   .discover-mini select{border:0;outline:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
@@ -527,7 +527,7 @@
     </div>
   </div>
   <div class="topbar-right">
-    <a class="mini-btn" href="/catalog" style="text-decoration:none">公司短剧库</a>
+    <a class="mini-btn" href="/catalog" style="text-decoration:none">公司短剧榜单</a>
     <a class="mini-btn admin-only" href="/admin" style="text-decoration:none">资产管理</a>
     <div class="history-menu" id="historyMenu">
       <button class="history-menu-btn" id="historyMenuBtn" type="button" aria-label="历史抓取记录" aria-expanded="false">...</button>
@@ -775,17 +775,11 @@ shortdramatime"></textarea>
         </div>
         <div class="discover-toolbar" id="discoverToolbar" hidden>
           <label class="discover-mini"><span>发现</span><select id="discoverModeSelect" aria-label="选择发现类型"><option value="accounts">账号</option><option value="works">作品</option></select></label>
-          <label class="search-field"><span id="discoverQueryLabel">关键词 / @账号 / 链接</span><input id="discoverKeywordsInput" type="search" placeholder="关键词、@账号或 TikTok 主页链接" autocomplete="off" aria-label="发现关键词、账号或 TikTok 链接"></label>
-          <label class="discover-mini discover-secret"><span>后端密码</span><input id="discoverSecretInput" type="password" autocomplete="off" spellcheck="false" placeholder="必填 SCHEDULE_SECRET" aria-label="发现功能后端密码"></label>
-          <button class="mini-btn" id="discoverSecretSaveBtn" type="button">保存密码</button>
-          <label class="discover-mini"><span>候选</span><input id="discoverLimitInput" type="number" min="1" max="200" step="1" value="40"><span>个</span></label>
-          <label class="discover-mini" id="discoverMinFollowersField" data-account-only><span>最低粉丝</span><input id="discoverMinFollowersInput" type="text" value="0"></label>
-          <label class="discover-mini" id="discoverMinDramasField" data-account-only><span>最低短剧</span><input id="discoverMinDramasInput" type="number" min="0" max="100000" step="1" value="0"><span>部</span></label>
-          <label class="discover-mini"><span>搜索视频</span><input id="discoverMaxVideosInput" type="number" min="1" max="200" step="1" value="50"><span>条/词</span></label>
-          <button class="mini-btn" id="discoverLoadBtn" type="button">读取结果</button>
-          <button class="mini-btn" id="discoverRunBtn" type="button">开始发现</button>
+          <label class="search-field"><span id="discoverQueryLabel">@账号 / TikTok 主页链接</span><input id="discoverKeywordsInput" type="search" placeholder="粘贴 TikTok 账号主页链接或输入 @账号" autocomplete="off" aria-label="输入 TikTok 账号主页链接或账号名"></label>
+          <button class="mini-btn" id="discoverRunBtn" type="button">搜索账号</button>
+          <button class="mini-btn" id="discoverLoadBtn" type="button">上次结果</button>
           <button class="mini-btn" id="discoverAddDirectBtn" type="button" data-account-only>按账号名直接加入</button>
-          <button class="mini-btn" id="discoverAddAllBtn" type="button">加入全部候选</button>
+          <button class="mini-btn" id="discoverAddAllBtn" type="button">全部加入监控</button>
           <span class="discover-status" id="discoverStatus"></span>
         </div>
       </div>
@@ -3076,7 +3070,7 @@ function backendBase(){
   return location.hostname==="paqu-tikhub-proxy.onrender.com"||localHosts.has(location.hostname) ? "" : "https://paqu-tikhub-proxy.onrender.com";
 }
 function backendSecret(){
-  for(const id of ["discoverSecretInput","backendSecretInline","backendSecret"]){
+  for(const id of ["backendSecretInline","backendSecret"]){
     const el=$(id);
     if(el&&el.value&&el.value.trim())return el.value.trim();
   }
@@ -3084,23 +3078,12 @@ function backendSecret(){
 }
 function syncBackendSecretInputs(value){
   value=String(value||"").trim();
-  ["backendSecret","backendSecretInline","discoverSecretInput"].forEach(id=>{
+  ["backendSecret","backendSecretInline"].forEach(id=>{
     const el=$(id);
     if(el&&el.value!==value)el.value=value;
   });
   if(value)store.set("thr_backend_secret",value);
   else store.del("thr_backend_secret");
-}
-function saveDiscoverySecret(){
-  const input=$("discoverSecretInput");
-  syncBackendSecretInputs(input&&input.value||"");
-  if(backendSecret()){
-    discoverySetStatus("后端密码已保存在当前浏览器，可以开始发现",true);
-    toast("后端密码已保存");
-  }else{
-    discoverySetStatus("请先填写后端密码（SCHEDULE_SECRET）",false);
-    toast("请先填写后端密码");
-  }
 }
 function backendResponseError(response,data){
   const raw=(data&&data.error)||("HTTP "+response.status);
@@ -3131,7 +3114,7 @@ async function backendFetchJson(path, params, opts){
   params=Object.assign({}, params||{});
   opts=opts||{};
   const secret=backendSecret();
-  if(opts.requireSecret&&!secret)throw new Error("请先填写并保存后端密码（SCHEDULE_SECRET）");
+  if(opts.requireSecret&&!secret)throw new Error("请先在页面上方填写任务密码（SCHEDULE_SECRET）");
   const headers=(secret&&opts.sendSecret!==false)?{"X-Schedule-Secret":secret}:{};
   let timer=null;
   const controller=(opts.timeoutMs&&window.AbortController)?new AbortController():null;
@@ -3140,7 +3123,7 @@ async function backendFetchJson(path, params, opts){
   try{
     r=await fetch(backendUrl(path,params),{headers,cache:"no-store",signal:controller?controller.signal:undefined});
   }catch(e){
-    if(e&&e.name==="AbortError")throw new Error("请求超时，请减少候选数量或稍后再试");
+    if(e&&e.name==="AbortError")throw new Error("请求超时，请减少一次输入的链接数量或稍后再试");
     throw e;
   }finally{
     if(timer)window.clearTimeout(timer);
@@ -3154,7 +3137,7 @@ async function backendPostJson(path, body, params, opts){
   params=Object.assign({}, params||{});
   opts=opts||{};
   const secret=backendSecret();
-  if(opts.requireSecret&&!secret)throw new Error("请先填写并保存后端密码（SCHEDULE_SECRET）");
+  if(opts.requireSecret&&!secret)throw new Error("请先在页面上方填写任务密码（SCHEDULE_SECRET）");
   const headers={"Content-Type":"application/json"};
   if(secret&&opts.sendSecret!==false)headers["X-Schedule-Secret"]=secret;
   const r=await fetch((opts.sameOrigin?sameOriginBackendUrl:backendUrl)(path,params),{
@@ -3179,55 +3162,43 @@ function discoveryQueryStorageKey(mode){
 }
 function storedDiscoveryKeywords(mode){
   mode=mode||discoveryMode;
-  const saved=(store.get(discoveryQueryStorageKey(mode))||"").trim();
-  if(mode==="works")return saved;
-  return (!saved||isLegacyDiscoveryKeywords(saved))?DEFAULT_DISCOVERY_KEYWORDS:saved;
+  return (store.get(discoveryQueryStorageKey(mode))||"").trim();
 }
 function discoveryKeywords(){
   const el=$("discoverKeywordsInput");
-  const value=el&&el.value?el.value.trim():"";
-  if(discoveryMode==="works")return value;
-  return (!value||isLegacyDiscoveryKeywords(value))?storedDiscoveryKeywords("accounts"):value;
+  return el&&el.value?el.value.trim():"";
 }
 function discoveryResultItems(){
   return discoveryMode==="works"?discoveredWorks:discoveredAccounts;
 }
 function discoveryLimit(){
-  const el=$("discoverLimitInput");
-  return Math.max(1,Math.min(200,toInt(el&&el.value)||40));
+  return 40;
 }
 function discoveryMinFollowers(){
-  const el=$("discoverMinFollowersInput");
-  return parseGrowthNumber(el&&el.value?el.value:"0");
+  return 0;
 }
 function discoveryMinDramas(){
-  const el=$("discoverMinDramasInput");
-  return Math.max(0,Math.min(100000,toInt(el&&el.value)||0));
+  return 0;
 }
 function discoveryMaxVideos(){
-  const el=$("discoverMaxVideosInput");
-  return Math.max(1,Math.min(200,toInt(el&&el.value)||50));
+  return 20;
 }
 function updateDiscoveryControls(){
   const toolbar=$("discoverToolbar");
   if(toolbar)toolbar.hidden=resultView!=="discover";
-  const input=$("discoverKeywordsInput"), limit=$("discoverLimitInput"), min=$("discoverMinFollowersInput"), minDramas=$("discoverMinDramasInput"), maxVideos=$("discoverMaxVideosInput");
+  const input=$("discoverKeywordsInput");
   const modeSelect=$("discoverModeSelect");
   if(modeSelect){modeSelect.value=discoveryMode;modeSelect.disabled=discoveryBusy;}
   if(input&&document.activeElement!==input)input.value=storedDiscoveryKeywords();
   if(input){
-    input.placeholder=discoveryMode==="works"?"关键词、@账号、主页链接、作品链接或分享短链接":"关键词、@账号或 TikTok 主页链接";
-    input.setAttribute("aria-label",discoveryMode==="works"?"发现作品关键词、账号或 TikTok 链接":"发现账号关键词、账号或 TikTok 链接");
+    input.placeholder=discoveryMode==="works"?"粘贴 TikTok 作品链接、账号主页链接或输入关键词":"粘贴 TikTok 账号主页链接或输入 @账号";
+    input.setAttribute("aria-label",discoveryMode==="works"?"搜索 TikTok 作品链接、账号或关键词":"搜索 TikTok 账号主页链接或账号名");
   }
   const queryLabel=$("discoverQueryLabel");
-  if(queryLabel)queryLabel.textContent=discoveryMode==="works"?"关键词 / @账号 / 作品链接":"关键词 / @账号 / 主页链接";
-  if(limit&&document.activeElement!==limit)limit.value=store.get("thr_discover_limit")||"40";
-  if(min&&document.activeElement!==min)min.value=store.get("thr_discover_min_followers")||"0";
-  if(minDramas&&document.activeElement!==minDramas)minDramas.value=store.get("thr_discover_min_dramas")||"0";
-  if(maxVideos&&document.activeElement!==maxVideos)maxVideos.value=store.get("thr_discover_max_videos")||"50";
+  if(queryLabel)queryLabel.textContent=discoveryMode==="works"?"作品链接 / @账号 / 关键词":"@账号 / TikTok 主页链接";
   document.querySelectorAll("[data-account-only]").forEach(el=>{el.hidden=discoveryMode==="works";});
   const runBtn=$("discoverRunBtn"), loadBtn=$("discoverLoadBtn"), addDirectBtn=$("discoverAddDirectBtn"), addAllBtn=$("discoverAddAllBtn");
-  if(runBtn){runBtn.disabled=discoveryBusy;runBtn.textContent=discoveryMode==="works"?"开始发现作品":"开始发现账号";}
+  if(runBtn){runBtn.disabled=discoveryBusy;runBtn.textContent=discoveryMode==="works"?"搜索作品":"搜索账号";}
   if(loadBtn)loadBtn.disabled=discoveryBusy;
   if(addDirectBtn){
     addDirectBtn.hidden=discoveryMode==="works";
@@ -3241,7 +3212,7 @@ function updateDiscoveryControls(){
     const time=reportTimeLabel(discoveryGeneratedAt)||"";
     const items=discoveryResultItems();
     const noun=discoveryMode==="works"?"作品":"候选账号";
-    const emptyStatus=backendSecret()?"密码已就绪，可以开始发现":"请先填写并保存后端密码";
+    const emptyStatus=backendSecret()?"输入账号主页链接或 @账号后搜索":"请先在页面上方填写任务密码";
     discoverySetStatus(discoveryBusy?("正在发现"+noun+"，通常 1 分钟内结束..."):(items.length?(noun+" "+fmt(items.length)+" 个"+(time?" · "+time:"")):emptyStatus), !!items.length||!!backendSecret());
   }
 }
@@ -3250,7 +3221,7 @@ function loadDiscoveryPayload(payload, shouldRender=true){
   else discoveredAccounts=Array.isArray(payload&&payload.accounts)?payload.accounts:[];
   discoveryGeneratedAt=(payload&&payload.generated_at)||"";
   const items=discoveryResultItems();
-  discoveryEmptyMessage=(!items.length&&discoveryGeneratedAt)?(discoveryMode==="works"?"上次没有发现作品。可以换关键词、账号或直接粘贴作品链接重试。":"上次发现没有候选账号。可以换关键词或降低最低粉丝后重试。"):"";
+  discoveryEmptyMessage=(!items.length&&discoveryGeneratedAt)?(discoveryMode==="works"?"上次没有发现作品。可以换关键词、账号或直接粘贴作品链接重试。":"上次没有找到账号。请检查主页链接或 @账号后重试。"):"";
   if(shouldRender)renderResultTable();
 }
 function discoveryErrorSummary(payload){
@@ -3274,8 +3245,8 @@ async function loadDiscoveryLatest(){
 async function runDiscovery(){
   if(discoveryBusy)return;
   const keywords=discoveryKeywords();
-  if(discoveryMode==="works"&&!keywords){
-    discoveryEmptyMessage="请输入关键词、@账号、TikTok 主页链接、作品链接或分享短链接。";
+  if(!keywords){
+    discoveryEmptyMessage=discoveryMode==="works"?"请输入作品链接、账号主页链接、@账号或关键词。":"请输入 TikTok 账号主页链接或 @账号。";
     discoverySetStatus(discoveryEmptyMessage,false);
     renderResultTable();
     return;
@@ -3286,11 +3257,7 @@ async function runDiscovery(){
   const minDramas=discoveryMinDramas();
   const maxVideos=discoveryMaxVideos();
   store.set(discoveryQueryStorageKey(),keywords);
-  store.set("thr_discover_limit",String(limit));
-  store.set("thr_discover_min_followers",($("discoverMinFollowersInput")&&$("discoverMinFollowersInput").value)||"0");
-  store.set("thr_discover_min_dramas",String(minDramas));
-  store.set("thr_discover_max_videos",String(maxVideos));
-  discoverySetStatus(discoveryMode==="works"?"正在搜索或解析作品...":"正在搜索短剧视频并筛作者...");
+  discoverySetStatus(discoveryMode==="works"?"正在搜索或解析作品...":"正在读取账号主页和作品数据...");
   discoveryEmptyMessage="";
   renderResultTable();
   let finalStatus="", finalOk=false;
@@ -3311,7 +3278,7 @@ async function runDiscovery(){
       const errors=Array.isArray(payload&&payload.errors)?payload.errors:[];
       const hitLimit=errors.some(item=>String(typeof item==="string"?item:(item&&item.message)||(item&&item.error)||"").includes("runtime limit"));
       const detail=discoveryErrorSummary(payload);
-      discoveryEmptyMessage=hitLimit?("发现已到时间上限，本次没有"+(discoveryMode==="works"?"作品":"候选账号")+"。可以减少关键词或候选数量后重试。"):(discoveryMode==="works"?("本次没有发现作品。可直接粘贴作品链接，或换关键词、@账号后重试。"+(detail?" "+detail:"")):("本次没有发现候选账号。TikHub 搜索接口可能没有返回可用的短剧作者。"+(detail?" "+detail:"")));
+      discoveryEmptyMessage=hitLimit?("搜索已到时间上限，本次没有"+(discoveryMode==="works"?"作品":"账号")+"。请减少一次输入的链接数量后重试。"):(discoveryMode==="works"?("本次没有发现作品。可直接粘贴作品链接，或换关键词、@账号后重试。"+(detail?" "+detail:"")):("本次没有找到账号，请检查 TikTok 主页链接或 @账号。"+(detail?" "+detail:"")));
     }
     finalStatus="发现完成 · "+(discoveryMode==="works"?"作品 ":"候选 ")+fmt(items.length)+" 个";
     finalOk=true;
@@ -3609,7 +3576,7 @@ function renderDiscoveryTable(){
     const td=document.createElement("td");
     td.colSpan=DISCOVERY_COLUMNS.length;
     td.className="detail-text";
-    td.textContent=discoveryBusy?"正在搜索公开短剧视频，通常 1 分钟内结束...":(discoveryEmptyMessage||"暂无候选账号。填写任务密码后点“开始发现”。");
+    td.textContent=discoveryBusy?"正在读取账号主页和作品数据，通常 1 分钟内结束...":(discoveryEmptyMessage||"暂无候选账号。请在页面上方填写任务密码，输入主页链接后点“搜索账号”。");
     tr.appendChild(td);
     tb.appendChild(tr);
     return;
@@ -4306,7 +4273,7 @@ function init(){
   $("accountsInput").addEventListener("input",updateAcctCount);
   $("accountsInput").addEventListener("input",()=>store.set("thr_accounts",$("accountsInput").value));
   if(store.get("thr_accounts")){$("accountsInput").value=store.get("thr_accounts");updateAcctCount();}
-  ["backendSecret","backendSecretInline","discoverSecretInput"].forEach(id=>{
+  ["backendSecret","backendSecretInline"].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener("input",()=>syncBackendSecretInputs(el.value));
   });
@@ -4336,7 +4303,7 @@ function init(){
   setPublicPageView("dashboard");
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
-  $("discoverTabBtn").addEventListener("click",()=>{resultView="discover";renderResultTable();if(!backendSecret()){discoverySetStatus("请先填写并保存后端密码",false);return;}if(!discoveryResultItems().length)loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));});
+  $("discoverTabBtn").addEventListener("click",()=>{resultView="discover";renderResultTable();if(!backendSecret()){discoverySetStatus("请先在页面上方填写任务密码",false);return;}if(!discoveryResultItems().length)loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));});
   $("sortHotBtn").addEventListener("click",()=>setResultSort("hot"));
   $("sortLatestBtn").addEventListener("click",()=>setResultSort("latest"));
   $("discoverLoadBtn").addEventListener("click",()=>loadDiscoveryLatest().catch(e=>{discoverySetStatus("读取失败: "+(e.message||e),false);toast("读取失败:"+(e.message||e));}));
@@ -4354,10 +4321,9 @@ function init(){
     if(input)input.value=storedDiscoveryKeywords();
     renderResultTable();
     if(backendSecret())loadDiscoveryLatest().catch(e=>discoverySetStatus("读取失败: "+(e.message||e),false));
-    else discoverySetStatus("请先填写并保存后端密码",false);
+    else discoverySetStatus("请先在页面上方填写任务密码",false);
   });
-  $("discoverSecretSaveBtn").addEventListener("click",saveDiscoverySecret);
-  ["discoverKeywordsInput","discoverLimitInput","discoverMinFollowersInput","discoverMinDramasInput","discoverMaxVideosInput"].forEach(id=>{
+  ["discoverKeywordsInput"].forEach(id=>{
     const el=$(id);
     if(el)el.addEventListener("keydown",e=>{if(e.key==="Enter")runDiscovery();});
   });

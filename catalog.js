@@ -29,13 +29,22 @@
   }
 
   function renderRanking() {
-    const rows = state.ranking.slice(0, 3);
-    $("ranking").innerHTML = rows.length ? rows.map((drama, index) => `
+    const rows = state.ranking;
+    const podium = rows.slice(0, 3);
+    $("rankingCount").textContent = rows.length ? `共 ${rows.length} 部上榜` : "暂无上榜作品";
+    $("ranking").innerHTML = podium.length ? podium.map((drama, index) => `
       <article class="rank-card"><div class="rank-number">${index + 1}</div><div class="rank-label">TOP ${index + 1}</div>
       <div class="rank-title">${escapeHtml(drama.chinese_title || drama.english_title || "未命名短剧")}</div>
       <div class="rank-en">${escapeHtml(drama.english_title || "英文名待补充")}</div>
-      <div class="rank-bottom"><div class="rank-views">${formatNumber(drama.total_views)}</div><div class="rank-source">${number(drama.source_count)} 条来源 · ${number(drama.episodes)} 集</div></div></article>`).join("")
+      <div class="rank-bottom"><div class="rank-views">${formatNumber(drama.total_views)}</div><div class="rank-source">${number(drama.source_count)} 条来源 · ${number(drama.episodes)} 集</div></div><button class="rank-open" data-detail="${escapeHtml(drama.id)}">查看详情 →</button></article>`).join("")
       : `<div class="empty"><strong>暂无公开榜单</strong>请在管理后台认领公司作品并设置为上架</div>`;
+    $("rankingTableBody").innerHTML = rows.length ? rows.map((drama, index) => `
+      <tr><td><span class="rank-chip">${index + 1}</span></td>
+      <td class="rank-drama"><strong>${escapeHtml(drama.chinese_title || drama.english_title || "未命名短剧")}</strong><small>${escapeHtml(drama.english_title || "英文名待补充")}</small></td>
+      <td class="rank-accounts">${(drama.accounts || []).length ? drama.accounts.map((account) => `@${escapeHtml(account)}`).join("、") : "—"}</td>
+      <td class="rank-people">${escapeHtml(drama.writer || "待补充")}</td><td class="rank-people">${escapeHtml(drama.producer || "待补充")}</td>
+      <td class="rank-play">${formatNumber(drama.total_views)}</td><td><button class="rank-open" data-detail="${escapeHtml(drama.id)}">打开 →</button></td></tr>`).join("")
+      : `<tr><td class="leaderboard-empty" colspan="7"><strong>暂无已上架的公司短剧</strong>管理员认领作品并开启“前台展示”后，榜单会自动生成</td></tr>`;
   }
 
   function filteredDramas() {
@@ -101,7 +110,7 @@
   $("search").addEventListener("input", renderCatalog);
   $("sort").addEventListener("change", renderCatalog);
   $("resetBtn").addEventListener("click", () => { $("search").value = ""; $("sort").value = "manual"; renderCatalog(); });
-  $("catalogGrid").addEventListener("click", (event) => { const button = event.target.closest("[data-detail]"); if (button) openDetail(button.dataset.detail); });
+  ["ranking", "rankingTableBody", "catalogGrid"].forEach((id) => $(id).addEventListener("click", (event) => { const button = event.target.closest("[data-detail]"); if (button) openDetail(button.dataset.detail); }));
   $("closeDialog").addEventListener("click", () => $("detailDialog").close());
   load();
 })();
