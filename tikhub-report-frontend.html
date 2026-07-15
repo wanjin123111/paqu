@@ -242,6 +242,9 @@
   td.cell-muted{color:var(--ink-faint)}
   .loading-inline{display:inline-flex;align-items:center;gap:6px;color:var(--ink-faint)}
   .loading-inline::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse .9s ease-in-out infinite}
+  .page-loading-status{position:fixed;top:78px;right:20px;z-index:2200;display:none;align-items:center;gap:10px;max-width:min(420px,calc(100vw - 28px));padding:12px 15px;border:1px solid #d9d6ff;border-radius:12px;background:rgba(255,255,255,.96);color:var(--ink);box-shadow:0 14px 40px rgba(31,39,51,.16);backdrop-filter:blur(10px);font-size:13px;font-weight:750}
+  .page-loading-status.active{display:flex}.page-loading-spinner{width:20px;height:20px;flex:0 0 auto;border:3px solid #e6e3ff;border-top-color:var(--accent);border-radius:50%;animation:page-loading-spin .72s linear infinite}.page-loading-copy small{display:block;margin-top:2px;color:var(--ink-faint);font-size:10.5px;font-weight:500}
+  @keyframes page-loading-spin{to{transform:rotate(360deg)}}
   @keyframes pulse{0%,100%{opacity:.35;transform:scale(.82)}50%{opacity:1;transform:scale(1)}}
   .row-err td{background:var(--err-soft)}
 
@@ -531,6 +534,8 @@
 </style>
 </head>
 <body class="public-mode">
+
+<div class="page-loading-status active" id="pageLoadingStatus" role="status" aria-live="polite" aria-label="页面数据加载中"><span class="page-loading-spinner" aria-hidden="true"></span><span class="page-loading-copy"><span id="pageLoadingText">正在加载页面数据</span><small>数据完成后会自动显示，请稍候</small></span></div>
 
 <header class="topbar">
   <div class="brand">
@@ -852,6 +857,22 @@ const store=(()=>{let ok=false;try{localStorage.setItem("__t","1");localStorage.
 
 const $=id=>document.getElementById(id);
 
+const pageLoadingTasks=new Map();
+let pageLoadingSequence=0;
+function updatePageLoading(){
+  const node=$("pageLoadingStatus");
+  if(!node)return;
+  const values=[...pageLoadingTasks.values()];
+  const current=values[values.length-1];
+  node.classList.toggle("active",!!current);
+  document.body.setAttribute("aria-busy",current?"true":"false");
+  if(current)$("pageLoadingText").textContent=current;
+}
+function beginPageLoading(message){const token=++pageLoadingSequence;pageLoadingTasks.set(token,message||"正在加载数据");updatePageLoading();return token;}
+function endPageLoading(token){pageLoadingTasks.delete(token);updatePageLoading();}
+async function withPageLoading(message,task){const token=beginPageLoading(message);try{return await task();}finally{endPageLoading(token);}}
+async function loadingFetch(input,options,message){return withPageLoading(message||"正在连接服务器，请稍候",()=>fetch(input,options));}
+
 /* ---------- 默认接口路径 ---------- */
 const DEFAULTS={
   epProfile:"/api/v1/tiktok/app/v3/handler_user_profile",
@@ -1135,7 +1156,7 @@ function proxyUsesPrivateBackend(){
   const proxy=(cfg.proxy||"").trim();
   return !!proxy&&(proxy.startsWith("/")||proxy.includes("paqu-tikhub-proxy.onrender.com"));
 }
-async function apiGet(path,params,label){
+async function apiGetRaw(path,params,label){
   const qs=new URLSearchParams(Object.entries(params).filter(([k,v])=>v!==undefined&&v!=="")).toString();
   const direct=cfg.host.replace(/\/$/,"")+path+(qs?"?"+qs:"");
   const url=applyProxy(direct);
@@ -1145,7 +1166,7 @@ async function apiGet(path,params,label){
   let last=null;
   for(let attempt=1;attempt<=cfg.retries;attempt++){
     let resp;
-    try{resp=await fetch(url,{headers});}
+    try{resp=await loadingFetch(url,{headers},"正在读取 TikTok 账号数据");}
     catch(e){throw new ApiError("浏览器无法连到 API(多半是 CORS)。",{corsLike:true});}
     if(resp.status===200){const t=await resp.text();try{return JSON.parse(t);}catch(_){return null;}}
     let detail="";try{detail=(await resp.text()||"").slice(0,400);}catch(_){}
@@ -1161,6 +1182,7 @@ async function apiGet(path,params,label){
   }
   throw new ApiError(last||"未知错误");
 }
+async function apiGet(path,params,label){return withPageLoading("正在读取 TikTok 账号数据",()=>apiGetRaw(path,params,label));}
 
 /* ---------- 抓取流程 ---------- */
 async function getProfile(uid,secUid){
@@ -1647,7 +1669,7 @@ async function hydrateThemeLabels(targetRows){
   themeHydrating=true;
   renderResultTable();
   try{
-    const r=await fetch(backendUrl("/translate-titles",{}),{
+    const r=await loadingFetch(backendUrl("/translate-titles",{}),{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({titles:labels}),
@@ -1685,7 +1707,7 @@ async function hydrateChineseTitles(targetRows){
   titleHydrating=true;
   renderResultTable();
   try{
-    const r=await fetch(backendUrl("/translate-titles",{}),{
+    const r=await loadingFetch(backendUrl("/translate-titles",{}),{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({titles:missing}),
@@ -3196,7 +3218,7 @@ function sameOriginBackendUrl(path, params){
   const qs=new URLSearchParams(params).toString();
   return path+(qs?(String(path).includes("?")?"&":"?")+qs:"");
 }
-async function backendFetchJson(path, params, opts){
+async function backendFetchJsonRaw(path, params, opts){
   params=Object.assign({}, params||{});
   opts=opts||{};
   const secret=backendSecret();
@@ -3207,7 +3229,7 @@ async function backendFetchJson(path, params, opts){
   if(controller)timer=window.setTimeout(()=>controller.abort(),opts.timeoutMs);
   let r;
   try{
-    r=await fetch(backendUrl(path,params),{headers,cache:"no-store",signal:controller?controller.signal:undefined});
+    r=await loadingFetch(backendUrl(path,params),{headers,cache:"no-store",signal:controller?controller.signal:undefined},"正在读取服务器数据");
   }catch(e){
     if(e&&e.name==="AbortError")throw new Error("请求超时，请减少一次输入的链接数量或稍后再试");
     throw e;
@@ -3219,14 +3241,15 @@ async function backendFetchJson(path, params, opts){
   if(!r.ok)throw new Error(backendResponseError(r,data));
   return data;
 }
-async function backendPostJson(path, body, params, opts){
+async function backendFetchJson(path,params,opts){return withPageLoading("正在读取服务器数据",()=>backendFetchJsonRaw(path,params,opts));}
+async function backendPostJsonRaw(path, body, params, opts){
   params=Object.assign({}, params||{});
   opts=opts||{};
   const secret=backendSecret();
   if(opts.requireSecret&&!secret)throw new Error("请先在页面上方填写任务密码（SCHEDULE_SECRET）");
   const headers={"Content-Type":"application/json"};
   if(secret&&opts.sendSecret!==false)headers["X-Schedule-Secret"]=secret;
-  const r=await fetch((opts.sameOrigin?sameOriginBackendUrl:backendUrl)(path,params),{
+  const r=await loadingFetch((opts.sameOrigin?sameOriginBackendUrl:backendUrl)(path,params),{
     method:"POST",
     headers,
     cache:"no-store",
@@ -3237,6 +3260,7 @@ async function backendPostJson(path, body, params, opts){
   if(!r.ok)throw new Error(backendResponseError(r,data));
   return data;
 }
+async function backendPostJson(path,body,params,opts){return withPageLoading("正在提交并处理数据",()=>backendPostJsonRaw(path,body,params,opts));}
 function discoverySetStatus(text, ok){
   const el=$("discoverStatus");
   if(!el)return;
@@ -3674,19 +3698,20 @@ function renderDiscoveryTable(){
     tb.appendChild(tr);
   }
 }
-async function fetchJsonUrl(url,opts){
+async function fetchJsonUrlRaw(url,opts){
   opts=opts||{};
   const cleanUrl=String(url).split("?")[0];
   const isLatestReport=/^(.+\/)?latest_report\.json$/.test(cleanUrl);
   const shouldBust=opts.noStore!==false&&(!cleanUrl.startsWith("public_reports/")||isLatestReport);
   const sep=String(url).includes("?")?"&":"?";
   const finalUrl=shouldBust?url+sep+"_="+Date.now():url;
-  const r=await fetch(finalUrl,{cache:shouldBust?"no-store":"default"});
+  const r=await loadingFetch(finalUrl,{cache:shouldBust?"no-store":"default"},"正在下载报表数据");
   const text=await r.text();
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
   return data;
 }
+async function fetchJsonUrl(url,opts){return withPageLoading("正在下载报表数据",()=>fetchJsonUrlRaw(url,opts));}
 function monitoredAccountRows(){
   const seen=new Set(), out=[];
   for(const row of rows){
@@ -4002,7 +4027,7 @@ async function loadPublicLatestMeta(){
   const data=await backendFetchJson("/supabase/reports",{limit:"1"}, {sendSecret:false});
   return (data.reports||[])[0]||null;
 }
-async function loadPublicDashboard(){
+async function loadPublicDashboardTask(){
   const cachedStatePromise=readCachedDashboardStateAsync();
   const latestMetaPromise=loadPublicLatestMeta().catch(()=>null);
   const cachedState=await cachedStatePromise;
@@ -4055,6 +4080,7 @@ async function loadPublicDashboard(){
     renderHistoryList([], "");
   });
 }
+async function loadPublicDashboard(){return withPageLoading("正在加载最新看板数据",loadPublicDashboardTask);}
 let publicRefreshInFlight=false;
 async function refreshPublicDashboardQuiet(){
   if(isAdminMode()||document.hidden||publicRefreshInFlight)return;
@@ -4219,7 +4245,7 @@ async function saveToProxy(filename,content,opts){
   if(opts.header)body.header=opts.header;
   const headers={"Content-Type":"application/json"};
   if(backendSecret())headers["X-Schedule-Secret"]=backendSecret();
-  const r=await fetch("/save",{method:"POST",headers,body:JSON.stringify(body)});
+  const r=await loadingFetch("/save",{method:"POST",headers,body:JSON.stringify(body)},"正在保存报表文件");
   if(!r.ok)throw new Error("存盘失败 HTTP "+r.status+"(代理是否在运行?是否从 localhost 打开?)");
   return r.json();
 }
@@ -4320,7 +4346,7 @@ async function testKey(){
   $("keyTest").className="key-test run";$("keyTest").textContent="正在用 @tiktok 测试…";
   let url=state.host.replace(/\/$/,"")+"/api/v1/tiktok/app/v3/get_user_id_and_sec_user_id_by_username?username=tiktok";
   const px=$("proxyInput").value.trim();if(px)url=px.includes("{url}")?px.replace("{url}",encodeURIComponent(url)):px+url;
-  try{const r=await fetch(url,{headers:{"Authorization":"Bearer "+key,"Accept":"application/json"}});
+  try{const r=await loadingFetch(url,{headers:{"Authorization":"Bearer "+key,"Accept":"application/json"}},"正在验证 API Key");
     if(r.status===401){$("keyTest").className="key-test err";$("keyTest").textContent="401 —— Key 被拒绝。";}
     else if(r.ok){$("keyTest").className="key-test ok";$("keyTest").textContent="可用 —— 返回 "+r.status+"。";}
     else if(r.status===402||r.status===403){$("keyTest").className="key-test ok";$("keyTest").textContent="Key 有效,但 "+r.status+"(余额/套餐)。鉴权没问题。";}

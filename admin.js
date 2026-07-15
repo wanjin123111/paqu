@@ -30,6 +30,7 @@
     generatedAt: "",
     storage: "",
     reviewPage: 1,
+    claimedPage: 1,
     verified: false,
     role: "",
     roleLabel: "",
@@ -45,6 +46,7 @@
     dashboard: ["运营工作台", "管理监控账号、认领公司作品并维护短剧资料"],
     accounts: ["监控账号", "查看最新抓取状态并向后端监控池添加账号"],
     review: ["作品认领", "判断抓取作品的公司归属，并支持跨账号合并"],
+    claimed: ["已认领作品", "查看已归入公司的作品，并随时进行二次编辑"],
     dramas: ["公司短剧", "维护主创资料、来源绑定、上架状态和展示顺序"],
     settings: ["后台设置", "查看数据连接与正式配置的保存状态"],
   };
@@ -55,16 +57,54 @@
     return headers;
   }
 
-  async function api(url, options = {}) {
-    const response = await fetch(url, { cache: "no-store", credentials: "same-origin", ...options });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const error = new Error(payload.error || `请求失败（${response.status}）`);
-      error.status = response.status;
-      error.payload = payload;
-      throw error;
+  const adminLoadingTasks = new Map();
+  let adminLoadingSequence = 0;
+
+  function updateAdminLoading() {
+    const node = $("adminLoading");
+    if (!node) return;
+    const entries = [...adminLoadingTasks.values()];
+    const current = entries[entries.length - 1];
+    node.classList.toggle("active", Boolean(current));
+    document.body.setAttribute("aria-busy", current ? "true" : "false");
+    if (current) {
+      $("adminLoadingTitle").textContent = current.title;
+      $("adminLoadingDetail").textContent = current.detail;
     }
-    return payload;
+  }
+
+  function beginAdminLoading(title = "正在读取后台数据", detail = "数据加载完成后页面会自动显示") {
+    const token = ++adminLoadingSequence;
+    adminLoadingTasks.set(token, { title, detail });
+    updateAdminLoading();
+    return token;
+  }
+
+  function endAdminLoading(token) {
+    adminLoadingTasks.delete(token);
+    updateAdminLoading();
+  }
+
+  async function api(url, options = {}) {
+    const {
+      loadingMessage = "正在与后台同步数据",
+      loadingDetail = "请稍候，不需要重复刷新页面",
+      ...fetchOptions
+    } = options;
+    const loadingToken = beginAdminLoading(loadingMessage, loadingDetail);
+    try {
+      const response = await fetch(url, { cache: "no-store", credentials: "same-origin", ...fetchOptions });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(payload.error || `请求失败（${response.status}）`);
+        error.status = response.status;
+        error.payload = payload;
+        throw error;
+      }
+      return payload;
+    } finally {
+      endAdminLoading(loadingToken);
+    }
   }
 
   function toast(message, bad = false) {
@@ -127,7 +167,7 @@
 
   async function verifyAdminAccess(showMessage = false) {
     try {
-      const payload = await api(`/admin/access?t=${Date.now()}`, { headers: adminHeaders() });
+      const payload = await api(`/admin/access?t=${Date.now()}`, { headers: adminHeaders(), loadingMessage: "正在建立后台管理会话" });
       applyAdminAccess(payload);
       return true;
     } catch (error) {
@@ -241,10 +281,10 @@
       let report;
       let reportSource = "线上最新报表";
       try {
-        report = await api(`/supabase/latest?t=${Date.now()}`);
+        report = await api(`/supabase/latest?t=${Date.now()}`, { loadingMessage: "正在读取最新公开报表" });
       } catch (latestError) {
         reportSource = "静态备用报表";
-        report = await api(`/public_reports/latest_report.json?t=${Date.now()}`);
+        report = await api(`/public_reports/latest_report.json?t=${Date.now()}`, { loadingMessage: "正在读取备用公开报表" });
       }
       const normalized = normalizePublicReport(report);
       if (!state.verified) {
@@ -265,7 +305,7 @@
     if (!await verifyAdminAccess(showMessage)) return false;
     setSync("正在读取后台正式数据");
     try {
-      const payload = await api(`/admin/catalog?t=${Date.now()}`, { headers: adminHeaders() });
+      const payload = await api(`/admin/catalog?t=${Date.now()}`, { headers: adminHeaders(), loadingMessage: "正在读取后台正式数据" });
       state.catalog = normalizeCatalog(payload.catalog);
       state.storage = payload.storage || "";
       state.generatedAt = payload.generated_at || "";
@@ -276,7 +316,7 @@
       updateStorageState();
       setSync("后台正式数据已同步");
       renderAll();
-      loadBackendAccounts(false);
+      await loadBackendAccounts(false);
       if (showMessage) toast("后台数据已重新读取");
       return true;
     } catch (error) {
@@ -310,6 +350,8 @@
       const payload = await api("/admin/catalog", {
         method: "POST", headers: adminHeaders(true),
         body: JSON.stringify({ expected_revision: expectedRevision, catalog: state.catalog }),
+        loadingMessage: "正在保存后台正式数据",
+        loadingDetail: "保存完成前请不要关闭页面",
       });
       state.catalog = normalizeCatalog(payload.catalog);
       state.storage = payload.storage || state.storage;
@@ -354,7 +396,7 @@
   async function loadBackendAccounts(showMessage = true) {
     if (!requireAdminSession("读取后端账号池")) return;
     try {
-      const payload = await api(`/schedule-accounts?t=${Date.now()}`, { headers: adminHeaders() });
+      const payload = await api(`/schedule-accounts?t=${Date.now()}`, { headers: adminHeaders(), loadingMessage: "正在读取后端监控账号池" });
       state.backendAccounts = payload.accounts || [];
       $("accountSource").textContent = `来源：后端监控池 ${state.backendAccounts.length} 个账号`;
       renderAccounts();
@@ -372,6 +414,7 @@
     $("pageSub").textContent = titles[name][1];
     $("sidebar").classList.remove("open");
     if (name === "review") renderReview();
+    if (name === "claimed") renderClaimed();
     if (name === "dramas") renderDramas();
     if (name === "accounts") renderAccounts();
   }
@@ -379,6 +422,7 @@
   function renderStats() {
     const dramas = aggregateDramas();
     const pending = state.sources.filter((row) => sourceStatus(row.key) === "pending").length;
+    const claimed = state.sources.filter((row) => sourceStatus(row.key) === "owned").length;
     const accountCount = state.backendAccounts.length || state.accounts.length;
     $("statAccounts").textContent = accountCount || "0";
     $("statAccountsSub").textContent = state.backendAccounts.length ? "来自后端监控池" : "来自最新抓取报表";
@@ -389,6 +433,7 @@
     $("statRawSub").textContent = `最新抓取共 ${state.sources.length} 条作品来源`;
     $("navAccountCount").textContent = accountCount;
     $("navPendingCount").textContent = pending;
+    $("navClaimedCount").textContent = claimed;
     $("navOwnedCount").textContent = dramas.length;
     $("generatedText").textContent = state.generatedAt ? `最新抓取：${formatTime(state.generatedAt)}（北京时间）` : "尚未读取抓取结果";
   }
@@ -481,6 +526,48 @@
     }).join("") : `<tr><td colspan="8"><div class="empty"><strong>当前筛选没有作品</strong>可以切换状态或调整搜索条件</div></td></tr>`;
   }
 
+  function claimedRows() {
+    const query = text($("claimedSearch").value).toLowerCase();
+    const sort = $("claimedSort").value;
+    const rows = state.sources.filter((row) => sourceStatus(row.key) === "owned").map((row) => {
+      const relation = state.catalog.sources[row.key] || {};
+      const drama = relation.drama_id ? state.catalog.dramas[relation.drama_id] : null;
+      return { ...row, relation, drama, drama_id: relation.drama_id || "" };
+    }).filter((row) => {
+      const drama = row.drama || {};
+      const haystack = `${row.chinese_title} ${row.english_title} ${row.account} ${row.nickname} ${drama.chinese_title || ""} ${drama.english_title || ""}`.toLowerCase();
+      return !query || haystack.includes(query);
+    });
+    rows.sort(sort === "views"
+      ? (a, b) => number(b.views) - number(a.views)
+      : sort === "title"
+        ? (a, b) => text(a.chinese_title || a.english_title).localeCompare(text(b.chinese_title || b.english_title), "zh-CN")
+        : (a, b) => text(b.relation.updated_at || b.drama?.updated_at).localeCompare(text(a.relation.updated_at || a.drama?.updated_at)));
+    return rows;
+  }
+
+  function renderClaimed() {
+    const all = claimedRows();
+    const pageCount = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+    state.claimedPage = Math.min(Math.max(1, state.claimedPage), pageCount);
+    const rows = all.slice((state.claimedPage - 1) * PAGE_SIZE, state.claimedPage * PAGE_SIZE);
+    $("claimedCount").textContent = `共 ${all.length} 条已认领作品`;
+    $("claimedPagerText").textContent = `第 ${state.claimedPage}/${pageCount} 页 · 共 ${all.length} 条`;
+    $("claimedPrev").disabled = state.claimedPage <= 1;
+    $("claimedNext").disabled = state.claimedPage >= pageCount;
+    $("claimedBody").innerHTML = rows.length ? rows.map((row) => {
+      const drama = row.drama || {};
+      const updatedAt = row.relation.updated_at || drama.updated_at || "";
+      return `<tr><td><div class="title-main">${escapeHtml(row.chinese_title || "中文名待补充")}</div><div class="title-sub">${escapeHtml(row.english_title || "英文名待补充")}</div></td>
+        <td><div class="title-main">${escapeHtml(drama.chinese_title || drama.english_title || "归属资料待补充")}</div><div class="title-sub">${escapeHtml(drama.english_title || "")}</div></td>
+        <td><div class="account-name">${escapeHtml(row.nickname || row.account)}</div><div class="account-handle">@${escapeHtml(row.account)}</div></td>
+        <td>${escapeHtml(formatTime(row.publish_time))}</td><td class="metric">${number(row.episodes)}</td><td class="metric">${formatNumber(row.views)}</td>
+        <td>${escapeHtml(formatTime(updatedAt))}</td><td><div class="action-row">
+        ${row.drama_id ? `<button class="btn small primary" data-edit-drama="${escapeHtml(row.drama_id)}">二次编辑</button>` : ""}
+        <button class="btn small" data-edit-source="${escapeHtml(row.key)}">调整归属</button></div></td></tr>`;
+    }).join("") : `<tr><td colspan="8"><div class="empty"><strong>还没有已认领作品</strong>请先到“作品认领”页面认领，公司作品会自动出现在这里</div></td></tr>`;
+  }
+
   function renderDramas() {
     const query = text($("dramaSearch").value).toLowerCase();
     const filter = $("dramaFilter").value;
@@ -507,6 +594,7 @@
     renderDashboard();
     renderAccounts();
     renderReview();
+    renderClaimed();
     renderDramas();
     updateStorageState();
     renderAdminAccess();
@@ -672,6 +760,7 @@
     try {
       const payload = await api("/discover-accounts", {
         method: "POST", headers: adminHeaders(true), body: JSON.stringify({ accounts: raw }),
+        loadingMessage: "正在添加监控账号",
       });
       state.backendAccounts = payload.accounts || [];
       $("newAccounts").value = "";
@@ -720,6 +809,10 @@
     openSourceEditor(keys);
   });
   $("bulkIgnoreBtn").addEventListener("click", () => ignoreSources(selectedReviewKeys()));
+  $("claimedSearch").addEventListener("input", () => { state.claimedPage = 1; renderClaimed(); });
+  $("claimedSort").addEventListener("change", () => { state.claimedPage = 1; renderClaimed(); });
+  $("claimedPrev").addEventListener("click", () => { state.claimedPage--; renderClaimed(); });
+  $("claimedNext").addEventListener("click", () => { state.claimedPage++; renderClaimed(); });
   $("accountSearch").addEventListener("input", renderAccounts);
   $("accountFilter").addEventListener("change", renderAccounts);
   $("dramaSearch").addEventListener("input", renderDramas);
@@ -745,7 +838,8 @@
   });
 
   renderAll();
-  loadAdminCatalog(false).then((loaded) => {
-    if (!loaded) loadPublicReport();
-  });
+  const startupLoading = beginAdminLoading("正在初始化后台管理面板", "正在读取权限、作品和监控账号数据");
+  loadAdminCatalog(false).then(async (loaded) => {
+    if (!loaded) await loadPublicReport();
+  }).finally(() => endAdminLoading(startupLoading));
 })();

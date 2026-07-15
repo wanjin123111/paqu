@@ -57,6 +57,11 @@
     .modal-head{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.modal-head h3{margin:0;font-size:16px}.modal-close{border:0;background:transparent;color:var(--muted);font-size:22px}.modal-body{padding:19px 20px;max-height:70vh;overflow:auto}.modal-foot{padding:14px 20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.form-group{display:grid;gap:6px}.form-group.full{grid-column:1/-1}.form-group label{font-size:11px;color:#5d6172;font-weight:700}.form-group .field{width:100%}.hint{font-size:10.5px;color:var(--muted);line-height:1.5}.source-box{background:var(--surface-2);border-radius:10px;padding:12px;font-size:11px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:8px}.source-box strong{color:var(--ink)}
     .switch-line{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:9px}.switch{position:relative;width:38px;height:21px}.switch input{opacity:0;width:0;height:0}.switch i{position:absolute;inset:0;border-radius:99px;background:#c9cbd5;transition:.16s}.switch i:before{content:"";position:absolute;width:17px;height:17px;left:2px;top:2px;border-radius:50%;background:white;transition:.16s}.switch input:checked+i{background:var(--purple)}.switch input:checked+i:before{transform:translateX(17px)}
     .toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,18px);opacity:0;pointer-events:none;background:#171923;color:#fff;border-radius:10px;padding:11px 15px;font-size:12px;z-index:99;transition:.18s}.toast.show{opacity:1;transform:translate(-50%,0)}
+    .admin-loading{position:fixed;inset:0;z-index:120;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(244,245,249,.82);backdrop-filter:blur(5px)}
+    .admin-loading.active{display:flex}.admin-loading-card{min-width:min(360px,calc(100vw - 40px));display:flex;align-items:center;gap:14px;padding:18px 20px;border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:var(--shadow)}
+    .admin-loading-spinner{width:28px;height:28px;flex:0 0 auto;border:3px solid #e4e2ff;border-top-color:var(--purple);border-radius:50%;animation:admin-spin .75s linear infinite}
+    .admin-loading strong{display:block;font-size:14px}.admin-loading span{display:block;margin-top:4px;color:var(--muted);font-size:11px}
+    @keyframes admin-spin{to{transform:rotate(360deg)}}
     .menu-btn{display:none}
     @media(max-width:1120px){.stats{grid-template-columns:repeat(2,1fr)}.dashboard-grid{grid-template-columns:1fr}.account-grid{grid-template-columns:repeat(2,1fr)}}
     @media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:-260px;width:246px;transition:.2s}.sidebar.open{left:0;box-shadow:30px 0 80px rgba(0,0,0,.22)}.menu-btn{display:inline-flex}.topbar{height:auto;min-height:68px;padding:12px 15px}.content{padding:17px 14px 35px}.top-title p,.status-pill{display:none}.stats{grid-template-columns:1fr 1fr}.account-grid{grid-template-columns:1fr}.section-head{align-items:flex-start;flex-direction:column}.queue-item{grid-template-columns:minmax(0,1fr) auto}.queue-item>:nth-child(2),.queue-item>:nth-child(3){display:none}.form-grid{grid-template-columns:1fr}.form-group.full{grid-column:auto}}
@@ -73,11 +78,12 @@
       <button class="nav-btn active" data-view="dashboard"><span class="nav-icon">⌂</span>工作台</button>
       <button class="nav-btn" data-view="accounts"><span class="nav-icon">◎</span>监控账号<span class="nav-count" id="navAccountCount">0</span></button>
       <button class="nav-btn" data-view="review"><span class="nav-icon">◇</span>作品认领<span class="nav-count" id="navPendingCount">0</span></button>
+      <button class="nav-btn" data-view="claimed"><span class="nav-icon">✓</span>已认领作品<span class="nav-count" id="navClaimedCount">0</span></button>
       <button class="nav-btn" data-view="dramas"><span class="nav-icon">▣</span>公司短剧<span class="nav-count" id="navOwnedCount">0</span></button>
     </nav>
     <div class="nav-label">系统</div>
     <nav class="nav"><button class="nav-btn" data-view="settings"><span class="nav-icon">⚙</span>后台设置</button></nav>
-    <div class="sidebar-foot"><a class="front-link" href="/">返回前端页面 →</a></div>
+    <div class="sidebar-foot"><a class="front-link" href="/" target="_blank" rel="noopener noreferrer">打开前端页面 ↗</a></div>
   </aside>
 
   <main class="main">
@@ -116,6 +122,13 @@
         <div class="pager"><span id="reviewPagerText">—</span><div class="pager-buttons"><button class="btn small" id="reviewPrev">上一页</button><button class="btn small" id="reviewNext">下一页</button></div></div>
       </section>
 
+      <section class="view" id="view-claimed">
+        <div class="section-head"><div><h2>已认领作品</h2><p>单独查看已归入公司的作品，并随时进行二次编辑</p></div></div>
+        <div class="toolbar"><input class="field search" id="claimedSearch" placeholder="搜索作品、公司短剧或发布账号" /><select class="field" id="claimedSort"><option value="updated">最近认领/编辑</option><option value="views">播放量从高到低</option><option value="title">按剧名排序</option></select><span class="muted" id="claimedCount" style="font-size:11px"></span></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>已认领作品</th><th>归属公司短剧</th><th>发布账号</th><th>发布时间</th><th>集数</th><th>累计播放</th><th>最近编辑</th><th>操作</th></tr></thead><tbody id="claimedBody"></tbody></table></div>
+        <div class="pager"><span id="claimedPagerText">—</span><div class="pager-buttons"><button class="btn small" id="claimedPrev">上一页</button><button class="btn small" id="claimedNext">下一页</button></div></div>
+      </section>
+
       <section class="view" id="view-dramas">
         <div class="section-head"><div><h2>公司短剧</h2><p>维护剧名、主创人员、来源绑定、上架状态和前台顺序</p></div><div class="section-actions"><button class="btn" id="exportDraftBtn">导出配置 JSON</button><a class="btn" href="/catalog">查看前台</a><button class="btn primary" id="newDramaBtn2">＋ 新建短剧</button></div></div>
         <div class="toolbar"><input class="field search" id="dramaSearch" placeholder="搜索剧名、编剧、制作或账号" /><select class="field" id="dramaFilter"><option value="all">全部短剧</option><option value="live">前台已上架</option><option value="draft">未上架</option></select><span class="muted" id="dramaCount" style="font-size:11px"></span></div>
@@ -128,6 +141,10 @@
       </section>
     </div>
   </main>
+</div>
+
+<div class="admin-loading active" id="adminLoading" role="status" aria-live="polite" aria-label="后台数据加载中">
+  <div class="admin-loading-card"><div class="admin-loading-spinner" aria-hidden="true"></div><div><strong id="adminLoadingTitle">正在读取后台数据</strong><span id="adminLoadingDetail">数据加载完成后页面会自动显示</span></div></div>
 </div>
 
 <dialog id="editDialog">
@@ -164,6 +181,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/admin.js?v=20260715-4"></script>
+<script src="/admin.js?v=20260715-5"></script>
 </body>
 </html>
