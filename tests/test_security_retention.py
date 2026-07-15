@@ -431,6 +431,7 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertIn('api("/schedule-accounts", {', admin_js)
         self.assertIn('JSON.stringify({ accounts: raw, mode: "append" })', admin_js)
         self.assertIn('loadingMessage: "正在确认账号已进入监控池"', admin_js)
+        self.assertIn('const missing = (payload.added || []).filter', admin_js)
         admin_js = (root / "admin.js").read_text(encoding="utf-8")
         self.assertIn('report = await api(`/supabase/latest?t=${Date.now()}`', admin_js)
         self.assertIn('report = await api(`/public_reports/latest_report.json?t=${Date.now()}`', admin_js)

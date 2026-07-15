@@ -399,6 +399,7 @@
       const payload = await api(`/schedule-accounts?t=${Date.now()}`, { headers: adminHeaders(), loadingMessage: "正在读取后端监控账号池" });
       state.backendAccounts = payload.accounts || [];
       $("accountSource").textContent = `来源：后端监控池 ${state.backendAccounts.length} 个账号`;
+      renderStats();
       renderAccounts();
       if (showMessage) toast(`已读取 ${state.backendAccounts.length} 个监控账号`);
     } catch (error) {
@@ -765,6 +766,9 @@
         headers: adminHeaders(), loadingMessage: "正在确认账号已进入监控池",
       });
       state.backendAccounts = verified.accounts || [];
+      const monitored = new Set(state.backendAccounts.map((account) => text(account).toLowerCase()));
+      const missing = (payload.added || []).filter((account) => !monitored.has(text(account).toLowerCase()));
+      if (missing.length) throw new Error(`账号池确认失败：${missing.join("、")}`);
       $("accountSource").textContent = `来源：后端监控池 ${state.backendAccounts.length} 个账号`;
       $("newAccounts").value = "";
       $("accountDialog").close();
