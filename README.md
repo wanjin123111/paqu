@@ -9,7 +9,6 @@
 - `catalog.html` / `catalog.js`: 对外公司短剧库，访问 `/catalog`。
 - `tikhub_proxy.py`: 本地 Python 代理，用来解决浏览器 CORS，并托管页面。
 - `启动代理.bat`: Windows 一键启动脚本。
-- `docs/ENTERPRISE_WECHAT_API.md`: 企业微信前端接入所需的页面与接口文档。
 
 ## 本地使用
 
