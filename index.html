@@ -919,7 +919,7 @@ let scheduleAccountCount=null;
 let scheduleAccountSource="";
 const DASHBOARD_CACHE_MAX_AGE=7*24*60*60*1000;
 const PUBLIC_REPORT_REFRESH_MS=60*1000;
-const DASHBOARD_HISTORY_WORKERS=2;
+const DASHBOARD_HISTORY_WORKERS=4;
 const DASHBOARD_CACHE_STORAGE="tikhub-dashboard-cache-v3";
 const DASHBOARD_LOCAL_CACHE_LIMIT=700000;
 const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v3";
@@ -4039,8 +4039,10 @@ async function loadPublicDashboard(){
     }
   }
   const latestChanged=!cacheReady||currentReportMs()>cachedMs+1000;
-  dashboardHistoryLoading=latestChanged||!dashboardHistoryPayloads.length;
-  dashboardHistoryReady=true;
+  const needsInitialHistory=!dashboardHistoryPayloads.length;
+  dashboardHistoryLoading=latestChanged||needsInitialHistory;
+  dashboardHistoryReady=!needsInitialHistory;
+  if(needsInitialHistory)renderDashboardLoading("正在加载历史对比数据...");
   await loadBackendReports({
     quiet:true,
     initial:false,
