@@ -687,6 +687,12 @@
   document.querySelectorAll("[data-jump]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.jump)));
   $("menuBtn").addEventListener("click", () => $("sidebar").classList.toggle("open"));
   $("noticeClose").addEventListener("click", () => $("draftNotice").remove());
+  document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => {
+    const dialog = $(button.dataset.closeDialog);
+    if (dialog?.open) dialog.close();
+  }));
+  $("editForm").addEventListener("submit", (event) => event.preventDefault());
+  $("accountForm").addEventListener("submit", (event) => event.preventDefault());
   $("refreshBtn").addEventListener("click", () => loadAdminCatalog(true));
   $("reloadCatalogBtn").addEventListener("click", () => loadAdminCatalog(true));
   $("loadBackendAccountsBtn").addEventListener("click", () => loadBackendAccounts());

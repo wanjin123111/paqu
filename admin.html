@@ -132,7 +132,7 @@
 
 <dialog id="editDialog">
   <form method="dialog" id="editForm">
-    <div class="modal-head"><div><h3 id="editTitle">认领公司短剧</h3><div class="hint" id="editSubtitle">补充公司内部资料</div></div><button class="modal-close" value="cancel" aria-label="关闭">×</button></div>
+    <div class="modal-head"><div><h3 id="editTitle">认领公司短剧</h3><div class="hint" id="editSubtitle">补充公司内部资料</div></div><button class="modal-close" type="button" data-close-dialog="editDialog" aria-label="关闭">×</button></div>
     <div class="modal-body">
       <div class="source-box" id="sourceBox"></div>
       <div class="form-grid" style="margin-top:16px">
@@ -150,20 +150,20 @@
         <div class="form-group full"><label for="editNotes">内部备注</label><textarea class="field" id="editNotes" rows="3" placeholder="例如：历史剧名、合作方称呼、归属说明"></textarea></div>
       </div>
     </div>
-    <div class="modal-foot"><button class="btn danger" id="ignoreFromEdit" value="cancel" type="button">标记为非公司作品</button><div class="section-actions"><button class="btn" value="cancel">取消</button><button class="btn primary" id="saveDramaBtn" value="default">保存并认领</button></div></div>
+    <div class="modal-foot"><button class="btn danger" id="ignoreFromEdit" type="button">标记为非公司作品</button><div class="section-actions"><button class="btn" type="button" data-close-dialog="editDialog">取消</button><button class="btn primary" id="saveDramaBtn" type="button">保存并认领</button></div></div>
   </form>
 </dialog>
 
 <dialog id="accountDialog">
   <form method="dialog" id="accountForm">
-    <div class="modal-head"><div><h3>添加监控账号</h3><div class="hint">新增后会进入后端动态监控池</div></div><button class="modal-close" value="cancel" aria-label="关闭">×</button></div>
+    <div class="modal-head"><div><h3>添加监控账号</h3><div class="hint">新增后会进入后端动态监控池</div></div><button class="modal-close" type="button" data-close-dialog="accountDialog" aria-label="关闭">×</button></div>
     <div class="modal-body"><div class="form-group"><label for="newAccounts">TikTok 账号或主页链接</label><textarea class="field" id="newAccounts" rows="6" placeholder="一行一个，例如：&#10;loveshotsfans&#10;https://www.tiktok.com/@reelshortapp"></textarea><div class="hint">系统会自动去重，已经监控的账号不会重复添加。</div></div></div>
-    <div class="modal-foot"><span></span><div class="section-actions"><button class="btn" value="cancel">取消</button><button class="btn primary" id="saveAccountsBtn" value="default">添加到后端</button></div></div>
+    <div class="modal-foot"><span></span><div class="section-actions"><button class="btn" type="button" data-close-dialog="accountDialog">取消</button><button class="btn primary" id="saveAccountsBtn" type="button">添加到后端</button></div></div>
   </form>
 </dialog>
 
 <div class="toast" id="toast"></div>
 
-<script src="/admin.js?v=20260715-3"></script>
+<script src="/admin.js?v=20260715-4"></script>
 </body>
 </html>
