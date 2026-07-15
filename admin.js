@@ -2,7 +2,6 @@
   "use strict";
 
   const PAGE_SIZE = 18;
-  const SESSION_KEY = "paqu_schedule_secret";
   const DEFAULT_PERMISSION_LABELS = [
     "查看后台正式数据", "认领、忽略与恢复作品", "合并多账号发布的同一短剧",
     "新建、编辑与删除公司短剧", "上架、下架与调整前台顺序", "读取、添加与更新监控账号池",
@@ -50,19 +49,14 @@
     settings: ["后台设置", "查看数据连接与正式配置的保存状态"],
   };
 
-  function secret() {
-    return sessionStorage.getItem(SESSION_KEY) || "";
-  }
-
-  function authHeaders(json = false) {
+  function adminHeaders(json = false) {
     const headers = {};
-    if (secret()) headers["X-Schedule-Secret"] = secret();
     if (json) headers["Content-Type"] = "application/json";
     return headers;
   }
 
   async function api(url, options = {}) {
-    const response = await fetch(url, { cache: "no-store", ...options });
+    const response = await fetch(url, { cache: "no-store", credentials: "same-origin", ...options });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = new Error(payload.error || `请求失败（${response.status}）`);
@@ -92,16 +86,14 @@
     const permissions = Array.isArray(state.permissions) ? state.permissions : [];
     const granted = permissions.filter((item) => item && item.granted !== false);
     const authorized = state.verified && granted.length > 0;
-    $("authBtnLabel").textContent = authorized ? (state.roleLabel || "超级管理员") : "后台密码";
-    $("authTitle").textContent = authorized ? `${state.roleLabel || "超级管理员"}已授权` : "验证超级管理员权限";
-    $("permissionSummary").textContent = authorized ? `已获得 ${granted.length} 项完整后台权限` : "验证后授予全部后台权限";
-    $("permissionBadge").textContent = authorized ? "全部已授权" : "未授权";
+    $("adminRoleBadge").textContent = authorized ? (state.roleLabel || "超级管理员") : "超级管理员连接中";
+    $("permissionBadge").textContent = authorized ? `${granted.length} 项已启用` : "连接中";
     $("permissionBadge").className = `badge ${authorized ? "owned" : "pending"}`;
-    $("settingPermissionState").textContent = authorized ? "全部已授权" : "未授权";
+    $("settingPermissionState").textContent = authorized ? "默认已授权" : "连接中";
     $("settingPermissionState").className = `badge ${authorized ? "owned" : "pending"}`;
     $("permissionDetail").textContent = authorized
-      ? `${state.roleLabel || "超级管理员"} · ${granted.length} 项权限 · 当前浏览器会话有效`
-      : "验证 SCHEDULE_SECRET 后授予全部后台权限";
+      ? `${state.roleLabel || "超级管理员"} · ${granted.length} 项权限 · 服务器自动管理会话`
+      : "正在建立服务器管理会话";
     const displayPermissions = permissions.length
       ? permissions
       : DEFAULT_PERMISSION_LABELS.map((label) => ({ label, granted: false }));
@@ -110,16 +102,16 @@
     ).join("");
   }
 
-  function clearAdminAccess(message = "未验证时仍可查看公开报表，不能修改后台数据。") {
+  function clearAdminAccess(message = "自动管理会话暂不可用，请刷新页面重试。") {
     state.verified = false;
     state.role = "";
     state.roleLabel = "";
     state.permissions = [];
     state.services = {};
-    $("authStatus").textContent = message;
-    $("settingBackendState").textContent = "未验证";
+    $("settingBackendState").textContent = "连接失败";
     $("settingBackendState").className = "badge pending";
     renderAdminAccess();
+    $("permissionDetail").textContent = message;
   }
 
   function applyAdminAccess(payload) {
@@ -128,24 +120,20 @@
     state.roleLabel = text(payload.role_label) || "超级管理员";
     state.permissions = Array.isArray(payload.permissions) ? payload.permissions : [];
     state.services = payload.services && typeof payload.services === "object" ? payload.services : {};
-    $("authStatus").textContent = `验证成功 · ${state.roleLabel} · ${state.permissions.length} 项权限全部授予`;
-    $("settingBackendState").textContent = "已验证";
+    $("settingBackendState").textContent = "可直接管理";
     $("settingBackendState").className = "badge owned";
-    $("authBox").classList.remove("open");
     renderAdminAccess();
   }
 
   async function verifyAdminAccess(showMessage = false) {
-    if (!secret()) return false;
     try {
-      const payload = await api(`/admin/access?t=${Date.now()}`, { headers: authHeaders() });
+      const payload = await api(`/admin/access?t=${Date.now()}`, { headers: adminHeaders() });
       applyAdminAccess(payload);
       return true;
     } catch (error) {
-      if (error.status === 403) sessionStorage.removeItem(SESSION_KEY);
-      clearAdminAccess(error.status === 403 ? "密码不正确，请重新输入" : `权限验证失败：${error.message}`);
-      setSync("后台权限验证失败", false);
-      if (showMessage) toast(error.status === 403 ? "后台密码不正确" : error.message, true);
+      clearAdminAccess(`自动管理权限不可用：${error.message}`);
+      setSync("自动管理会话连接失败", false);
+      if (showMessage) toast(`自动管理权限不可用：${error.message}`, true);
       return false;
     }
   }
@@ -242,11 +230,9 @@
     }).sort((a, b) => number(a.order || 999999) - number(b.order || 999999) || text(a.chinese_title).localeCompare(text(b.chinese_title), "zh-CN"));
   }
 
-  function requireAuth(action = "进行这项操作") {
+  function requireAdminSession(action = "进行这项操作") {
     if (state.verified) return true;
-    $("authBox").classList.add("open");
-    $("secretInput").focus();
-    toast(`请先验证后台密码，再${action}`, true);
+    toast(`后台管理会话尚未就绪，暂时无法${action}，请刷新页面`, true);
     return false;
   }
 
@@ -276,18 +262,17 @@
   }
 
   async function loadAdminCatalog(showMessage = false) {
-    if (!secret()) return false;
     if (!await verifyAdminAccess(showMessage)) return false;
     setSync("正在读取后台正式数据");
     try {
-      const payload = await api(`/admin/catalog?t=${Date.now()}`, { headers: authHeaders() });
+      const payload = await api(`/admin/catalog?t=${Date.now()}`, { headers: adminHeaders() });
       state.catalog = normalizeCatalog(payload.catalog);
       state.storage = payload.storage || "";
       state.generatedAt = payload.generated_at || "";
       setSourceRows(payload.sources || []);
       state.accounts = payload.accounts || [];
       $("accountSource").textContent = `来源：线上最新报表 ${state.accounts.length} 个账号`;
-      $("authStatus").textContent = `验证成功 · ${state.roleLabel} · ${state.permissions.length} 项权限 · 配置版本 ${state.catalog.revision}`;
+      $("permissionDetail").textContent = `${state.roleLabel} · ${state.permissions.length} 项权限 · 配置版本 ${state.catalog.revision}`;
       updateStorageState();
       setSync("后台正式数据已同步");
       renderAll();
@@ -296,8 +281,7 @@
       return true;
     } catch (error) {
       if (error.status === 403) {
-        sessionStorage.removeItem(SESSION_KEY);
-        clearAdminAccess("密码不正确，请重新输入");
+        clearAdminAccess("自动管理会话已失效，请刷新后台页面");
       }
       setSync("后台数据读取失败", false);
       if (showMessage) toast(error.message, true);
@@ -313,18 +297,18 @@
       ? `Supabase 正式保存 · 当前版本 ${state.catalog.revision}`
       : state.storage
         ? `Render 运行时文件备用保存 · 当前版本 ${state.catalog.revision}`
-        : "等待验证后台连接";
+        : "等待后台连接";
   }
 
   async function saveCatalog(message) {
-    if (!requireAuth("保存")) throw new Error("未验证");
+    if (!requireAdminSession("保存")) throw new Error("管理会话未就绪");
     if (state.saving) throw new Error("上一项保存尚未完成");
     state.saving = true;
     setSync("正在保存后台正式数据");
     const expectedRevision = number(state.catalog.revision);
     try {
       const payload = await api("/admin/catalog", {
-        method: "POST", headers: authHeaders(true),
+        method: "POST", headers: adminHeaders(true),
         body: JSON.stringify({ expected_revision: expectedRevision, catalog: state.catalog }),
       });
       state.catalog = normalizeCatalog(payload.catalog);
@@ -351,7 +335,7 @@
   }
 
   async function mutateAndSave(mutator, message) {
-    if (!requireAuth("修改数据")) return false;
+    if (!requireAdminSession("修改数据")) return false;
     const before = cloneCatalog();
     try {
       mutator();
@@ -368,9 +352,9 @@
   }
 
   async function loadBackendAccounts(showMessage = true) {
-    if (!requireAuth("读取后端账号池")) return;
+    if (!requireAdminSession("读取后端账号池")) return;
     try {
-      const payload = await api(`/schedule-accounts?t=${Date.now()}`, { headers: authHeaders() });
+      const payload = await api(`/schedule-accounts?t=${Date.now()}`, { headers: adminHeaders() });
       state.backendAccounts = payload.accounts || [];
       $("accountSource").textContent = `来源：后端监控池 ${state.backendAccounts.length} 个账号`;
       renderAccounts();
@@ -453,7 +437,7 @@
       <div><div class="account-name">${escapeHtml(row.nickname || row.account)}</div><div class="account-handle">@${escapeHtml(row.account)}</div></div></div>
       <span class="badge ${number(row.dramas) ? "owned" : "pending"}">${number(row.dramas) ? "抓取正常" : "等待数据"}</span></div>
       <div class="account-meta"><div><strong>${formatNumber(row.followers)}</strong>粉丝</div><div><strong>${formatNumber(row.dramas)}</strong>短剧</div><div><strong>${formatNumber(row.views)}</strong>累计播放</div></div></article>`).join("")
-      : `<div class="card empty" style="grid-column:1/-1"><strong>没有找到账号</strong>请调整搜索条件或验证密码后读取后端账号池</div>`;
+      : `<div class="card empty" style="grid-column:1/-1"><strong>没有找到账号</strong>请调整搜索条件或刷新后端账号池</div>`;
   }
 
   function reviewRows() {
@@ -555,7 +539,7 @@
   }
 
   function openSourceEditor(keys) {
-    if (!requireAuth("认领作品")) return;
+    if (!requireAdminSession("认领作品")) return;
     state.editorSourceKeys = [...new Set(keys)].filter((key) => state.sourceMap.has(key));
     state.editorDramaId = "";
     if (!state.editorSourceKeys.length) return;
@@ -577,7 +561,7 @@
   }
 
   function openDramaEditor(dramaId = "") {
-    if (!requireAuth("编辑短剧")) return;
+    if (!requireAdminSession("编辑短剧")) return;
     state.editorSourceKeys = [];
     state.editorDramaId = dramaId;
     const drama = dramaId ? state.catalog.dramas[dramaId] : null;
@@ -682,12 +666,12 @@
   }
 
   async function addAccounts() {
-    if (!requireAuth("添加账号")) return;
+    if (!requireAdminSession("添加账号")) return;
     const raw = text($("newAccounts").value);
     if (!raw) return toast("请输入至少一个 TikTok 账号或主页链接", true);
     try {
       const payload = await api("/discover-accounts", {
-        method: "POST", headers: authHeaders(true), body: JSON.stringify({ accounts: raw }),
+        method: "POST", headers: adminHeaders(true), body: JSON.stringify({ accounts: raw }),
       });
       state.backendAccounts = payload.accounts || [];
       $("newAccounts").value = "";
@@ -703,18 +687,10 @@
   document.querySelectorAll("[data-jump]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.jump)));
   $("menuBtn").addEventListener("click", () => $("sidebar").classList.toggle("open"));
   $("noticeClose").addEventListener("click", () => $("draftNotice").remove());
-  $("authBtn").addEventListener("click", () => $("authBox").classList.toggle("open"));
-  $("verifyBtn").addEventListener("click", async () => {
-    const value = text($("secretInput").value);
-    if (!value) return toast("请输入后台任务密码", true);
-    sessionStorage.setItem(SESSION_KEY, value);
-    await loadAdminCatalog(true);
-  });
-  $("secretInput").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); $("verifyBtn").click(); } });
-  $("refreshBtn").addEventListener("click", () => state.verified ? loadAdminCatalog(true) : loadPublicReport());
-  $("reloadCatalogBtn").addEventListener("click", () => state.verified ? loadAdminCatalog(true) : requireAuth("读取后台数据"));
+  $("refreshBtn").addEventListener("click", () => loadAdminCatalog(true));
+  $("reloadCatalogBtn").addEventListener("click", () => loadAdminCatalog(true));
   $("loadBackendAccountsBtn").addEventListener("click", () => loadBackendAccounts());
-  $("addAccountBtn").addEventListener("click", () => { if (requireAuth("添加账号")) $("accountDialog").showModal(); });
+  $("addAccountBtn").addEventListener("click", () => { if (requireAdminSession("添加账号")) $("accountDialog").showModal(); });
   $("saveAccountsBtn").addEventListener("click", (event) => { event.preventDefault(); addAccounts(); });
   $("newDramaBtn").addEventListener("click", () => openDramaEditor());
   $("newDramaBtn2").addEventListener("click", () => openDramaEditor());
@@ -763,10 +739,7 @@
   });
 
   renderAll();
-  loadPublicReport().then(() => {
-    if (secret()) {
-      $("secretInput").value = secret();
-      loadAdminCatalog(false);
-    }
+  loadAdminCatalog(false).then((loaded) => {
+    if (!loaded) loadPublicReport();
   });
 })();

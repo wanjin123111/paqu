@@ -32,6 +32,31 @@ class PrivateAccessTests(unittest.TestCase):
             self.assertTrue(handler._require_private_access({}))
         self.assertEqual(handler.responses, [])
 
+    def test_admin_auto_session_cookie_is_accepted(self):
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"):
+            token = proxy._admin_session_token()
+            handler = self.make_handler(headers={
+                "Cookie": f"{proxy.ADMIN_SESSION_COOKIE_NAME}={token}",
+            })
+            self.assertTrue(handler._require_private_access({}))
+        self.assertEqual(handler.responses, [])
+
+    def test_admin_page_issues_http_only_session_without_plaintext_secret(self):
+        handler = self.make_handler()
+        handler._send_bytes = mock.Mock()
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
+                mock.patch.dict(proxy.os.environ, {"RENDER": "true"}):
+            handler._serve_static("/admin")
+
+        _, kwargs = handler._send_bytes.call_args
+        cookie = kwargs["extra_headers"]["Set-Cookie"]
+        self.assertIn(f"{proxy.ADMIN_SESSION_COOKIE_NAME}=", cookie)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        self.assertIn("Secure", cookie)
+        self.assertIn("Path=/", cookie)
+        self.assertNotIn("expected-secret", cookie)
+
     def test_query_parameter_secret_is_rejected(self):
         handler = self.make_handler()
         with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"):
@@ -329,10 +354,11 @@ class AdminCatalogTests(unittest.TestCase):
         catalog_js = (root / "catalog.js").read_text(encoding="utf-8")
         admin_html = (root / "admin.html").read_text(encoding="utf-8")
 
-        self.assertIn('headers["X-Schedule-Secret"]', admin_js)
+        self.assertNotIn("X-Schedule-Secret", admin_js)
         self.assertIn('/admin/access?t=${Date.now()}', admin_js)
         self.assertIn("超级管理员", admin_js)
-        self.assertIn("sessionStorage", admin_js)
+        self.assertIn('credentials: "same-origin"', admin_js)
+        self.assertNotIn("sessionStorage", admin_js)
         self.assertNotIn("localStorage", admin_js)
         self.assertNotIn("?secret=", admin_js)
         self.assertIn("/curated-catalog", catalog_js)
@@ -342,6 +368,9 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertIn('href="/catalog"', admin_html)
         self.assertIn('id="permissionList"', admin_html)
         self.assertIn('id="settingPermissionState"', admin_html)
+        self.assertIn('id="adminRoleBadge"', admin_html)
+        self.assertNotIn('id="secretInput"', admin_html)
+        self.assertNotIn('id="verifyBtn"', admin_html)
         admin_js = (root / "admin.js").read_text(encoding="utf-8")
         self.assertIn('report = await api(`/supabase/latest?t=${Date.now()}`);', admin_js)
         self.assertIn('report = await api(`/public_reports/latest_report.json?t=${Date.now()}`);', admin_js)

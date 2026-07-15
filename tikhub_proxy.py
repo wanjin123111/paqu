@@ -23,6 +23,7 @@
 import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures, uuid
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie
 
 PORT = int(os.environ.get("PORT", "8787"))
 HOST = os.environ.get("HOST", "127.0.0.1")
@@ -79,6 +80,8 @@ TIKTOK_AID = os.environ.get("TIKTOK_AID", "1233").strip() or "1233"
 TIKTOK_REGION = os.environ.get("TIKTOK_REGION", "US").strip() or "US"
 TIKTOK_LANGUAGE = os.environ.get("TIKTOK_LANGUAGE", "en").strip() or "en"
 SCHEDULE_SECRET = os.environ.get("SCHEDULE_SECRET", "").strip()
+ADMIN_SESSION_COOKIE_NAME = "paqu_admin_session"
+ADMIN_SESSION_MAX_AGE = _env_int("ADMIN_SESSION_MAX_AGE", 86400, 300, 2592000)
 ADMIN_PERMISSION_DEFINITIONS = (
     ("catalog.read", "查看后台正式数据"),
     ("catalog.review", "认领、忽略与恢复作品"),
@@ -90,6 +93,16 @@ ADMIN_PERMISSION_DEFINITIONS = (
     ("media.private", "访问受保护的播放源与下载"),
     ("reports.export", "导出后台配置与报表"),
 )
+
+
+def _admin_session_token():
+    if not SCHEDULE_SECRET:
+        return ""
+    return hmac.new(
+        SCHEDULE_SECRET.encode("utf-8"),
+        b"paqu-admin-auto-access-v1",
+        "sha256",
+    ).hexdigest()
 SCHEDULE_ACCOUNTS = os.environ.get("SCHEDULE_ACCOUNTS", "")
 SCHEDULE_MAX_VIDEOS = _env_int("SCHEDULE_MAX_VIDEOS", 100, 0, 20000)
 SCHEDULE_MAX_PAGES = _env_int("SCHEDULE_MAX_PAGES", 80, 1, 20000)
@@ -5497,7 +5510,17 @@ class Handler(BaseHTTPRequestHandler):
         if not SCHEDULE_SECRET:
             return False
         supplied = self.headers.get("X-Schedule-Secret", "")
-        return hmac.compare_digest(str(supplied), SCHEDULE_SECRET)
+        if supplied and hmac.compare_digest(str(supplied), SCHEDULE_SECRET):
+            return True
+        try:
+            cookies = SimpleCookie()
+            cookies.load(self.headers.get("Cookie", ""))
+            morsel = cookies.get(ADMIN_SESSION_COOKIE_NAME)
+            session_value = morsel.value if morsel else ""
+        except Exception:
+            session_value = ""
+        token = _admin_session_token()
+        return bool(token and session_value and hmac.compare_digest(str(session_value), token))
 
     def _allow_report_read(self, qs):
         if PUBLIC_REPORTS:
@@ -6176,6 +6199,7 @@ class Handler(BaseHTTPRequestHandler):
     # ---- 静态托管 ----
     def _serve_static(self, path):
         path = path.split("?", 1)[0]
+        issue_admin_session = path in ("/admin", "/admin/", "/admin.html")
         if path in ("/admin", "/admin/"):
             path = "/admin.html"
         if path in ("/catalog", "/catalog/"):
@@ -6195,7 +6219,19 @@ class Handler(BaseHTTPRequestHandler):
             cache_control = "public, max-age=120, stale-while-revalidate=600"
         elif not path.endswith(".html"):
             cache_control = "public, max-age=3600"
-        self._send_bytes(200, data, ctype, no_cache=path.endswith(".html"), cache_control=cache_control)
+        extra_headers = {}
+        if issue_admin_session:
+            token = _admin_session_token()
+            if token:
+                secure = "; Secure" if os.environ.get("RENDER") else ""
+                extra_headers["Set-Cookie"] = (
+                    f"{ADMIN_SESSION_COOKIE_NAME}={token}; Path=/; Max-Age={ADMIN_SESSION_MAX_AGE}; "
+                    f"HttpOnly; SameSite=Strict{secure}"
+                )
+        self._send_bytes(
+            200, data, ctype, no_cache=path.endswith(".html"),
+            cache_control=cache_control, extra_headers=extra_headers,
+        )
 
     # ---- 转发到 TikHub ----
     def _proxy(self, method, target):
@@ -6231,7 +6267,7 @@ class Handler(BaseHTTPRequestHandler):
         data = json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
         self._send_bytes(code, data, "application/json; charset=utf-8", no_cache=True)
 
-    def _send_bytes(self, code, data, ctype, no_cache=False, cache_control=None):
+    def _send_bytes(self, code, data, ctype, no_cache=False, cache_control=None, extra_headers=None):
         self.send_response(code)
         self._cors()
         if cache_control:
@@ -6241,6 +6277,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
         self.send_header("Content-Type", ctype)
+        for name, value in (extra_headers or {}).items():
+            self.send_header(str(name), str(value))
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         try:
