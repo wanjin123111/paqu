@@ -185,6 +185,7 @@ ADMIN_CATALOG_CACHE_SECONDS=20
 INTERNAL_SCHEDULER_ENABLED=1
 INTERNAL_SCHEDULE_TIMES=00:00,12:00
 INTERNAL_SCHEDULER_POLL_SECONDS=15
+INTERNAL_SCHEDULER_TRIGGER_WINDOW_SECONDS=120
 INTERNAL_SCHEDULER_MAX_ATTEMPTS=3
 INTERNAL_SCHEDULER_RETRY_SECONDS=300
 SCHEDULE_MAX_RUNTIME_SECONDS=600
@@ -263,7 +264,7 @@ python -m unittest discover -s tests -v
 
 ## 11. 已知问题
 
-- Render Starter 付费实例不会因空闲自动休眠；部署、平台维护或实例重启期间仍可能短暂不可用，内部定时器会依据 Supabase 最新报表时间补抓遗漏时段。
+- Render Starter 付费实例不会因空闲自动休眠；部署、平台维护或实例重启期间仍可能短暂不可用。为保证页面刷新绝不触发抓取，错过的计划时段不会在重启后补抓，只能等待下一计划时间或由后台手动触发。
 - TikHub API 余额、限流、字段变化或单个端点异常会影响抓取完整度。
 - 视频直链可能过期，且浏览器编解码器、来源防盗链或 CORS 会导致“有声音但画面停住”等播放差异。
 - Supabase 免费额度和平台政策不是项目代码能保证的永久服务，需要定期查看配额和项目状态。

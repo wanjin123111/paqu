@@ -603,29 +603,18 @@ shortdramatime"></textarea>
     </div>
   </div>
 
-  <!-- 定时监控 -->
+  <!-- 云端定时监控 -->
   <div class="card" id="schedCard">
     <details class="settings" id="schedDetails">
-      <summary>⏰ 定时监控 —— 每天自动抓一份存盘 <span id="schedBadge" style="font:600 11px ui-monospace,monospace;color:#9ca3af;background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;padding:1px 7px;margin-left:6px">未启用</span></summary>
+      <summary>⏰ 云端定时监控 <span style="font:600 11px ui-monospace,monospace;color:#16a34a;background:#dcfce7;border:1px solid #86efac;border-radius:6px;padding:1px 7px;margin-left:6px">固定计划</span></summary>
       <div class="settings-body">
-        <div class="grid">
-          <div class="field">
-            <label class="fl">启用每天定时</label>
-            <label style="display:flex;align-items:center;gap:8px;height:38px;cursor:pointer"><input type="checkbox" id="schedEnabled" style="width:16px;height:16px"> <span id="schedEnabledTxt" style="font-size:13px;color:var(--ink-soft)">关闭</span></label>
-          </div>
-          <div class="field">
-            <label class="fl">每天几点跑 <span class="hint">— 24 小时制</span></label>
-            <input class="tf" id="schedTime" type="time" value="08:00" />
-          </div>
-        </div>
         <div style="background:var(--bg-soft,#f8fafc);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-size:12.5px;color:var(--ink-soft);line-height:1.9;margin-top:4px">
-          下次运行:<b id="schedNext">—</b><br>
-          上次运行:<span id="schedLast">从未</span><br>
-          填了上方任务密码时,这里会调用后端账号名单并把结果加载到前端表格;没填任务密码时,才使用本页账号列表本地抓取。
+          云端只在北京时间每天 <b>00:00</b> 和 <b>12:00</b> 自动抓取。<br>
+          页面刷新、重新进入网页、切换标签页只读取数据库最新结果，不会启动抓取。
         </div>
         <div style="display:flex;align-items:center;gap:12px;margin-top:11px;flex-wrap:wrap">
-          <button class="mini-btn" id="schedNowBtn" type="button">▶ 立即跑一次定时任务</button>
-          <span class="hint" style="max-width:520px">前端定时需要本页开着；云端按北京时间每天 00:00、12:00 自动抓取。</span>
+          <button class="mini-btn" id="schedNowBtn" type="button">▶ 立即手动抓取</button>
+          <span class="hint" style="max-width:520px">手动抓取需要任务密码；固定定时不需要打开网页。</span>
         </div>
       </div>
     </details>
@@ -3854,21 +3843,10 @@ async function loadBackendLatest(opts){
     }
     if(shouldCheckJob)await refreshBackendJobState();
   }catch(firstErr){
-    if(backendSecret()){
-      try{
-        backendSetStatus("后端暂无最新结果，正在重新抓取…");
-        await backendFetchJson("/run-scheduled",{wait:"1"}, {requireSecret:true});
-        try{
-          payload=await backendFetchJson("/supabase/latest",{}, {sendSecret:false});
-        }catch(_){
-          payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
-        }
-        if(shouldCheckJob)await refreshBackendJobState();
-      }catch(_){
-        payload=await fetchJsonUrl("public_reports/latest_report.json");
-      }
-    }else{
+    try{
       payload=await fetchJsonUrl("public_reports/latest_report.json");
+    }catch(_){
+      throw firstErr;
     }
   }
   loadBackendPayload(payload,{source:"latest", quiet:opts.quiet, skipCache:opts.skipCache});
@@ -4027,6 +4005,26 @@ async function loadPublicLatestMeta(){
   const data=await backendFetchJson("/supabase/reports",{limit:"1"}, {sendSecret:false});
   return (data.reports||[])[0]||null;
 }
+async function refreshPublicHistoryInBackground(latestChanged){
+  const needsInitialHistory=!dashboardHistoryPayloads.length;
+  dashboardHistoryLoading=!!latestChanged||needsInitialHistory;
+  dashboardHistoryReady=!needsInitialHistory;
+  try{
+    await loadBackendReports({
+      quiet:true,
+      initial:false,
+      refreshPayloads:!!latestChanged||needsInitialHistory
+    });
+  }catch(_){
+    dashboardHistoryLoading=false;
+    dashboardHistoryReady=true;
+    if(rows.length||dramaRows.length)renderDashboard();
+    renderHistoryList([], "");
+  }
+}
+function deferPublicHistoryRefresh(latestChanged){
+  setTimeout(()=>{void refreshPublicHistoryInBackground(latestChanged);},1200);
+}
 async function loadPublicDashboardTask(){
   const cachedStatePromise=readCachedDashboardStateAsync();
   const latestMetaPromise=loadPublicLatestMeta().catch(()=>null);
@@ -4034,14 +4032,12 @@ async function loadPublicDashboardTask(){
   const cachedMs=cachedState?dashboardPayloadTime(cachedState.payload):0;
   dashboardHistoryLoading=true;
   dashboardHistoryReady=false;
-  const cacheTrusted=!!(cachedState&&dashboardValidationIsFresh(cachedMs));
-  if(cacheTrusted)applyCachedDashboardState(cachedState);
-  else renderDashboardLoading("正在检查最新数据...");
+  if(cachedState)applyCachedDashboardState(cachedState);
+  else renderDashboardLoading("正在读取最新数据...");
   const latestMeta=await latestMetaPromise;
   const latestMetaMs=reportItemMs(latestMeta);
   let cacheReady=!!(cachedState&&(!latestMetaMs||cachedMs>=latestMetaMs-1000));
   if(cacheReady){
-    if(!cacheTrusted)applyCachedDashboardState(cachedState);
     if(latestMetaMs)dashboardValidationSet(latestMetaMs);
   }else{
     renderDashboardLoading("正在同步最新数据...");
@@ -4064,21 +4060,13 @@ async function loadPublicDashboardTask(){
     }
   }
   const latestChanged=!cacheReady||currentReportMs()>cachedMs+1000;
-  const needsInitialHistory=!dashboardHistoryPayloads.length;
-  dashboardHistoryLoading=latestChanged||needsInitialHistory;
-  dashboardHistoryReady=!needsInitialHistory;
-  if(needsInitialHistory)renderDashboardLoading("正在加载历史对比数据...");
-  await loadBackendReports({
-    quiet:true,
-    initial:false,
-    refreshPayloads:latestChanged||!dashboardHistoryPayloads.length
-  }).catch(()=>{
+  if(rows.length||dramaRows.length){
     dashboardHistoryLoading=false;
     dashboardHistoryReady=true;
-    if(rows.length||dramaRows.length)renderDashboard();
-    else renderDashboardLoading("暂时没有最新数据，请稍后刷新");
-    renderHistoryList([], "");
-  });
+    renderDashboard();
+    renderResultTable();
+  }
+  deferPublicHistoryRefresh(latestChanged);
 }
 async function loadPublicDashboard(){return withPageLoading("正在加载最新看板数据",loadPublicDashboardTask);}
 let publicRefreshInFlight=false;
@@ -4204,7 +4192,7 @@ async function runBackendJob(manual){
     backendSetStatus("出错:"+(e.message||e));
     log("后端任务出错:"+(e.message||e),"c-err");
     if(manual)toast("出错:"+(e.message||e));
-  }finally{schedBusy=false;refreshSchedUI();}
+  }finally{schedBusy=false;}
 }
 async function openBackendReports(){
   loadBackendReports().catch(e=>{backendSetStatus("刷新历史失败:"+(e.message||e));toast("刷新历史失败");});
@@ -4217,28 +4205,6 @@ function dayStr(d){d=d||new Date();return d.getFullYear()+"-"+pad2(d.getMonth()+
 function nowStamp(){const d=new Date();return dayStr(d)+" "+pad2(d.getHours())+":"+pad2(d.getMinutes());}
 function isPublicMode(){return document.body.classList.contains("public-mode");}
 function isAdminMode(){return new URLSearchParams(location.search).get("admin")==="1";}
-function schedCfg(){return {enabled:!isPublicMode()&&store.get("thr_sched_on")==="1",time:store.get("thr_sched_time")||"08:00",last:store.get("thr_sched_last")||""};}
-function computeNext(){
-  const c=schedCfg();if(!c.enabled)return null;
-  const p=c.time.split(":");const hh=+p[0]||0,mm=+p[1]||0;
-  const now=new Date();const next=new Date();next.setHours(hh,mm,0,0);
-  if(next<=now&&c.last===dayStr(now))next.setDate(next.getDate()+1);
-  else if(next<=now&&c.last!==dayStr(now))return now; // 今天已过点且没跑 → 开页就补跑
-  return next;
-}
-function fmtDT(d){return d?dayStr(d)+" "+pad2(d.getHours())+":"+pad2(d.getMinutes()):"—";}
-function refreshSchedUI(){
-  const c=schedCfg();
-  $("schedEnabled").checked=c.enabled;
-  $("schedEnabledTxt").textContent=c.enabled?"已开启":"关闭";
-  $("schedTime").value=c.time;
-  const b=$("schedBadge");
-  if(c.enabled){b.textContent="已启用";b.style.color="#16a34a";b.style.background="#dcfce7";b.style.borderColor="#86efac";}
-  else{b.textContent="未启用";b.style.color="#9ca3af";b.style.background="#f3f4f6";b.style.borderColor="#e5e7eb";}
-  const nx=computeNext();
-  $("schedNext").textContent=c.enabled?(nx&&dayStr(nx)===dayStr()&&nx<=new Date()?"开页将补跑今天":fmtDT(nx)):"(未启用)";
-  $("schedLast").textContent=c.last?(c.last+" 已完成"):"从未";
-}
 async function saveToProxy(filename,content,opts){
   opts=opts||{};
   const body={filename:filename,content:content,base64:!!opts.base64,append:!!opts.append};
@@ -4266,26 +4232,16 @@ async function runScheduled(manual){
   if(backendSecret())return runBackendJob(manual);
   schedBusy=true;
   try{
-    if(!manual)store.set("thr_sched_last",dayStr()); // 自动跑先占当天,避免每30秒重复触发
-    logHead("⏰ "+(manual?"手动测试":"定时")+"任务启动 "+nowStamp());
+    logHead("⏰ 手动任务启动 "+nowStamp());
     await run();
     if(cancelled){log("任务被中断,未存盘","c-err");return;}
     await saveReports();
-    store.set("thr_sched_last",dayStr());
     log("✅ 已存盘:reports/report_"+dayStr()+".xlsx + monitor_history.csv","c-ok");
-    toast("定时任务完成,已存盘到 reports/");
+    toast("手动任务完成,已存盘到 reports/");
   }catch(e){
     log("⏰ 定时任务出错:"+(e.message||e),"c-err");
     if(manual)toast("出错:"+(e.message||e));
-  }finally{schedBusy=false;refreshSchedUI();}
-}
-function tickScheduler(){
-  const c=schedCfg();
-  if(!c.enabled||running||schedBusy)return;
-  const now=new Date();
-  if(c.last===dayStr(now))return;
-  const p=c.time.split(":");const sched=new Date();sched.setHours(+p[0]||0,+p[1]||0,0,0);
-  if(now>=sched)runScheduled(false);
+  }finally{schedBusy=false;}
 }
 function exportWord(){
   if(!rows.length){toast("还没有数据");return;}
@@ -4507,12 +4463,7 @@ function init(){
     detailPage+=1;
     renderResultTable();
   });
-  $("schedEnabled").addEventListener("change",()=>{store.set("thr_sched_on",$("schedEnabled").checked?"1":"0");if($("schedEnabled").checked){toast("已开启每天定时");$("schedDetails").open=true;}refreshSchedUI();});
-  $("schedTime").addEventListener("change",()=>{store.set("thr_sched_time",$("schedTime").value||"08:00");refreshSchedUI();});
   $("schedNowBtn").addEventListener("click",()=>runScheduled(true));
-  refreshSchedUI();
-  setInterval(tickScheduler,30000);
-  setTimeout(tickScheduler,4000);
   $("goBtn").addEventListener("click",run);
   $("stopBtn").addEventListener("click",()=>{cancelled=true;toast("正在停止…");});
   $("hostSelect").addEventListener("change",()=>{state.host=$("hostSelect").value;store.set("thr_host",state.host);});

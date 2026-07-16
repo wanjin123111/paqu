@@ -12,6 +12,7 @@ class InternalSchedulerTests(unittest.TestCase):
             proxy.INTERNAL_SCHEDULER_STATE.update({
                 "thread_started": False,
                 "active_slot": "",
+                "skipped_slot": "",
                 "completed_slot": "",
                 "running_slot": "",
                 "attempts": 0,
@@ -48,7 +49,7 @@ class InternalSchedulerTests(unittest.TestCase):
         self.assertEqual(proxy._next_internal_schedule_slot(after_noon, schedule), self.beijing(17, 0))
 
     def test_tick_skips_slot_when_database_already_has_new_report(self):
-        now = self.beijing(16, 12, 5)
+        now = self.beijing(16, 12, 0, 5)
         latest = self.beijing(16, 12, 1)
         with mock.patch.object(proxy, "INTERNAL_SCHEDULER_ENABLED", True), \
                 mock.patch.object(proxy, "INTERNAL_SCHEDULE_TIMES", "00:00,12:00"), \
@@ -60,8 +61,8 @@ class InternalSchedulerTests(unittest.TestCase):
         with proxy.INTERNAL_SCHEDULER_STATE_LOCK:
             self.assertEqual(proxy.INTERNAL_SCHEDULER_STATE["completed_slot"], "2026-07-16T12:00+08:00")
 
-    def test_tick_starts_catchup_when_latest_report_is_older_than_slot(self):
-        now = self.beijing(16, 12, 5)
+    def test_tick_starts_scheduled_run_inside_trigger_window(self):
+        now = self.beijing(16, 12, 0, 5)
         latest = self.beijing(16, 11, 45)
         with mock.patch.object(proxy, "INTERNAL_SCHEDULER_ENABLED", True), \
                 mock.patch.object(proxy, "INTERNAL_SCHEDULE_TIMES", "00:00,12:00"), \
@@ -72,8 +73,22 @@ class InternalSchedulerTests(unittest.TestCase):
         self.assertEqual(start.call_args.args[0], self.beijing(16, 12))
         self.assertEqual(start.call_args.args[1], now)
 
+    def test_tick_does_not_catch_up_old_slot_after_page_or_service_refresh(self):
+        now = self.beijing(16, 11, 0)
+        with mock.patch.object(proxy, "INTERNAL_SCHEDULER_ENABLED", True), \
+                mock.patch.object(proxy, "INTERNAL_SCHEDULE_TIMES", "00:00,12:00"), \
+                mock.patch.object(proxy, "_latest_persisted_report_at") as latest, \
+                mock.patch.object(proxy, "_start_internal_scheduled_job") as start:
+            self.assertFalse(proxy._internal_scheduler_tick(now))
+            self.assertFalse(proxy._internal_scheduler_tick(now + datetime.timedelta(minutes=1)))
+
+        latest.assert_not_called()
+        start.assert_not_called()
+        with proxy.INTERNAL_SCHEDULER_STATE_LOCK:
+            self.assertEqual(proxy.INTERNAL_SCHEDULER_STATE["skipped_slot"], "2026-07-16T00:00+08:00")
+
     def test_database_check_error_waits_instead_of_risking_duplicate_run(self):
-        now = self.beijing(16, 12, 5)
+        now = self.beijing(16, 12, 0, 5)
         with mock.patch.object(proxy, "INTERNAL_SCHEDULER_ENABLED", True), \
                 mock.patch.object(proxy, "INTERNAL_SCHEDULE_TIMES", "00:00,12:00"), \
                 mock.patch.object(proxy, "_latest_persisted_report_at", side_effect=RuntimeError("temporary outage")), \
@@ -113,6 +128,7 @@ class InternalSchedulerTests(unittest.TestCase):
         self.assertTrue(status["enabled"])
         self.assertEqual(status["timezone"], "Asia/Shanghai")
         self.assertEqual(status["times"], ["00:00", "12:00"])
+        self.assertEqual(status["trigger_window_seconds"], 120)
         self.assertEqual(status["next_run_at"], "2026-07-16T12:00:00+08:00")
 
 

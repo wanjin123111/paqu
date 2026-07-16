@@ -6,9 +6,10 @@
 - 每天 `12:00`（中午 12 点）抓取一次。
 - 每 15 秒检查一次是否到达计划时段。
 - 单次失败最多自动尝试 3 次，默认依次等待 5 分钟、10 分钟后重试。
-- 服务重启或重新部署后会读取 Supabase 最新报表时间；若本时段还没有成功报表，会自动补抓。
-- 同一进程使用任务锁避免定时、手动和页面触发的抓取重叠运行。
+- 只在计划时间后的 120 秒触发窗口内启动新任务；服务重启、页面刷新和读取报表都不会补抓旧时段。
+- 同一进程使用任务锁避免定时任务与后台手动抓取重叠运行。
 - Supabase 中本时段已有新报表时，不会因为服务重启而重复抓取。
+- 页面刷新只读取 Supabase 最新报表；若数据库暂时不可用，只回退读取随部署发布的静态报表，不会调用 TikHub。
 
 `.github/workflows/scheduled-report.yml` 不再配置自动 cron，只保留 GitHub 后台的手动应急触发入口，避免 GitHub Actions 队列延迟造成时间不准或与后端重复执行。
 
@@ -22,6 +23,7 @@ SCHEDULE_ACCOUNTS=账号1,账号2,账号3
 INTERNAL_SCHEDULER_ENABLED=1
 INTERNAL_SCHEDULE_TIMES=00:00,12:00
 INTERNAL_SCHEDULER_POLL_SECONDS=15
+INTERNAL_SCHEDULER_TRIGGER_WINDOW_SECONDS=120
 INTERNAL_SCHEDULER_MAX_ATTEMPTS=3
 INTERNAL_SCHEDULER_RETRY_SECONDS=300
 

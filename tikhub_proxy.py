@@ -125,6 +125,7 @@ SCHEDULE_ACCOUNT_WORKERS = _env_int("SCHEDULE_ACCOUNT_WORKERS", 4, 1, 16)
 INTERNAL_SCHEDULER_ENABLED = _env_bool("INTERNAL_SCHEDULER_ENABLED", False)
 INTERNAL_SCHEDULE_TIMES = os.environ.get("INTERNAL_SCHEDULE_TIMES", "00:00,12:00").strip()
 INTERNAL_SCHEDULER_POLL_SECONDS = _env_int("INTERNAL_SCHEDULER_POLL_SECONDS", 15, 5, 300)
+INTERNAL_SCHEDULER_TRIGGER_WINDOW_SECONDS = _env_int("INTERNAL_SCHEDULER_TRIGGER_WINDOW_SECONDS", 120, 30, 600)
 INTERNAL_SCHEDULER_MAX_ATTEMPTS = _env_int("INTERNAL_SCHEDULER_MAX_ATTEMPTS", 3, 1, 10)
 INTERNAL_SCHEDULER_RETRY_SECONDS = _env_int("INTERNAL_SCHEDULER_RETRY_SECONDS", 300, 30, 3600)
 # TikHub's 20-RPS plan is kept below its hard ceiling so retries and manual
@@ -133,7 +134,6 @@ TIKHUB_RPS_LIMIT = _env_int("TIKHUB_RPS_LIMIT", 18, 1, 1000)
 # Drama-library calls go directly to TikTok and do not consume TikHub RPS.
 # Keep those requests paced as well when multiple accounts run concurrently.
 TIKTOK_RPS_LIMIT = _env_int("TIKTOK_RPS_LIMIT", 8, 1, 1000)
-AUTO_REFRESH_COOLDOWN_SECONDS = _env_int("AUTO_REFRESH_COOLDOWN_SECONDS", 300, 30, 86400)
 VIDEO_PLAY_URL_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_URL_CACHE_TTL_SECONDS", 600, 0, 86400)
 DRAMA_LINK_PAGE_SIZE = _env_int("DRAMA_LINK_PAGE_SIZE", 50, 1, 50)
 DRAMA_LINK_MAX_EPISODES = _env_int("DRAMA_LINK_MAX_EPISODES", 500, 1, 5000)
@@ -345,11 +345,11 @@ LAST_JOB = {
     "account_workers": SCHEDULE_ACCOUNT_WORKERS,
     "tikhub_rps_limit": TIKHUB_RPS_LIMIT,
 }
-LAST_AUTO_REFRESH_AT = 0.0
 INTERNAL_SCHEDULER_STATE_LOCK = threading.Lock()
 INTERNAL_SCHEDULER_STATE = {
     "thread_started": False,
     "active_slot": "",
+    "skipped_slot": "",
     "completed_slot": "",
     "running_slot": "",
     "attempts": 0,
@@ -5530,6 +5530,7 @@ def _internal_scheduler_status(now=None):
         "timezone": "Asia/Shanghai",
         "times": ["%02d:%02d" % divmod(item, 60) for item in schedule_minutes],
         "poll_seconds": INTERNAL_SCHEDULER_POLL_SECONDS,
+        "trigger_window_seconds": INTERNAL_SCHEDULER_TRIGGER_WINDOW_SECONDS,
         "max_attempts": INTERNAL_SCHEDULER_MAX_ATTEMPTS,
         "next_run_at": next_slot.isoformat(timespec="seconds") if next_slot else "",
     })
@@ -5652,17 +5653,27 @@ def _internal_scheduler_tick(now=None):
     if not slot:
         return False
     slot_key = slot.isoformat(timespec="minutes")
+    slot_age_seconds = max(0.0, (now - slot).total_seconds())
 
     with INTERNAL_SCHEDULER_STATE_LOCK:
         if INTERNAL_SCHEDULER_STATE.get("active_slot") != slot_key:
             INTERNAL_SCHEDULER_STATE.update({
                 "active_slot": slot_key,
+                "skipped_slot": "",
                 "attempts": 0,
                 "last_error": "",
                 "next_retry_at": "",
                 "next_retry_timestamp": 0.0,
                 "needs_report_check": True,
             })
+            if slot_age_seconds > INTERNAL_SCHEDULER_TRIGGER_WINDOW_SECONDS:
+                INTERNAL_SCHEDULER_STATE.update({
+                    "skipped_slot": slot_key,
+                    "needs_report_check": False,
+                })
+                return False
+        if INTERNAL_SCHEDULER_STATE.get("skipped_slot") == slot_key:
+            return False
         if INTERNAL_SCHEDULER_STATE.get("completed_slot") == slot_key:
             return False
         if INTERNAL_SCHEDULER_STATE.get("running_slot") == slot_key:
@@ -5735,34 +5746,6 @@ def _start_internal_scheduler():
             INTERNAL_SCHEDULER_STATE["thread_started"] = False
             INTERNAL_SCHEDULER_STATE["last_error"] = str(exc)
         return False
-    return True
-
-
-def _start_configured_scheduled_job_if_idle():
-    global LAST_AUTO_REFRESH_AT
-    if not SERVER_API_KEY:
-        return False
-    accounts, _source = _configured_schedule_accounts()
-    if not accounts:
-        return False
-    if LAST_JOB.get("running"):
-        return False
-    now = time.time()
-    if now - LAST_AUTO_REFRESH_AT < AUTO_REFRESH_COOLDOWN_SECONDS:
-        return False
-    if not JOB_LOCK.acquire(blocking=False):
-        return False
-    LAST_AUTO_REFRESH_AT = now
-    LAST_JOB.update({"running": True, "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                     "finished_at": None, "result": None, "error": None})
-
-    def background():
-        try:
-            _execute_scheduled_job(accounts, trigger="auto_refresh")
-        finally:
-            JOB_LOCK.release()
-
-    threading.Thread(target=background, daemon=True).start()
     return True
 
 
@@ -6495,8 +6478,6 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             runtime_safe = False
         if not runtime_safe or not os.path.isfile(full):
-            if relative == "latest_report.json":
-                _start_configured_scheduled_job_if_idle()
             public_full = os.path.normpath(os.path.join(PUBLIC_REPORTS_DIR, *relative.split("/")))
             try:
                 public_safe = os.path.commonpath((os.path.normpath(PUBLIC_REPORTS_DIR), public_full)) == os.path.normpath(PUBLIC_REPORTS_DIR)

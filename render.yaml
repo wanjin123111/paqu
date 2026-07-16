@@ -53,6 +53,8 @@ services:
         value: "00:00,12:00"
       - key: INTERNAL_SCHEDULER_POLL_SECONDS
         value: 15
+      - key: INTERNAL_SCHEDULER_TRIGGER_WINDOW_SECONDS
+        value: 120
       - key: INTERNAL_SCHEDULER_MAX_ATTEMPTS
         value: 3
       - key: INTERNAL_SCHEDULER_RETRY_SECONDS

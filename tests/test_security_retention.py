@@ -543,7 +543,7 @@ class DiscoveryWorksTests(unittest.TestCase):
             (root / "tikhub-report-frontend.html").read_bytes(),
         )
 
-    def test_public_dashboard_validates_cache_before_rendering(self):
+    def test_public_dashboard_reads_latest_without_triggering_scrape(self):
         root = pathlib.Path(proxy.ROOT)
         for name in ("index.html", "tikhub-report-frontend.html"):
             page = (root / name).read_text(encoding="utf-8")
@@ -553,15 +553,19 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn('const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v1";', page)
             self.assertIn("const cachedStatePromise=readCachedDashboardStateAsync();", page)
             self.assertIn("const latestMetaPromise=loadPublicLatestMeta().catch(()=>null);", page)
-            self.assertIn("const cacheTrusted=!!(cachedState&&dashboardValidationIsFresh(cachedMs));", page)
-            self.assertIn("if(cacheTrusted)applyCachedDashboardState(cachedState);", page)
-            self.assertIn("const needsInitialHistory=!dashboardHistoryPayloads.length;", page)
-            self.assertIn('renderDashboardLoading("正在加载历史对比数据...");', page)
+            self.assertIn("if(cachedState)applyCachedDashboardState(cachedState);", page)
             self.assertIn("cachedMs>=latestMetaMs-1000", page)
             self.assertIn("await dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,latestPayload);", page)
+            self.assertIn("function deferPublicHistoryRefresh(latestChanged)", page)
+            self.assertIn("deferPublicHistoryRefresh(latestChanged);", page)
+            self.assertIn("setTimeout(()=>{void refreshPublicHistoryInBackground(latestChanged);},1200);", page)
             self.assertIn("if(!isPublicMode()||!supabase.length)", page)
             self.assertIn('document.addEventListener("visibilitychange"', page)
             self.assertIn('window.addEventListener("focus",refreshPublicDashboardQuiet)', page)
+            self.assertNotIn('backendFetchJson("/run-scheduled",{wait:"1"}', page)
+            self.assertNotIn("function tickScheduler()", page)
+            self.assertNotIn("setInterval(tickScheduler", page)
+            self.assertIn('backendFetchJson("/run-scheduled",{}, {requireSecret:true})', page)
 
     def test_dashboard_growth_uses_first_matching_history_for_new_accounts(self):
         root = pathlib.Path(proxy.ROOT)
@@ -615,6 +619,23 @@ class DiscoveryWorksTests(unittest.TestCase):
 
 
 class RetentionTests(unittest.TestCase):
+    def test_missing_latest_report_read_does_not_start_scrape(self):
+        handler = object.__new__(proxy.Handler)
+        handler._allow_report_read = mock.Mock(return_value=True)
+        handler._send_json = mock.Mock()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = pathlib.Path(temp_dir)
+            reports = root / "reports"
+            public = root / "public"
+            reports.mkdir()
+            public.mkdir()
+            with mock.patch.object(proxy, "REPORTS_DIR", str(reports)), \
+                    mock.patch.object(proxy, "PUBLIC_REPORTS_DIR", str(public)), \
+                    mock.patch.object(proxy, "_execute_scheduled_job") as execute:
+                handler._serve_report("/reports/latest_report.json", {})
+        execute.assert_not_called()
+        handler._send_json.assert_called_once_with(404, {"ok": False, "error": "report not found"})
+
     def test_report_route_serves_nested_episode_history_shard(self):
         handler = object.__new__(proxy.Handler)
         handler._allow_report_read = mock.Mock(return_value=True)
