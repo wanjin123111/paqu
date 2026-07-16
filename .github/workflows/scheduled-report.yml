@@ -2,9 +2,6 @@ name: Scheduled TikHub report
 
 on:
   workflow_dispatch:
-  schedule:
-    # 00:05 UTC = 08:05 Asia/Shanghai. Avoid the busiest top-of-hour queue.
-    - cron: "5 0 * * *"
 
 permissions:
   contents: write

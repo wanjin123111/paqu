@@ -122,6 +122,11 @@ SCHEDULE_DELAY_MS = _env_int("SCHEDULE_DELAY_MS", 300, 0, 60000)
 SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
 SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
 SCHEDULE_ACCOUNT_WORKERS = _env_int("SCHEDULE_ACCOUNT_WORKERS", 4, 1, 16)
+INTERNAL_SCHEDULER_ENABLED = _env_bool("INTERNAL_SCHEDULER_ENABLED", False)
+INTERNAL_SCHEDULE_TIMES = os.environ.get("INTERNAL_SCHEDULE_TIMES", "00:00,12:00").strip()
+INTERNAL_SCHEDULER_POLL_SECONDS = _env_int("INTERNAL_SCHEDULER_POLL_SECONDS", 15, 5, 300)
+INTERNAL_SCHEDULER_MAX_ATTEMPTS = _env_int("INTERNAL_SCHEDULER_MAX_ATTEMPTS", 3, 1, 10)
+INTERNAL_SCHEDULER_RETRY_SECONDS = _env_int("INTERNAL_SCHEDULER_RETRY_SECONDS", 300, 30, 3600)
 # TikHub's 20-RPS plan is kept below its hard ceiling so retries and manual
 # lookups from the same process still have a little headroom.
 TIKHUB_RPS_LIMIT = _env_int("TIKHUB_RPS_LIMIT", 18, 1, 1000)
@@ -341,6 +346,20 @@ LAST_JOB = {
     "tikhub_rps_limit": TIKHUB_RPS_LIMIT,
 }
 LAST_AUTO_REFRESH_AT = 0.0
+INTERNAL_SCHEDULER_STATE_LOCK = threading.Lock()
+INTERNAL_SCHEDULER_STATE = {
+    "thread_started": False,
+    "active_slot": "",
+    "completed_slot": "",
+    "running_slot": "",
+    "attempts": 0,
+    "last_triggered_at": "",
+    "last_completed_at": "",
+    "last_error": "",
+    "next_retry_at": "",
+    "next_retry_timestamp": 0.0,
+    "needs_report_check": True,
+}
 DRAMA_DETAIL_CACHE = None
 DRAMA_DETAIL_CACHE_LOCK = threading.RLock()
 DRAMA_EPISODE_HISTORY_LOCK = threading.Lock()
@@ -4253,14 +4272,15 @@ def _run_scheduled_job(accounts):
     }
 
 
-def _execute_scheduled_job(accounts):
+def _execute_scheduled_job(accounts, trigger="manual", scheduled_slot=""):
     LAST_JOB.update({"running": True, "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
                      "finished_at": None, "result": None, "error": None,
                      "phase": "starting", "accounts_total": len(accounts),
                      "accounts_completed": 0, "accounts_succeeded": 0,
                      "accounts_failed": 0, "current_account": "", "current_accounts": [],
                      "account_workers": min(SCHEDULE_ACCOUNT_WORKERS, max(1, len(accounts))),
-                     "tikhub_rps_limit": TIKHUB_RPS_LIMIT})
+                     "tikhub_rps_limit": TIKHUB_RPS_LIMIT,
+                     "trigger": trigger, "scheduled_slot": scheduled_slot})
     try:
         result = _run_scheduled_job(accounts)
         LAST_JOB.update({"running": False, "finished_at": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -5396,6 +5416,328 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
     )
     return body.encode("utf-8")
 
+def _parse_internal_schedule_times(value=None):
+    raw = INTERNAL_SCHEDULE_TIMES if value is None else value
+    if isinstance(raw, (list, tuple, set)):
+        parts = [str(item).strip() for item in raw]
+    else:
+        parts = [item.strip() for item in re.split(r"[,;\s]+", str(raw or ""))]
+    minutes = set()
+    for part in parts:
+        if not part:
+            continue
+        match = re.fullmatch(r"(\d{1,2}):(\d{2})", part)
+        if not match:
+            continue
+        hour, minute = int(match.group(1)), int(match.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            minutes.add(hour * 60 + minute)
+    return tuple(sorted(minutes))
+
+
+def _as_beijing_datetime(value=None):
+    if value is None:
+        return datetime.datetime.now(BEIJING_TZ)
+    if isinstance(value, datetime.datetime):
+        parsed = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=BEIJING_TZ)
+    return parsed.astimezone(BEIJING_TZ)
+
+
+def _internal_schedule_slot(now=None, schedule_minutes=None):
+    now = _as_beijing_datetime(now) or datetime.datetime.now(BEIJING_TZ)
+    schedule_minutes = tuple(schedule_minutes or _parse_internal_schedule_times())
+    if not schedule_minutes:
+        return None
+    candidates = []
+    for day_offset in (0, -1):
+        day = (now + datetime.timedelta(days=day_offset)).date()
+        for minute_of_day in schedule_minutes:
+            candidate = datetime.datetime.combine(
+                day,
+                datetime.time(minute_of_day // 60, minute_of_day % 60),
+                tzinfo=BEIJING_TZ,
+            )
+            if candidate <= now:
+                candidates.append(candidate)
+    return max(candidates) if candidates else None
+
+
+def _next_internal_schedule_slot(now=None, schedule_minutes=None):
+    now = _as_beijing_datetime(now) or datetime.datetime.now(BEIJING_TZ)
+    schedule_minutes = tuple(schedule_minutes or _parse_internal_schedule_times())
+    if not schedule_minutes:
+        return None
+    candidates = []
+    for day_offset in (0, 1):
+        day = (now + datetime.timedelta(days=day_offset)).date()
+        for minute_of_day in schedule_minutes:
+            candidate = datetime.datetime.combine(
+                day,
+                datetime.time(minute_of_day // 60, minute_of_day % 60),
+                tzinfo=BEIJING_TZ,
+            )
+            if candidate > now:
+                candidates.append(candidate)
+    return min(candidates) if candidates else None
+
+
+def _latest_persisted_report_at():
+    if _supabase_report_read_enabled():
+        rows = _supabase_request(
+            "GET",
+            "/report_runs?select=generated_at,created_at&source=neq.%s"
+            "&order=generated_at.desc&limit=1"
+            % urllib.parse.quote(ADMIN_CATALOG_SOURCE, safe=""),
+            timeout=20,
+        )
+        if isinstance(rows, list) and rows:
+            row = rows[0] if isinstance(rows[0], dict) else {}
+            return _as_beijing_datetime(row.get("generated_at") or row.get("created_at"))
+        return None
+
+    for directory in (REPORTS_DIR, PUBLIC_REPORTS_DIR):
+        path = os.path.join(directory, "latest_report.json")
+        try:
+            with open(path, "r", encoding="utf-8-sig") as handle:
+                payload = json.load(handle)
+            generated_at = payload.get("generated_at") if isinstance(payload, dict) else ""
+            parsed = _as_beijing_datetime(generated_at)
+            if parsed:
+                return parsed
+        except Exception:
+            continue
+    return None
+
+
+def _internal_scheduler_status(now=None):
+    now = _as_beijing_datetime(now) or datetime.datetime.now(BEIJING_TZ)
+    schedule_minutes = _parse_internal_schedule_times()
+    next_slot = _next_internal_schedule_slot(now, schedule_minutes)
+    with INTERNAL_SCHEDULER_STATE_LOCK:
+        state = dict(INTERNAL_SCHEDULER_STATE)
+    state.update({
+        "enabled": bool(INTERNAL_SCHEDULER_ENABLED),
+        "timezone": "Asia/Shanghai",
+        "times": ["%02d:%02d" % divmod(item, 60) for item in schedule_minutes],
+        "poll_seconds": INTERNAL_SCHEDULER_POLL_SECONDS,
+        "max_attempts": INTERNAL_SCHEDULER_MAX_ATTEMPTS,
+        "next_run_at": next_slot.isoformat(timespec="seconds") if next_slot else "",
+    })
+    state.pop("next_retry_timestamp", None)
+    state.pop("needs_report_check", None)
+    return state
+
+
+def _record_internal_scheduler_failure(slot_key, message, now=None, increment_attempt=False):
+    now = _as_beijing_datetime(now) or datetime.datetime.now(BEIJING_TZ)
+    with INTERNAL_SCHEDULER_STATE_LOCK:
+        if INTERNAL_SCHEDULER_STATE.get("active_slot") != slot_key:
+            return
+        if increment_attempt:
+            INTERNAL_SCHEDULER_STATE["attempts"] += 1
+        attempts = int(INTERNAL_SCHEDULER_STATE.get("attempts") or 0)
+        INTERNAL_SCHEDULER_STATE["running_slot"] = ""
+        INTERNAL_SCHEDULER_STATE["last_error"] = str(message or "scheduled job failed")
+        if attempts < INTERNAL_SCHEDULER_MAX_ATTEMPTS:
+            delay = min(INTERNAL_SCHEDULER_RETRY_SECONDS * (2 ** max(0, attempts - 1)), 3600)
+            retry_at = now + datetime.timedelta(seconds=delay)
+            INTERNAL_SCHEDULER_STATE["next_retry_timestamp"] = retry_at.timestamp()
+            INTERNAL_SCHEDULER_STATE["next_retry_at"] = retry_at.isoformat(timespec="seconds")
+        else:
+            INTERNAL_SCHEDULER_STATE["next_retry_timestamp"] = 0.0
+            INTERNAL_SCHEDULER_STATE["next_retry_at"] = ""
+
+
+def _internal_scheduled_result_error(result):
+    if not isinstance(result, dict):
+        return "scheduled job returned an invalid result"
+    if _to_int(result.get("accounts_requested")) and not _to_int(result.get("accounts_ok")):
+        return "all scheduled accounts failed"
+    supabase = result.get("supabase")
+    if isinstance(supabase, dict) and supabase.get("configured") and not supabase.get("ok"):
+        return "Supabase save failed: %s" % (supabase.get("error") or "unknown error")
+    return ""
+
+
+def _start_internal_scheduled_job(slot, now=None):
+    now = _as_beijing_datetime(now) or datetime.datetime.now(BEIJING_TZ)
+    slot = _as_beijing_datetime(slot)
+    if not slot:
+        return False
+    slot_key = slot.isoformat(timespec="minutes")
+    if not SERVER_API_KEY:
+        _record_internal_scheduler_failure(slot_key, "TIKHUB_API_KEY is not configured", now, increment_attempt=True)
+        return False
+    accounts, source = _configured_schedule_accounts()
+    if not accounts:
+        _record_internal_scheduler_failure(slot_key, "schedule account pool is empty", now, increment_attempt=True)
+        return False
+    if not JOB_LOCK.acquire(blocking=False):
+        with INTERNAL_SCHEDULER_STATE_LOCK:
+            if INTERNAL_SCHEDULER_STATE.get("active_slot") == slot_key:
+                retry_at = now + datetime.timedelta(seconds=INTERNAL_SCHEDULER_POLL_SECONDS)
+                INTERNAL_SCHEDULER_STATE["needs_report_check"] = True
+                INTERNAL_SCHEDULER_STATE["next_retry_timestamp"] = retry_at.timestamp()
+                INTERNAL_SCHEDULER_STATE["next_retry_at"] = retry_at.isoformat(timespec="seconds")
+        return False
+
+    with INTERNAL_SCHEDULER_STATE_LOCK:
+        if INTERNAL_SCHEDULER_STATE.get("active_slot") != slot_key:
+            JOB_LOCK.release()
+            return False
+        INTERNAL_SCHEDULER_STATE["attempts"] += 1
+        INTERNAL_SCHEDULER_STATE["running_slot"] = slot_key
+        INTERNAL_SCHEDULER_STATE["last_triggered_at"] = now.isoformat(timespec="seconds")
+        INTERNAL_SCHEDULER_STATE["last_error"] = ""
+        INTERNAL_SCHEDULER_STATE["next_retry_timestamp"] = 0.0
+        INTERNAL_SCHEDULER_STATE["next_retry_at"] = ""
+
+    def background():
+        try:
+            result = _execute_scheduled_job(
+                accounts,
+                trigger="internal_scheduler",
+                scheduled_slot=slot_key,
+            )
+            result_error = _internal_scheduled_result_error(result)
+            if result_error:
+                LAST_JOB.update({"phase": "failed", "error": result_error})
+                raise RuntimeError(result_error)
+            completed_at = datetime.datetime.now(BEIJING_TZ)
+            with INTERNAL_SCHEDULER_STATE_LOCK:
+                if INTERNAL_SCHEDULER_STATE.get("active_slot") == slot_key:
+                    INTERNAL_SCHEDULER_STATE.update({
+                        "completed_slot": slot_key,
+                        "running_slot": "",
+                        "last_completed_at": completed_at.isoformat(timespec="seconds"),
+                        "last_error": "",
+                        "next_retry_at": "",
+                        "next_retry_timestamp": 0.0,
+                        "needs_report_check": False,
+                    })
+        except Exception as exc:
+            _record_internal_scheduler_failure(slot_key, str(exc))
+        finally:
+            JOB_LOCK.release()
+
+    try:
+        threading.Thread(
+            target=background,
+            name="internal-report-scheduler-job",
+            daemon=True,
+        ).start()
+    except Exception as exc:
+        JOB_LOCK.release()
+        _record_internal_scheduler_failure(slot_key, str(exc))
+        return False
+    return True
+
+
+def _internal_scheduler_tick(now=None):
+    if not INTERNAL_SCHEDULER_ENABLED:
+        return False
+    now = _as_beijing_datetime(now) or datetime.datetime.now(BEIJING_TZ)
+    schedule_minutes = _parse_internal_schedule_times()
+    slot = _internal_schedule_slot(now, schedule_minutes)
+    if not slot:
+        return False
+    slot_key = slot.isoformat(timespec="minutes")
+
+    with INTERNAL_SCHEDULER_STATE_LOCK:
+        if INTERNAL_SCHEDULER_STATE.get("active_slot") != slot_key:
+            INTERNAL_SCHEDULER_STATE.update({
+                "active_slot": slot_key,
+                "attempts": 0,
+                "last_error": "",
+                "next_retry_at": "",
+                "next_retry_timestamp": 0.0,
+                "needs_report_check": True,
+            })
+        if INTERNAL_SCHEDULER_STATE.get("completed_slot") == slot_key:
+            return False
+        if INTERNAL_SCHEDULER_STATE.get("running_slot") == slot_key:
+            return False
+        if now.timestamp() < float(INTERNAL_SCHEDULER_STATE.get("next_retry_timestamp") or 0):
+            return False
+        if int(INTERNAL_SCHEDULER_STATE.get("attempts") or 0) >= INTERNAL_SCHEDULER_MAX_ATTEMPTS:
+            return False
+        needs_report_check = bool(INTERNAL_SCHEDULER_STATE.get("needs_report_check"))
+
+    if needs_report_check:
+        try:
+            latest_report_at = _latest_persisted_report_at()
+        except Exception as exc:
+            retry_at = now + datetime.timedelta(seconds=max(60, INTERNAL_SCHEDULER_POLL_SECONDS))
+            with INTERNAL_SCHEDULER_STATE_LOCK:
+                if INTERNAL_SCHEDULER_STATE.get("active_slot") == slot_key:
+                    INTERNAL_SCHEDULER_STATE.update({
+                        "last_error": "latest report check failed: %s" % exc,
+                        "needs_report_check": True,
+                        "next_retry_timestamp": retry_at.timestamp(),
+                        "next_retry_at": retry_at.isoformat(timespec="seconds"),
+                    })
+            return False
+        with INTERNAL_SCHEDULER_STATE_LOCK:
+            if INTERNAL_SCHEDULER_STATE.get("active_slot") != slot_key:
+                return False
+            INTERNAL_SCHEDULER_STATE["needs_report_check"] = False
+            if latest_report_at and latest_report_at >= slot:
+                INTERNAL_SCHEDULER_STATE.update({
+                    "completed_slot": slot_key,
+                    "last_completed_at": latest_report_at.isoformat(timespec="seconds"),
+                    "last_error": "",
+                })
+                return False
+
+    return _start_internal_scheduled_job(slot, now)
+
+
+def _internal_scheduler_loop():
+    while True:
+        try:
+            _internal_scheduler_tick()
+        except Exception as exc:
+            with INTERNAL_SCHEDULER_STATE_LOCK:
+                INTERNAL_SCHEDULER_STATE["last_error"] = "scheduler tick failed: %s" % exc
+        time.sleep(INTERNAL_SCHEDULER_POLL_SECONDS)
+
+
+def _start_internal_scheduler():
+    if not INTERNAL_SCHEDULER_ENABLED:
+        return False
+    schedule_minutes = _parse_internal_schedule_times()
+    if not schedule_minutes:
+        with INTERNAL_SCHEDULER_STATE_LOCK:
+            INTERNAL_SCHEDULER_STATE["last_error"] = "INTERNAL_SCHEDULE_TIMES has no valid HH:MM values"
+        return False
+    with INTERNAL_SCHEDULER_STATE_LOCK:
+        if INTERNAL_SCHEDULER_STATE.get("thread_started"):
+            return False
+        INTERNAL_SCHEDULER_STATE["thread_started"] = True
+    try:
+        threading.Thread(
+            target=_internal_scheduler_loop,
+            name="internal-report-scheduler",
+            daemon=True,
+        ).start()
+    except Exception as exc:
+        with INTERNAL_SCHEDULER_STATE_LOCK:
+            INTERNAL_SCHEDULER_STATE["thread_started"] = False
+            INTERNAL_SCHEDULER_STATE["last_error"] = str(exc)
+        return False
+    return True
+
+
 def _start_configured_scheduled_job_if_idle():
     global LAST_AUTO_REFRESH_AT
     if not SERVER_API_KEY:
@@ -5416,7 +5758,7 @@ def _start_configured_scheduled_job_if_idle():
 
     def background():
         try:
-            _execute_scheduled_job(accounts)
+            _execute_scheduled_job(accounts, trigger="auto_refresh")
         finally:
             JOB_LOCK.release()
 
@@ -5458,6 +5800,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(200, {
                 "ok": True,
                 "job": job,
+                "internal_scheduler": _internal_scheduler_status(),
                 "schedule_account_count": len(accounts),
                 "schedule_account_source": source or "empty",
             })
@@ -6069,7 +6412,7 @@ class Handler(BaseHTTPRequestHandler):
         wait = str(qs.get("wait", ["0"])[0]).lower() in ("1", "true", "yes")
         if wait:
             try:
-                result = _execute_scheduled_job(accounts)
+                result = _execute_scheduled_job(accounts, trigger="api")
                 if isinstance(result, dict):
                     result["source"] = source
                 self._send_json(200, result)
@@ -6081,7 +6424,7 @@ class Handler(BaseHTTPRequestHandler):
 
         def background():
             try:
-                _execute_scheduled_job(accounts)
+                _execute_scheduled_job(accounts, trigger="api")
             finally:
                 JOB_LOCK.release()
 
@@ -6345,7 +6688,9 @@ if __name__ == "__main__":
     print(" 保持本窗口开着;停止按 Ctrl+C")
     print("=" * 56)
     try:
-        ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+        server = ThreadingHTTPServer((HOST, PORT), Handler)
+        _start_internal_scheduler()
+        server.serve_forever()
     except KeyboardInterrupt:
         print("\n已停止。")
     except OSError as e:

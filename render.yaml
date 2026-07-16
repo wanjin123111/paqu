@@ -2,9 +2,10 @@ services:
   - type: web
     name: paqu-tikhub-proxy
     runtime: python
-    plan: free
+    plan: starter
     buildCommand: ""
     startCommand: python tikhub_proxy.py
+    healthCheckPath: /health
     envVars:
       - key: ALLOWED_PROXY_HOSTS
         value: api.tikhub.io,api.tikhub.dev
@@ -46,6 +47,16 @@ services:
         value: 300
       - key: SCHEDULE_ACCOUNT_WORKERS
         value: 4
+      - key: INTERNAL_SCHEDULER_ENABLED
+        value: "1"
+      - key: INTERNAL_SCHEDULE_TIMES
+        value: "00:00,12:00"
+      - key: INTERNAL_SCHEDULER_POLL_SECONDS
+        value: 15
+      - key: INTERNAL_SCHEDULER_MAX_ATTEMPTS
+        value: 3
+      - key: INTERNAL_SCHEDULER_RETRY_SECONDS
+        value: 300
       - key: TIKHUB_RPS_LIMIT
         value: 18
       - key: TIKTOK_RPS_LIMIT

@@ -49,9 +49,10 @@ paqu/
 │  └─ scheduled_*                     # 历史快照，自动清理 30 天以前文件
 ├─ reports/                           # Render/本地运行时目录，已忽略，不是永久存储
 ├─ tests/
-│  └─ test_security_retention.py      # 安全、鉴权、缓存、保留期测试
+│  ├─ test_security_retention.py      # 安全、鉴权、缓存、保留期测试
+│  └─ test_internal_scheduler.py      # 北京时间双时段、补抓、防重复与状态测试
 ├─ .github/workflows/
-│  └─ scheduled-report.yml            # 每天 08:05（北京时间）触发抓取并提交报表
+│  └─ scheduled-report.yml            # GitHub 后台手动应急抓取，不再自动定时
 ├─ docs/                              # 页面结构、组件和设计参考
 ├─ README.md                          # 早期使用说明
 ├─ SCHEDULE.md                        # 早期定时任务说明
@@ -80,7 +81,7 @@ paqu/
 ### 后端与数据
 
 - TikHub API 代理、账号抓取、短剧归类、题材和标题翻译、报表 JSON/CSV 生成。
-- Render 定时抓取和 GitHub Actions 每日调度。
+- Render Starter 后端每天北京时间 00:00、12:00 内部定时抓取，带失败重试、防重复锁和重启补抓。
 - Supabase 持久化账号、短剧、报表运行记录和历史快照。
 - Supabase 最新报表缓存、按 ID 缓存、紧凑历史报表接口 `?compact=1`。
 - 公司短剧配置复用 Supabase `report_runs` 持久化，使用 `source=admin_catalog` 独立保存；普通报表查询与 30 天清理均排除此记录。
@@ -119,13 +120,14 @@ paqu/
 数据流：
 
 ```text
-GitHub Actions（每天 08:05）
-    → Render /run-scheduled（X-Schedule-Secret）
+Render Starter 内部定时器（每天北京时间 00:00、12:00）
+    → 检查 Supabase 最新报表时间并执行防重复/重启补抓
     → TikHub 抓取账号和短剧
     → Render reports/ 生成报表
     → Supabase 保存结构化快照
-    → Actions 下载结果并提交 public_reports/
-    → 首页优先读取 Supabase，失败时回退 public_reports
+    → 首页优先读取 Supabase，失败时回退 GitHub public_reports
+
+GitHub Actions 仅保留 workflow_dispatch 手动应急入口，需要时可人工触发并提交 public_reports。
 ```
 
 ## 7. 数据存放位置
@@ -180,6 +182,11 @@ DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS=30
 SUPABASE_REPORT_HISTORY_LIMIT=30
 SUPABASE_LATEST_CACHE_SECONDS=120
 ADMIN_CATALOG_CACHE_SECONDS=20
+INTERNAL_SCHEDULER_ENABLED=1
+INTERNAL_SCHEDULE_TIMES=00:00,12:00
+INTERNAL_SCHEDULER_POLL_SECONDS=15
+INTERNAL_SCHEDULER_MAX_ATTEMPTS=3
+INTERNAL_SCHEDULER_RETRY_SECONDS=300
 SCHEDULE_MAX_RUNTIME_SECONDS=600
 SCHEDULE_DELAY_MS=300
 SCHEDULE_ACCOUNT_WORKERS=4
@@ -234,7 +241,7 @@ git push origin main
 
 - 推送 `main` 后，Render 会自动部署后端和 `/` 前端。
 - GitHub Pages 会发布静态 `index.html`。
-- `.github/workflows/scheduled-report.yml` 每天自动抓取并提交 `public_reports`。
+- 后端内部定时器每天北京时间 00:00、12:00 自动抓取并写入 Supabase；`.github/workflows/scheduled-report.yml` 仅供手动应急抓取和提交 `public_reports`。
 - 发布后至少检查：Render `/health`、Render `/`、GitHub Pages、最新报表时间和浏览器控制台。
 
 ### 本地验证
@@ -250,13 +257,13 @@ python -m unittest discover -s tests -v
 - `tikhub-report-frontend.html`：前端副本。现阶段必须与 `index.html` 同步修改，不能只改一个。
 - `tikhub_proxy.py`：核心后端，修改前先搜索现有路由、缓存、保留期和鉴权函数，避免重复实现。
 - `render.yaml`：Render 默认环境变量与启动命令；真实密钥使用 `sync: false`，只在后台填写。
-- `.github/workflows/scheduled-report.yml`：每日抓取、报表下载、30 天清理和 Git 提交。
+- `.github/workflows/scheduled-report.yml`：手动应急抓取、报表下载、30 天清理和 Git 提交；自动定时由 Render 后端负责。
 - `public_reports/manifest.json`：前端静态历史报表入口。
 - `tests/test_security_retention.py`：任何安全、历史读取、缓存或清理修改后都必须运行。
 
 ## 11. 已知问题
 
-- Render 免费实例可能休眠，直接打开 Render 域名时首次唤醒可能等待几十秒到约两分钟；GitHub Pages 静态入口通常更快。
+- Render Starter 付费实例不会因空闲自动休眠；部署、平台维护或实例重启期间仍可能短暂不可用，内部定时器会依据 Supabase 最新报表时间补抓遗漏时段。
 - TikHub API 余额、限流、字段变化或单个端点异常会影响抓取完整度。
 - 视频直链可能过期，且浏览器编解码器、来源防盗链或 CORS 会导致“有声音但画面停住”等播放差异。
 - Supabase 免费额度和平台政策不是项目代码能保证的永久服务，需要定期查看配额和项目状态。
@@ -280,7 +287,7 @@ python -m unittest discover -s tests -v
 换电脑后的第一轮建议：
 
 1. 克隆仓库并运行测试。
-2. 确认 Render 的 5 个必需环境变量仍存在，GitHub Actions 的 `SCHEDULE_SECRET` 与 Render 一致。
+2. 确认 Render 必需环境变量仍存在，`INTERNAL_SCHEDULER_ENABLED=1` 且 `INTERNAL_SCHEDULE_TIMES=00:00,12:00`；GitHub 手动应急任务的 `SCHEDULE_SECRET` 与 Render 一致。
 3. 打开两个线上地址，核对最新报表时间与账号数量。
 4. 继续开发前先截图桌面和移动端首页，建立新的视觉基线。
 5. 每次修改完成后：语法检查 → 自动测试 → 本地浏览器验证 → 提交 → 推送 → 线上复查。

@@ -1,8 +1,16 @@
 # 后端定时自动抓取
 
-Render 服务支持把账号名单放在后端账号池或环境变量里，然后由 GitHub Actions 每天定时触发抓取。
+线上 Render Starter 服务由后端进程直接负责定时抓取，时区固定为北京时间（UTC+8）：
 
-Render 免费 Web Service 没有人访问时会休眠，所以“前端页面里的每天 08:00”只有页面开着才准。稳定方案是仓库里的 GitHub Actions 从外部访问 `/run-scheduled`，它会唤醒 Render 并触发抓取。当前工作流配置在 `.github/workflows/scheduled-report.yml`，默认北京时间每天 08:05 运行。
+- 每天 `00:00`（晚上 12 点）抓取一次。
+- 每天 `12:00`（中午 12 点）抓取一次。
+- 每 15 秒检查一次是否到达计划时段。
+- 单次失败最多自动尝试 3 次，默认依次等待 5 分钟、10 分钟后重试。
+- 服务重启或重新部署后会读取 Supabase 最新报表时间；若本时段还没有成功报表，会自动补抓。
+- 同一进程使用任务锁避免定时、手动和页面触发的抓取重叠运行。
+- Supabase 中本时段已有新报表时，不会因为服务重启而重复抓取。
+
+`.github/workflows/scheduled-report.yml` 不再配置自动 cron，只保留 GitHub 后台的手动应急触发入口，避免 GitHub Actions 队列延迟造成时间不准或与后端重复执行。
 
 ## Render 环境变量
 
@@ -10,6 +18,13 @@ Render 免费 Web Service 没有人访问时会休眠，所以“前端页面里
 TIKHUB_API_KEY=你的 TikHub API Key
 SCHEDULE_SECRET=你自己设置的一串密码
 SCHEDULE_ACCOUNTS=账号1,账号2,账号3
+
+INTERNAL_SCHEDULER_ENABLED=1
+INTERNAL_SCHEDULE_TIMES=00:00,12:00
+INTERNAL_SCHEDULER_POLL_SECONDS=15
+INTERNAL_SCHEDULER_MAX_ATTEMPTS=3
+INTERNAL_SCHEDULER_RETRY_SECONDS=300
+
 SCHEDULE_MAX_VIDEOS=100
 SCHEDULE_USE_PLAYLISTS=1
 SCHEDULE_MAX_PLAYLISTS=300
@@ -22,30 +37,17 @@ TIKHUB_RPS_LIMIT=18
 TIKTOK_RPS_LIMIT=8
 ```
 
+`INTERNAL_SCHEDULE_TIMES` 支持使用英文逗号分隔多个 `HH:MM` 时间。线上默认值由 `render.yaml` 固定为 `00:00,12:00`。
+
 上述并发配置适用于已经单独购买 TikHub 20 RPS 套餐的账号。`18` 是安全上限，不等于把接口余额充值到 5 美元；RPS 套餐与按请求扣费余额是两项独立配置。如果 TikHub 后台显示的上限仍为 10 RPS，请把 `TIKHUB_RPS_LIMIT` 改为 `8`。
 
-`SCHEDULE_ACCOUNTS` 也可以一行一个账号。现在前端报表页还提供“账号池”，输入 `SCHEDULE_SECRET` 后可以把账号保存到后端运行时文件 `reports/schedule_accounts.json`。抓取时优先使用后端账号池；账号池为空时才回退到 `SCHEDULE_ACCOUNTS`。
+抓取账号池由 Render 环境变量、GitHub 种子文件、后端账号池和 Supabase 已保存账号合并去重。后台管理面板新增账号后，会进入后端监控池；`SCHEDULE_ACCOUNTS` 继续作为部署环境兜底。
 
-默认会优先走 TikHub 播放列表/合集接口统计短剧数量；如果某个账号拿不到可用合集，或者合集返回的集数/播放量明显为空，才会退回按公开视频标题自动归类。`SCHEDULE_MAX_VIDEOS` 只影响这个退回方案。
-
-## GitHub Secret
-
-GitHub 仓库也要添加一个 Secret：
-
-```text
-SCHEDULE_SECRET=和 Render 里完全一样的密码
-```
-
-默认定时任务在北京时间每天 08:00 运行，配置文件是 `.github/workflows/scheduled-report.yml`。
-
-注意 GitHub Actions 的 cron 不保证秒级准点，通常会有几分钟队列延迟；当前配置故意用 08:05，避开整点高峰。
+默认优先走 TikHub 播放列表/合集接口统计短剧数量；如果某个账号拿不到可用合集，或者合集返回的集数/播放量明显为空，才会退回按公开视频标题自动归类。`SCHEDULE_MAX_VIDEOS` 只影响这个退回方案。
 
 ## 手动触发和查看
 
-前端页面现在有“后端账号报表”区域。只需要在前端填 `SCHEDULE_SECRET` 的值，然后点“启动后端抓取”或“加载最新结果”。账号名单不会显示在前端，仍然只从 Render 的 `SCHEDULE_ACCOUNTS` 读取。
-前端报表页的“账号池”可以读取/保存后端账号池，并支持“保存并立即抓取”。
-
-敏感接口只接受 `X-Schedule-Secret` 请求头，不再接受网址中的 `?secret=`，避免密码进入浏览器历史、日志和分享链接。
+敏感接口只接受 `X-Schedule-Secret` 请求头，不接受网址中的 `?secret=`，避免密码进入浏览器历史、日志和分享链接。
 
 手动触发：
 
@@ -54,12 +56,14 @@ curl "https://paqu-tikhub-proxy.onrender.com/run-scheduled?wait=1" \
   -H "X-Schedule-Secret: 你的SCHEDULE_SECRET"
 ```
 
-查看状态：
+查看任务和内部定时器状态：
 
 ```bash
 curl "https://paqu-tikhub-proxy.onrender.com/schedule-status" \
   -H "X-Schedule-Secret: 你的SCHEDULE_SECRET"
 ```
+
+返回结果里的 `internal_scheduler` 会显示是否启用、北京时间计划、下一次运行时间、当前时段、重试次数和最近错误。
 
 查看账号池：
 
@@ -89,4 +93,4 @@ https://paqu-tikhub-proxy.onrender.com/reports
 https://paqu-tikhub-proxy.onrender.com/reports/latest_report.csv
 ```
 
-注意：Render 免费服务的本地文件不是永久存储，服务重启或重新部署后 `reports/` 里的历史报告和 `reports/schedule_accounts.json` 可能会丢。账号池适合日常在线调整；长期稳定建议继续把 `SCHEDULE_ACCOUNTS` 放在 Render Environment 里作为兜底，或后续接 Google Sheets、数据库、对象存储。
+Render 本地 `reports/` 仍是临时文件；账号、报表和历史快照的持久数据以 Supabase 为准。不要把 Render 本地磁盘当作唯一数据源。
