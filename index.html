@@ -944,8 +944,9 @@ const DASHBOARD_HISTORY_WORKERS=4;
 const DASHBOARD_CACHE_STORAGE="tikhub-dashboard-cache-v3";
 const DASHBOARD_LOCAL_CACHE_LIMIT=700000;
 const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v3";
-const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v3";
-const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v1";
+  const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v3";
+  const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v1";
+  const DASHBOARD_PREVIEW_CACHE_KEY="thr_dashboard_preview_v1";
 const DASHBOARD_VALIDATION_MAX_AGE=2*PUBLIC_REPORT_REFRESH_MS;
 function dashboardCacheGet(key,maxAgeMs){
   try{
@@ -1007,12 +1008,53 @@ function dashboardValidationIsFresh(cachedMs){
   if(!cachedMs)return false;
   try{
     const item=JSON.parse(store.get(DASHBOARD_VALIDATION_CACHE_KEY)||"null");
-    return !!(item&&Date.now()-Number(item.t||0)<=DASHBOARD_VALIDATION_MAX_AGE&&Number(item.generated_at_ms||0)>=cachedMs-1000);
+    return !!(item&&Date.now()-Number(item.t||0)<=DASHBOARD_VALIDATION_MAX_AGE&&Math.abs(Number(item.generated_at_ms||0)-cachedMs)<=1000);
   }catch(_){return false;}
 }
 function dashboardValidationSet(generatedAtMs){
   if(!generatedAtMs)return;
   store.set(DASHBOARD_VALIDATION_CACHE_KEY,JSON.stringify({t:Date.now(),generated_at_ms:Number(generatedAtMs)||0}));
+}
+function readCachedDashboardPreview(){
+  try{
+    const item=JSON.parse(store.get(DASHBOARD_PREVIEW_CACHE_KEY)||"null");
+    if(!item||!item.dashboard_html||Date.now()-Number(item.t||0)>DASHBOARD_CACHE_MAX_AGE)return null;
+    return item;
+  }catch(_){return null;}
+}
+function cacheDashboardPreview(){
+  if(!isPublicMode()||!currentReportGeneratedAt)return false;
+  const dashboard=$('dashboardCard'),monitor=$('monitorDashboardCard');
+  if(!dashboard||dashboard.querySelector('.dashboard-skeleton')||!dashboard.innerHTML.trim())return false;
+  const item={
+    t:Date.now(),
+    generated_at_ms:currentReportMs(),
+    dashboard_html:dashboard.innerHTML,
+    monitor_html:monitor&&monitor.innerHTML||""
+  };
+  try{
+    const raw=JSON.stringify(item);
+    if(raw.length>DASHBOARD_LOCAL_CACHE_LIMIT)return false;
+    store.set(DASHBOARD_PREVIEW_CACHE_KEY,raw);
+    return true;
+  }catch(_){return false;}
+}
+function applyCachedDashboardPreview(item,verifiedMs=0){
+  if(!isPublicMode()||!item||!item.dashboard_html)return false;
+  const previewMs=Number(item.generated_at_ms||0);
+  const verified=verifiedMs?Math.abs(Number(verifiedMs)-previewMs)<=1000:dashboardValidationIsFresh(previewMs);
+  if(!verified)return false;
+  const dashboard=$('dashboardCard'),monitor=$('monitorDashboardCard');
+  if(!dashboard)return false;
+  dashboard.style.display='block';
+  dashboard.innerHTML=item.dashboard_html;
+  if(monitor&&item.monitor_html){
+    monitor.style.display='block';
+    monitor.innerHTML=item.monitor_html;
+    bindMonitorSearchControls();
+  }
+  setPublicPageView(publicPageView);
+  return true;
 }
 function applyCachedDashboardState(state){
   if(!state||!state.payload)return false;
@@ -2256,7 +2298,7 @@ function dashboardDramaGrowthForRow(days,payloads,currentPayload,targetRow){
   const baselineChoice=dashboardDramaBaselinePayload(payloads,currentMs,days,targetKeys);
   const baseline=baselineChoice.payload;
   if(!baseline||!targetKeys.size){
-    return {row,views,before:null,diff:0,baseline:null,sub:`当前 ${fmtPlay(views)} · 暂无${days}天历史基准`};
+    return {row,views,before:null,diff:0,baseline:null,sub:dashboardHistoryLoading?"正在加载历史对比…":`当前 ${fmtPlay(views)} · 暂无${days}天历史基准`};
   }
   const baselineRow=dashboardDramaRowInPayload(baseline,targetKeys);
   if(!baselineRow){
@@ -2272,7 +2314,7 @@ function dashboardDramaGrowthForRow(days,payloads,currentPayload,targetRow){
 function dashboardDramaCardHtml(label,item,opts={}){
   const row=item&&item.row;
   const title=row?dashboardDramaDisplayTitle(row):"暂无数据";
-  const sub=item&&item.sub?item.sub:"暂无可对比历史";
+  const sub=item&&item.sub?item.sub:(dashboardHistoryLoading?"正在加载历史对比…":"暂无可对比历史");
   let subHtml=esc(sub);
   if(item&&Number(item.diff)>0){
     const prefix="+"+fmtPlay(item.diff);
@@ -2479,7 +2521,7 @@ function dashboardDramaGrowthBarSvg(items,opts){
   const all=(items||[]).filter(item=>item&&Number(item.diff)>0);
   const limit=Object.prototype.hasOwnProperty.call(opts,"limit")?Number(opts.limit):10;
   const list=limit>0?all.slice(0,limit):all;
-  if(!list.length)return '<div class="dashboard-loading">暂无近30天可对比新增数据</div>';
+  if(!list.length)return '<div class="dashboard-loading">'+(dashboardHistoryLoading?'正在加载历史对比数据…':'暂无近30天可对比新增数据')+'</div>';
   const max=Math.max(1,...list.map(item=>Number(item.diff||0)));
   const rows=list.map((item,i)=>{
     const title=dashboardDramaTrendTitle(item,"暂无数据");
@@ -2506,7 +2548,7 @@ function dashboardAreaSvg(values,labels,color){
 }
 function dashboardThemeGrowthPanelHtml(items,label){
   const list=(items||[]).filter(item=>item&&Number(item.diff)>0);
-  if(!list.length)return `<div class="dashboard-loading">暂无${esc(label)}题材增长数据</div>`;
+  if(!list.length)return `<div class="dashboard-loading">${dashboardHistoryLoading?'正在加载历史对比数据…':`暂无${esc(label)}题材增长数据`}</div>`;
   const max=Math.max(1,...list.map(item=>Number(item.diff||0)));
   const rows=list.map((item,i)=>{
     const value=Number(item.diff||0);
@@ -2641,10 +2683,6 @@ function renderDashboard(){
   const box=$("dashboardCard");
   const page=$("dashboardPage");
   if(!box)return;
-  if(isPublicMode()&&!dashboardHistoryReady){
-    renderDashboardLoading(dashboardHistoryLoading?"正在同步最新数据...":"正在准备运营看板...");
-    return;
-  }
   if(!rows.length&&!dramaRows.length){
     if(isPublicMode()&&!dashboardHistoryReady){
       renderDashboardLoading(dashboardHistoryLoading?"正在加载历史对比数据...":"正在准备运营看板...");
@@ -2661,9 +2699,9 @@ function renderDashboard(){
   const comparablePayloads=dashboardComparablePayloads();
   const weeklyDramaGrowth=dashboardWeeklyDramaGrowth(comparablePayloads,currentPayload,7);
   const topAccountGrowth=dashboardTopAccountDramaGrowth(comparablePayloads,currentPayload,7);
-  const weeklyDramaSub=weeklyDramaGrowth.hasBaseline?`近7天 ${fmt(weeklyDramaGrowth.beforeCount)}→${fmt(weeklyDramaGrowth.currentCount)}部`:"暂无历史基准";
-  const accountGrowthTitle=topAccountGrowth?`增长最多账号：${topAccountGrowth.name||topAccountGrowth.account||"未知账号"}`:"增长最多账号：暂无";
-  const accountGrowthSub=topAccountGrowth?(topAccountGrowth.diff>0?`近7天 +${fmt(topAccountGrowth.diff)}部 · 当前${fmt(topAccountGrowth.count)}部`:`近7天无新增 · 当前${fmt(topAccountGrowth.count)}部`):"暂无可对比账号";
+  const weeklyDramaSub=dashboardHistoryLoading?"正在加载历史对比…":(weeklyDramaGrowth.hasBaseline?`近7天 ${fmt(weeklyDramaGrowth.beforeCount)}→${fmt(weeklyDramaGrowth.currentCount)}部`:"暂无历史基准");
+  const accountGrowthTitle=dashboardHistoryLoading?"增长最多账号：正在计算…":(topAccountGrowth?`增长最多账号：${topAccountGrowth.name||topAccountGrowth.account||"未知账号"}`:"增长最多账号：暂无");
+  const accountGrowthSub=dashboardHistoryLoading?"正在加载历史对比数据":(topAccountGrowth?(topAccountGrowth.diff>0?`近7天 +${fmt(topAccountGrowth.diff)}部 · 当前${fmt(topAccountGrowth.count)}部`:`近7天无新增 · 当前${fmt(topAccountGrowth.count)}部`):"暂无可对比账号");
   const hottest=dashboardHottestDrama(currentPayload);
   const grow7=dashboardDramaGrowthForRow(7,comparablePayloads,currentPayload,hottest&&hottest.row);
   const grow3=dashboardDramaGrowthForRow(3,comparablePayloads,currentPayload,hottest&&hottest.row);
@@ -2692,6 +2730,7 @@ function renderDashboard(){
     </div>
   </div>`;
   renderMonitorDashboard(current);
+  cacheDashboardPreview();
   if(isPublicMode())setPublicPageView(publicPageView);
   else if(page)page.hidden=false;
 }
@@ -4065,17 +4104,24 @@ function deferPublicHistoryRefresh(latestChanged){
   setTimeout(()=>{void refreshPublicHistoryInBackground(latestChanged);},1200);
 }
 async function loadPublicDashboardTask(){
+  const cachedPreview=readCachedDashboardPreview();
+  let previewReady=applyCachedDashboardPreview(cachedPreview);
   const cachedStatePromise=readCachedDashboardStateAsync();
   const latestMetaPromise=loadPublicLatestMeta().catch(()=>null);
+  dashboardHistoryLoading=true;
+  dashboardHistoryReady=false;
+  if(!previewReady)renderDashboardLoading("正在读取最新数据...");
+  const latestMeta=await latestMetaPromise;
+  const latestMetaMs=reportItemMs(latestMeta);
+  if(!previewReady&&latestMetaMs&&applyCachedDashboardPreview(cachedPreview,latestMetaMs)){
+    previewReady=true;
+    dashboardValidationSet(latestMetaMs);
+  }
   const cachedState=await cachedStatePromise;
   const cachedMs=cachedState?dashboardPayloadTime(cachedState.payload):0;
   const cacheTrusted=!!(cachedState&&dashboardValidationIsFresh(cachedMs));
-  dashboardHistoryLoading=true;
-  dashboardHistoryReady=false;
   if(cacheTrusted)applyCachedDashboardState(cachedState);
-  else renderDashboardLoading("正在读取最新数据...");
-  const latestMeta=await latestMetaPromise;
-  const latestMetaMs=reportItemMs(latestMeta);
+  else if(!previewReady)renderDashboardLoading("正在读取最新数据...");
   let cacheReady=!!(cachedState&&latestMetaMs&&cachedMs>=latestMetaMs-1000);
   if(cacheReady){
     if(!cacheTrusted)applyCachedDashboardState(cachedState);
