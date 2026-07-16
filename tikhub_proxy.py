@@ -20,7 +20,7 @@
  端口被占用?把下面的 PORT 改个数字,网页代理框也跟着改。
 ==============================================================================
 """
-import os, posixpath, mimetypes, base64, json, datetime, csv, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures, uuid
+import os, posixpath, mimetypes, base64, json, datetime, csv, gzip, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures, uuid
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
@@ -6628,6 +6628,20 @@ class Handler(BaseHTTPRequestHandler):
         self._send_bytes(code, data, "application/json; charset=utf-8", no_cache=True)
 
     def _send_bytes(self, code, data, ctype, no_cache=False, cache_control=None, extra_headers=None):
+        extra_headers = dict(extra_headers or {})
+        accept_encoding = str(getattr(self, "headers", {}).get("Accept-Encoding", "")).lower()
+        already_encoded = any(str(name).lower() == "content-encoding" for name in extra_headers)
+        if (
+            len(data) >= 16 * 1024
+            and "application/json" in str(ctype).lower()
+            and "gzip" in accept_encoding
+            and not already_encoded
+        ):
+            compressed = gzip.compress(data, compresslevel=5, mtime=0)
+            if len(compressed) < len(data):
+                data = compressed
+                extra_headers["Content-Encoding"] = "gzip"
+                extra_headers["Vary"] = "Accept-Encoding"
         self.send_response(code)
         self._cors()
         if cache_control:
@@ -6637,7 +6651,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
         self.send_header("Content-Type", ctype)
-        for name, value in (extra_headers or {}).items():
+        for name, value in extra_headers.items():
             self.send_header(str(name), str(value))
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()

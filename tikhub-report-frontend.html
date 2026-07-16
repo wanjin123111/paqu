@@ -52,7 +52,7 @@
 
   .wrap{max-width:1180px;margin:0 auto;padding:22px;display:flex;flex-direction:column;gap:16px}
   .dashboard-page,.catalog-page,.monitor-page,.report-page{display:block}
-  .page-switch{display:none}
+  .public-page-nav{display:none}
   body.public-mode .wrap{max-width:none;padding:0;gap:0}
   body.public-mode.dashboard-view,
   body.public-mode.monitor-view{overflow:hidden}
@@ -82,18 +82,13 @@
   body.public-mode .report-page{min-height:100vh;padding:18px 16px 26px}
   .catalog-frame{display:block;width:100%;height:calc(100vh - 108px);min-height:620px;border:1px solid var(--line);border-radius:16px;background:var(--paper);box-shadow:var(--shadow)}
   body.public-mode .report-page .foot-note{width:calc(100vw - 32px);max-width:none;margin:14px auto 0}
-  body.public-mode .page-switch{display:flex;position:fixed;right:28px;z-index:60;gap:10px}
-  body.public-mode .dashboard-page-switch,
-  body.public-mode .monitor-page-switch{top:34px}
-  body.public-mode .catalog-page-switch,
-  body.public-mode .report-page-switch{bottom:24px}
-  body.public-mode .page-switch .mini-btn{box-shadow:0 10px 24px rgba(15,23,42,.14)}
-  body.public-mode .dashboard-next-btn,
-  body.public-mode .catalog-next-btn,
-  body.public-mode .monitor-next-btn{background:var(--accent);color:#fff;border-color:var(--accent)}
-  body.public-mode .dashboard-next-btn:hover,
-  body.public-mode .catalog-next-btn:hover,
-  body.public-mode .monitor-next-btn:hover{background:var(--accent-press);color:#fff;border-color:var(--accent-press);text-decoration:none}
+  body.public-mode .public-page-nav{display:flex;position:fixed;top:34px;right:28px;z-index:70;gap:10px}
+  body.public-mode .public-page-nav .mini-btn[hidden]{display:none!important}
+  body.public-mode.catalog-view .public-page-nav,
+  body.public-mode.report-view .public-page-nav{top:78px}
+  body.public-mode .public-page-nav .mini-btn{box-shadow:0 10px 24px rgba(15,23,42,.14)}
+  body.public-mode .public-page-nav .public-page-next{background:var(--accent);color:#fff;border-color:var(--accent)}
+  body.public-mode .public-page-nav .public-page-next:hover{background:var(--accent-press);color:#fff;border-color:var(--accent-press);text-decoration:none}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
   .card-head{display:flex;align-items:center;justify-content:space-between;padding:15px 18px 12px;border-bottom:1px solid var(--line)}
   .card-head h2{margin:0;font-family:var(--display);font-size:13px;font-weight:600;letter-spacing:.05em;color:var(--ink-soft)}
@@ -242,7 +237,9 @@
   td.cell-muted{color:var(--ink-faint)}
   .loading-inline{display:inline-flex;align-items:center;gap:6px;color:var(--ink-faint)}
   .loading-inline::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse .9s ease-in-out infinite}
-  .page-loading-status{position:fixed;top:78px;right:20px;z-index:2200;display:none;align-items:center;gap:10px;max-width:min(420px,calc(100vw - 28px));padding:12px 15px;border:1px solid #d9d6ff;border-radius:12px;background:rgba(255,255,255,.96);color:var(--ink);box-shadow:0 14px 40px rgba(31,39,51,.16);backdrop-filter:blur(10px);font-size:13px;font-weight:750}
+  .page-loading-status{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:2200;display:none;align-items:center;gap:10px;max-width:min(420px,calc(100vw - 28px));padding:12px 15px;border:1px solid #d9d6ff;border-radius:12px;background:rgba(255,255,255,.96);color:var(--ink);box-shadow:0 14px 40px rgba(31,39,51,.16);backdrop-filter:blur(10px);font-size:13px;font-weight:750}
+  body.public-mode.catalog-view .page-loading-status,
+  body.public-mode.report-view .page-loading-status{top:78px}
   .page-loading-status.active{display:flex}.page-loading-spinner{width:20px;height:20px;flex:0 0 auto;border:3px solid #e6e3ff;border-top-color:var(--accent);border-radius:50%;animation:page-loading-spin .72s linear infinite}.page-loading-copy small{display:block;margin-top:2px;color:var(--ink-faint);font-size:10.5px;font-weight:500}
   @keyframes page-loading-spin{to{transform:rotate(360deg)}}
   @keyframes pulse{0%,100%{opacity:.35;transform:scale(.82)}50%{opacity:1;transform:scale(1)}}
@@ -405,6 +402,19 @@
   .monitor-searchbar .search-field{min-width:280px;max-width:460px}
   .monitor-account-row[hidden]{display:none}
   .dashboard-loading{padding:24px;color:var(--ink-faint)}
+  .dashboard-skeleton{width:100%;height:100%;min-height:100vh;padding:34px 40px 30px;background:var(--paper);overflow:hidden}
+  .dashboard-skeleton-head{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:14px}
+  .dashboard-skeleton-title{display:flex;align-items:center;gap:12px;color:var(--ink);font-family:var(--display);font-size:20px;font-weight:700}
+  .dashboard-skeleton-title .page-loading-spinner{width:22px;height:22px}
+  .dashboard-skeleton-note{font-size:12px;color:var(--ink-faint)}
+  .dashboard-skeleton-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .dashboard-skeleton-kpis i,.dashboard-skeleton-panels i{display:block;border:1px solid var(--line);border-radius:14px;background:linear-gradient(100deg,#fff 20%,#f0efff 38%,#fff 56%);background-size:240% 100%;animation:dashboard-skeleton-pulse 1.25s ease-in-out infinite}
+  .dashboard-skeleton-kpis i{height:144px}
+  .dashboard-skeleton-panels{display:grid;grid-template-columns:minmax(0,3fr) minmax(240px,1fr);gap:12px;margin-top:12px}
+  .dashboard-skeleton-panels i{height:360px}
+  .dashboard-skeleton-panels i:last-child{animation-delay:.12s}
+  .dashboard-skeleton-footer{margin-top:13px;color:var(--ink-faint);font-size:12px}
+  @keyframes dashboard-skeleton-pulse{0%{background-position:100% 0}100%{background-position:-120% 0}}
   body.public-mode #dashboardCard{width:100vw;height:100vh;max-width:none;margin:0;transform:none;border:0;border-radius:0;box-shadow:none}
   body.public-mode #monitorDashboardCard{width:100vw;height:100vh;max-width:none;margin:0;transform:none;border:0;border-radius:0;box-shadow:none}
   body.public-mode #dashboardCard::after{height:8px}
@@ -529,13 +539,13 @@
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
   @media (max-width:900px){ .report-cloud-admin{grid-template-columns:1fr;align-items:stretch}.report-cloud-status{align-self:auto} }
-  @media (max-width:680px){ .wrap{padding:14px}.topbar{padding:12px 14px}.tagline{display:none}.history-popover{right:-2px;width:calc(100vw - 24px)}.history-item{align-items:flex-start;flex-direction:column}.history-links{justify-content:flex-start} }
+  @media (max-width:680px){ .wrap{padding:14px}.topbar{padding:12px 14px}.tagline{display:none}.history-popover{right:-2px;width:calc(100vw - 24px)}.history-item{align-items:flex-start;flex-direction:column}.history-links{justify-content:flex-start}.dashboard-skeleton{padding:76px 14px 20px}.dashboard-skeleton-head{align-items:flex-start;flex-direction:column}.dashboard-skeleton-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-skeleton-panels{grid-template-columns:1fr}.dashboard-skeleton-panels i{height:220px}body.public-mode .public-page-nav{top:16px;right:14px}body.public-mode.catalog-view .public-page-nav,body.public-mode.report-view .public-page-nav{top:70px}.public-page-nav .mini-btn{padding:8px 10px;font-size:11.5px}.page-loading-status{top:auto;bottom:18px}.page-loading-copy small{display:none!important}body.public-mode.catalog-view .page-loading-status,body.public-mode.report-view .page-loading-status{top:auto} }
   @media (prefers-reduced-motion:reduce){ *{animation-duration:.001ms!important;transition-duration:.001ms!important} }
 </style>
 </head>
-<body class="public-mode">
+<body class="public-mode dashboard-view">
 
-<div class="page-loading-status active" id="pageLoadingStatus" role="status" aria-live="polite" aria-label="页面数据加载中"><span class="page-loading-spinner" aria-hidden="true"></span><span class="page-loading-copy"><span id="pageLoadingText">正在加载页面数据</span><small>数据完成后会自动显示，请稍候</small></span></div>
+<div class="page-loading-status" id="pageLoadingStatus" role="status" aria-live="polite" aria-label="页面数据加载中"><span class="page-loading-spinner" aria-hidden="true"></span><span class="page-loading-copy"><span id="pageLoadingText">正在加载页面数据</span><small>数据完成后会自动显示，请稍候</small></span></div>
 
 <header class="topbar">
   <div class="brand">
@@ -579,6 +589,11 @@
     <button class="key-pill" id="keyPill"><span class="key-dot"></span><span id="keyPillText">未设置 Key</span></button>
   </div>
 </header>
+
+<nav class="public-page-nav" id="publicPageNav" aria-label="公开页面导航">
+  <button class="mini-btn public-page-prev" id="publicPagePrevBtn" type="button" hidden></button>
+  <button class="mini-btn public-page-next" id="publicPageNextBtn" type="button"></button>
+</nav>
 
 <div class="wrap">
 
@@ -699,39 +714,35 @@ shortdramatime"></textarea>
   </div>
 
   <!-- 结果 -->
-  <section class="dashboard-page" id="dashboardPage" hidden>
+  <section class="dashboard-page" id="dashboardPage">
     <div class="card dashboard-card" id="dashboardCard">
-      <div class="dashboard-loading">正在加载运营看板...</div>
-    </div>
-    <div class="page-switch dashboard-page-switch">
-      <button class="mini-btn dashboard-next-btn" id="dashboardNextBtn" type="button">下一页：公司短剧榜单</button>
+      <div class="dashboard-skeleton" aria-busy="true">
+        <div class="dashboard-skeleton-head"><div class="dashboard-skeleton-title"><span class="page-loading-spinner" aria-hidden="true"></span><span>正在读取今天最新报表</span></div><div class="dashboard-skeleton-note">已连接服务器，数据完成后自动显示</div></div>
+        <div class="dashboard-skeleton-kpis"><i></i><i></i><i></i><i></i></div>
+        <div class="dashboard-skeleton-panels"><i></i><i></i></div>
+        <div class="dashboard-skeleton-footer">刷新页面只读取数据库，不会启动重新抓取。</div>
+      </div>
     </div>
   </section>
 
   <section class="catalog-page" id="catalogPage" hidden>
     <iframe class="catalog-frame" id="catalogFrame" title="公司短剧榜单" data-src="/catalog?embed=1" loading="lazy"></iframe>
-    <div class="page-switch catalog-page-switch">
-      <button class="mini-btn" id="catalogBackBtn" type="button">上一页：运营看板</button>
-      <button class="mini-btn catalog-next-btn" id="catalogNextBtn" type="button">下一页：监控账号</button>
-    </div>
   </section>
 
   <section class="monitor-page" id="monitorPage" hidden>
     <div class="card monitor-dashboard-card" id="monitorDashboardCard">
-      <div class="dashboard-loading">正在加载监控账号看板...</div>
-    </div>
-    <div class="page-switch monitor-page-switch">
-      <button class="mini-btn" id="monitorBackBtn" type="button">上一页：公司短剧榜单</button>
-      <button class="mini-btn monitor-next-btn" id="monitorNextBtn" type="button">下一页：报表</button>
+      <div class="dashboard-skeleton" aria-busy="true">
+        <div class="dashboard-skeleton-head"><div class="dashboard-skeleton-title"><span class="page-loading-spinner" aria-hidden="true"></span><span>正在加载监控账号看板</span></div><div class="dashboard-skeleton-note">已连接服务器，数据完成后自动显示</div></div>
+        <div class="dashboard-skeleton-kpis"><i></i><i></i><i></i><i></i></div>
+        <div class="dashboard-skeleton-panels"><i></i><i></i></div>
+        <div class="dashboard-skeleton-footer">刷新页面只读取数据库，不会启动重新抓取。</div>
+      </div>
     </div>
   </section>
 
   <section class="report-page" id="reportPage" hidden>
-    <div class="page-switch report-page-switch">
-      <button class="mini-btn" id="dashboardBackBtn" type="button">上一页：监控账号</button>
-    </div>
     <div class="card" id="resultCard">
-    <div class="card-head"><h2>报表</h2><div class="report-head-actions"><button class="mini-btn" id="reportBackTopBtn" type="button">返回监控账号</button></div></div>
+    <div class="card-head"><h2>报表</h2></div>
     <div class="card-body">
       <div class="report-cloud-admin admin-only">
         <div>
@@ -1006,8 +1017,8 @@ function dashboardValidationSet(generatedAtMs){
 function applyCachedDashboardState(state){
   if(!state||!state.payload)return false;
   dashboardHistoryPayloads=state.history||[];
-  dashboardHistoryLoading=false;
-  dashboardHistoryReady=true;
+  dashboardHistoryLoading=!dashboardHistoryPayloads.length;
+  dashboardHistoryReady=!!dashboardHistoryPayloads.length;
   loadBackendPayload(state.payload,{source:"latest",quiet:true,skipCache:true});
   return true;
 }
@@ -1421,12 +1432,12 @@ function clearResults(){
   const reportPage=$("reportPage");
   const dashboard=$("dashboardCard");
   const monitor=$("monitorDashboardCard");
-  if(dashboardPage)dashboardPage.hidden=true;
+  if(dashboardPage)dashboardPage.hidden=publicPageView!=="dashboard";
   if(catalogPage)catalogPage.hidden=true;
-  if(monitorPage)monitorPage.hidden=true;
+  if(monitorPage)monitorPage.hidden=publicPageView!=="monitor";
   if(reportPage)reportPage.hidden=true;
-  if(dashboard){dashboard.style.display="none";dashboard.innerHTML='<div class="dashboard-loading">正在加载运营看板...</div>';}
-  if(monitor){monitor.style.display="none";monitor.innerHTML='<div class="dashboard-loading">正在加载监控账号看板...</div>';}
+  if(dashboard){dashboard.style.display="block";dashboard.innerHTML=publicLoadingSkeleton("正在加载运营看板...");}
+  if(monitor){monitor.style.display="block";monitor.innerHTML=publicLoadingSkeleton("正在加载监控账号看板...");}
   $("resultCard").style.display="none";
   $("resultTable").querySelector("thead").innerHTML="";
   $("resultTable").querySelector("tbody").innerHTML="";
@@ -1435,6 +1446,21 @@ function clearResults(){
   if($("detailCount"))$("detailCount").textContent="";
   if($("detailPager"))$("detailPager").classList.remove("show");
 }
+const PUBLIC_PAGE_ORDER=["dashboard","catalog","monitor","report"];
+const PUBLIC_PAGE_LABELS={dashboard:"运营看板",catalog:"公司短剧榜单",monitor:"监控账号",report:"报表"};
+function updatePublicPageNav(){
+  if(!isPublicMode())return;
+  const index=PUBLIC_PAGE_ORDER.indexOf(publicPageView);
+  const prev=$("publicPagePrevBtn"), next=$("publicPageNextBtn");
+  if(prev){
+    prev.hidden=index<=0;
+    if(index>0)prev.textContent="上一页："+PUBLIC_PAGE_LABELS[PUBLIC_PAGE_ORDER[index-1]];
+  }
+  if(next){
+    next.hidden=index<0||index>=PUBLIC_PAGE_ORDER.length-1;
+    if(index>=0&&index<PUBLIC_PAGE_ORDER.length-1)next.textContent="下一页："+PUBLIC_PAGE_LABELS[PUBLIC_PAGE_ORDER[index+1]];
+  }
+}
 function setPublicPageView(view){
   if(!isPublicMode())return;
   publicPageView=view==="report"?"report":(view==="monitor"?"monitor":(view==="catalog"?"catalog":"dashboard"));
@@ -1442,15 +1468,15 @@ function setPublicPageView(view){
   const catalogPage=$("catalogPage");
   const monitorPage=$("monitorPage");
   const reportPage=$("reportPage");
-  const hasDashboard=!!(rows.length||dramaRows.length);
   document.body.classList.toggle("dashboard-view",publicPageView==="dashboard");
   document.body.classList.toggle("catalog-view",publicPageView==="catalog");
   document.body.classList.toggle("monitor-view",publicPageView==="monitor");
   document.body.classList.toggle("report-view",publicPageView==="report");
-  if(dashboardPage)dashboardPage.hidden=publicPageView!=="dashboard"||!hasDashboard;
+  if(dashboardPage)dashboardPage.hidden=publicPageView!=="dashboard";
   if(catalogPage)catalogPage.hidden=publicPageView!=="catalog";
-  if(monitorPage)monitorPage.hidden=publicPageView!=="monitor"||!hasDashboard;
+  if(monitorPage)monitorPage.hidden=publicPageView!=="monitor";
   if(reportPage)reportPage.hidden=publicPageView!=="report";
+  updatePublicPageNav();
   if(publicPageView==="catalog")ensureCatalogFrame();
   window.scrollTo({top:0,left:0,behavior:"auto"});
 }
@@ -1826,12 +1852,13 @@ function compactDashboardPayload(payload){
     }))
   };
 }
-async function fetchReportPayloadForItem(item){
+async function fetchReportPayloadForItem(item,opts){
+  opts=opts||{};
   const url=(item&& (item.url||item.path))||"";
   if(!url)throw new Error("missing report url");
   const payload=url.startsWith("http")||url.startsWith("public_reports/")
-    ?await fetchJsonUrl(url)
-    :await backendFetchJson(url,{compact:"1"}, {sendSecret:false});
+    ?await (opts.quiet?fetchJsonUrlRaw:fetchJsonUrl)(url)
+    :await (opts.quiet?backendFetchJsonRaw:backendFetchJson)(url,{compact:"1"}, {sendSecret:false});
   return compactDashboardPayload(payload);
 }
 function dramaGrowthKey(row){
@@ -2668,6 +2695,13 @@ function renderDashboard(){
   if(isPublicMode())setPublicPageView(publicPageView);
   else if(page)page.hidden=false;
 }
+function publicLoadingSkeleton(message){
+  return '<div class="dashboard-skeleton" aria-busy="true">'+
+    '<div class="dashboard-skeleton-head"><div class="dashboard-skeleton-title"><span class="page-loading-spinner" aria-hidden="true"></span><span>'+esc(message||"正在读取今天最新报表")+'</span></div><div class="dashboard-skeleton-note">已连接服务器，数据完成后自动显示</div></div>'+
+    '<div class="dashboard-skeleton-kpis"><i></i><i></i><i></i><i></i></div>'+
+    '<div class="dashboard-skeleton-panels"><i></i><i></i></div>'+
+    '<div class="dashboard-skeleton-footer">刷新页面只读取数据库，不会启动重新抓取。</div></div>';
+}
 function renderDashboardLoading(message){
   const box=$("dashboardCard");
   const page=$("dashboardPage");
@@ -2675,10 +2709,10 @@ function renderDashboardLoading(message){
   const monitorPage=$("monitorPage");
   if(!box)return;
   box.style.display="block";
-  box.innerHTML='<div class="dashboard-loading">'+esc(message||"正在加载运营看板...")+'</div>';
+  box.innerHTML=publicLoadingSkeleton(message||"正在加载运营看板...");
   if(monitorBox){
     monitorBox.style.display="block";
-    monitorBox.innerHTML='<div class="dashboard-loading">'+esc(message||"正在加载监控账号看板...")+'</div>';
+    monitorBox.innerHTML=publicLoadingSkeleton(message||"正在加载监控账号看板...");
   }
   if(isPublicMode()){
     const reportPage=$("reportPage");
@@ -2721,7 +2755,7 @@ async function refreshDashboardHistory(opts){
     while(cursor<items.length){
       const index=cursor++;
       try{
-        const payload=await fetchReportPayloadForItem(items[index]);
+        const payload=await fetchReportPayloadForItem(items[index],{quiet});
         if(run!==dashboardHistoryRun)return;
         orderedPayloads[index]=payload;
       }catch(_){}
@@ -3218,7 +3252,7 @@ async function backendFetchJsonRaw(path, params, opts){
   if(controller)timer=window.setTimeout(()=>controller.abort(),opts.timeoutMs);
   let r;
   try{
-    r=await loadingFetch(backendUrl(path,params),{headers,cache:"no-store",signal:controller?controller.signal:undefined},"正在读取服务器数据");
+    r=await fetch(backendUrl(path,params),{headers,cache:"no-store",signal:controller?controller.signal:undefined});
   }catch(e){
     if(e&&e.name==="AbortError")throw new Error("请求超时，请减少一次输入的链接数量或稍后再试");
     throw e;
@@ -3238,7 +3272,7 @@ async function backendPostJsonRaw(path, body, params, opts){
   if(opts.requireSecret&&!secret)throw new Error("请先在页面上方填写任务密码（SCHEDULE_SECRET）");
   const headers={"Content-Type":"application/json"};
   if(secret&&opts.sendSecret!==false)headers["X-Schedule-Secret"]=secret;
-  const r=await loadingFetch((opts.sameOrigin?sameOriginBackendUrl:backendUrl)(path,params),{
+  const r=await fetch((opts.sameOrigin?sameOriginBackendUrl:backendUrl)(path,params),{
     method:"POST",
     headers,
     cache:"no-store",
@@ -3694,7 +3728,7 @@ async function fetchJsonUrlRaw(url,opts){
   const shouldBust=opts.noStore!==false&&(!cleanUrl.startsWith("public_reports/")||isLatestReport);
   const sep=String(url).includes("?")?"&":"?";
   const finalUrl=shouldBust?url+sep+"_="+Date.now():url;
-  const r=await loadingFetch(finalUrl,{cache:shouldBust?"no-store":"default"},"正在下载报表数据");
+  const r=await fetch(finalUrl,{cache:shouldBust?"no-store":"default"});
   const text=await r.text();
   let data=null;try{data=text?JSON.parse(text):null;}catch(_){}
   if(!r.ok)throw new Error((data&&data.error)||("HTTP "+r.status));
@@ -3831,20 +3865,22 @@ function loadBackendPayload(payload,opts){
 }
 async function loadBackendLatest(opts){
   opts=opts||{};
+  const getBackend=opts.quiet?backendFetchJsonRaw:backendFetchJson;
+  const getFile=opts.quiet?fetchJsonUrlRaw:fetchJsonUrl;
   if(!opts.quiet)backendSetStatus("正在加载最新结果…");
   const shouldCheckJob=!isPublicMode();
   if(shouldCheckJob)await refreshBackendJobState();
   let payload=null;
   try{
     try{
-      payload=await backendFetchJson("/supabase/latest",{}, {sendSecret:false});
+      payload=await getBackend("/supabase/latest",{}, {sendSecret:false});
     }catch(_){
-      payload=await backendFetchJson("/reports/latest_report.json",{}, {sendSecret:false});
+      payload=await getBackend("/reports/latest_report.json",{}, {sendSecret:false});
     }
     if(shouldCheckJob)await refreshBackendJobState();
   }catch(firstErr){
     try{
-      payload=await fetchJsonUrl("public_reports/latest_report.json");
+      payload=await getFile("public_reports/latest_report.json");
     }catch(_){
       throw firstErr;
     }
@@ -3895,8 +3931,9 @@ function renderHistoryList(items, source){
     window.open(url.startsWith("http")||url.startsWith("public_reports/")?url:backendBase()+url,"_blank","noopener");
   }));
 }
-async function loadPublishedHistory(){
-  const manifest=await fetchJsonUrl("public_reports/manifest.json");
+async function loadPublishedHistory(opts){
+  opts=opts||{};
+  const manifest=await (opts.quiet?fetchJsonUrlRaw:fetchJsonUrl)("public_reports/manifest.json");
   const items=(manifest.reports||[]).map(r=>({
     name:r.name,
     title:r.title||reportStamp(r.name),
@@ -3911,15 +3948,17 @@ async function loadPublishedHistory(){
   renderHistoryList(items,"历史存档");
   return items;
 }
-async function loadSupabaseHistory(){
-  const data=await backendFetchJson("/supabase/reports",{limit:"30"}, {sendSecret:false});
+async function loadSupabaseHistory(opts){
+  opts=opts||{};
+  const data=await (opts.quiet?backendFetchJsonRaw:backendFetchJson)("/supabase/reports",{limit:"30"}, {sendSecret:false});
   const items=data.reports||[];
   if(!items.length)throw new Error("empty Supabase history");
   renderHistoryList(items,"Supabase");
   return items;
 }
-async function loadRenderHistory(){
-  const data=await backendFetchJson("/reports",{}, {sendSecret:false});
+async function loadRenderHistory(opts){
+  opts=opts||{};
+  const data=await (opts.quiet?backendFetchJsonRaw:backendFetchJson)("/reports",{}, {sendSecret:false});
   const reports=data.reports||[];
   const jsonReports=reports.filter(r=>/^scheduled_report_.*\.json$/.test(r.name));
   const items=jsonReports.map(r=>{
@@ -3961,10 +4000,10 @@ async function loadBackendReports(opts){
   }
   backendSetStatus("正在刷新历史记录…");
   let supabase=[], published=[], render=[], lastErr=null;
-  try{supabase=await loadSupabaseHistory();}catch(e){lastErr=e;}
+  try{supabase=await loadSupabaseHistory({quiet});}catch(e){lastErr=e;}
   if(!isPublicMode()||!supabase.length){
-    try{published=await loadPublishedHistory();}catch(e){lastErr=e;}
-    try{render=await loadRenderHistory();}catch(e){lastErr=e;}
+    try{published=await loadPublishedHistory({quiet});}catch(e){lastErr=e;}
+    try{render=await loadRenderHistory({quiet});}catch(e){lastErr=e;}
   }
   const items=mergeReportHistoryItems(supabase,published,render);
   reportHistoryItems=items;
@@ -4002,7 +4041,7 @@ async function loadBackendReports(opts){
   throw lastErr||new Error("empty history");
 }
 async function loadPublicLatestMeta(){
-  const data=await backendFetchJson("/supabase/reports",{limit:"1"}, {sendSecret:false});
+  const data=await backendFetchJsonRaw("/supabase/reports",{limit:"1"}, {sendSecret:false});
   return (data.reports||[])[0]||null;
 }
 async function refreshPublicHistoryInBackground(latestChanged){
@@ -4030,27 +4069,36 @@ async function loadPublicDashboardTask(){
   const latestMetaPromise=loadPublicLatestMeta().catch(()=>null);
   const cachedState=await cachedStatePromise;
   const cachedMs=cachedState?dashboardPayloadTime(cachedState.payload):0;
+  const cacheTrusted=!!(cachedState&&dashboardValidationIsFresh(cachedMs));
   dashboardHistoryLoading=true;
   dashboardHistoryReady=false;
-  if(cachedState)applyCachedDashboardState(cachedState);
+  if(cacheTrusted)applyCachedDashboardState(cachedState);
   else renderDashboardLoading("正在读取最新数据...");
   const latestMeta=await latestMetaPromise;
   const latestMetaMs=reportItemMs(latestMeta);
-  let cacheReady=!!(cachedState&&(!latestMetaMs||cachedMs>=latestMetaMs-1000));
+  let cacheReady=!!(cachedState&&latestMetaMs&&cachedMs>=latestMetaMs-1000);
   if(cacheReady){
+    if(!cacheTrusted)applyCachedDashboardState(cachedState);
     if(latestMetaMs)dashboardValidationSet(latestMetaMs);
   }else{
-    renderDashboardLoading("正在同步最新数据...");
+    if(!cacheTrusted)renderDashboardLoading("正在同步最新数据...");
     try{
       const latestPayload=await loadBackendLatest({quiet:true,skipCache:true});
       await dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,latestPayload);
       dashboardValidationSet(currentReportMs());
       if(cachedState&&cachedState.history.length)dashboardHistoryPayloads=cachedState.history;
-      dashboardHistoryLoading=false;
-      dashboardHistoryReady=true;
+      dashboardHistoryLoading=!dashboardHistoryPayloads.length;
+      dashboardHistoryReady=!!dashboardHistoryPayloads.length;
       renderDashboard();
       renderResultTable();
     }catch(e){
+      if(cacheTrusted){
+        backendSetStatus("最新数据校验失败，暂时显示已验证缓存:"+(e.message||e));
+        renderDashboard();
+        renderResultTable();
+        deferPublicHistoryRefresh(false);
+        return;
+      }
       dashboardHistoryLoading=false;
       dashboardHistoryReady=true;
       backendSetStatus("最新数据加载失败:"+(e.message||e));
@@ -4061,8 +4109,8 @@ async function loadPublicDashboardTask(){
   }
   const latestChanged=!cacheReady||currentReportMs()>cachedMs+1000;
   if(rows.length||dramaRows.length){
-    dashboardHistoryLoading=false;
-    dashboardHistoryReady=true;
+    dashboardHistoryLoading=!dashboardHistoryPayloads.length;
+    dashboardHistoryReady=!!dashboardHistoryPayloads.length;
     renderDashboard();
     renderResultTable();
   }
@@ -4374,15 +4422,16 @@ function init(){
     document.addEventListener("click",closeHistoryMenu);
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeHistoryMenu();});
   }
-  const catalogPageBtn=$("catalogPageBtn"), dashboardNext=$("dashboardNextBtn"), catalogBack=$("catalogBackBtn"), catalogNext=$("catalogNextBtn"), monitorBack=$("monitorBackBtn"), monitorNext=$("monitorNextBtn"), dashboardBack=$("dashboardBackBtn"), reportBackTop=$("reportBackTopBtn");
+  const catalogPageBtn=$("catalogPageBtn"), publicPagePrev=$("publicPagePrevBtn"), publicPageNext=$("publicPageNextBtn");
   if(catalogPageBtn)catalogPageBtn.addEventListener("click",()=>setPublicPageView("catalog"));
-  if(dashboardNext)dashboardNext.addEventListener("click",()=>setPublicPageView("catalog"));
-  if(catalogBack)catalogBack.addEventListener("click",()=>setPublicPageView("dashboard"));
-  if(catalogNext)catalogNext.addEventListener("click",()=>setPublicPageView("monitor"));
-  if(monitorBack)monitorBack.addEventListener("click",()=>setPublicPageView("catalog"));
-  if(monitorNext)monitorNext.addEventListener("click",()=>setPublicPageView("report"));
-  if(dashboardBack)dashboardBack.addEventListener("click",()=>setPublicPageView("monitor"));
-  if(reportBackTop)reportBackTop.addEventListener("click",()=>setPublicPageView("monitor"));
+  if(publicPagePrev)publicPagePrev.addEventListener("click",()=>{
+    const index=PUBLIC_PAGE_ORDER.indexOf(publicPageView);
+    if(index>0)setPublicPageView(PUBLIC_PAGE_ORDER[index-1]);
+  });
+  if(publicPageNext)publicPageNext.addEventListener("click",()=>{
+    const index=PUBLIC_PAGE_ORDER.indexOf(publicPageView);
+    if(index>=0&&index<PUBLIC_PAGE_ORDER.length-1)setPublicPageView(PUBLIC_PAGE_ORDER[index+1]);
+  });
   setPublicPageView("dashboard");
   $("summaryTabBtn").addEventListener("click",()=>{resultView="summary";renderResultTable();});
   $("detailTabBtn").addEventListener("click",()=>{resultView="detail";resetDetailPage();renderResultTable();});
@@ -4480,7 +4529,7 @@ function init(){
   $("testKeyBtn").addEventListener("click",testKey);
   $("keyModal").addEventListener("click",e=>{if(e.target===$("keyModal"))closeKeyModal();});
   document.addEventListener("keydown",e=>{if(e.key==="Escape")closeKeyModal();});
-  setTimeout(loadPublicDashboard,600);
+  loadPublicDashboard();
   if(!isAdminMode()){
     setInterval(refreshPublicDashboardQuiet,PUBLIC_REPORT_REFRESH_MS);
     document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshPublicDashboardQuiet();});

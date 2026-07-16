@@ -1,4 +1,5 @@
 import datetime
+import gzip
 import io
 import json
 import pathlib
@@ -297,6 +298,24 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertEqual(handler.responses[0][0], 403)
         load_catalog.assert_not_called()
 
+    def test_large_json_response_is_gzip_compressed_when_browser_accepts_it(self):
+        handler = object.__new__(proxy.Handler)
+        handler.headers = {"Accept-Encoding": "gzip, deflate"}
+        handler.send_response = mock.Mock()
+        handler.send_header = mock.Mock()
+        handler.end_headers = mock.Mock()
+        handler._cors = mock.Mock()
+        handler.wfile = io.BytesIO()
+
+        payload = {"summary": [{"account": "demo", "title": "短剧" * 100}] * 300}
+        handler._send_json(200, payload)
+
+        response_headers = dict(call.args for call in handler.send_header.call_args_list)
+        self.assertEqual(response_headers.get("Content-Encoding"), "gzip")
+        self.assertEqual(response_headers.get("Vary"), "Accept-Encoding")
+        decoded = json.loads(gzip.decompress(handler.wfile.getvalue()).decode("utf-8"))
+        self.assertEqual(decoded, payload)
+
     def test_schedule_account_parser_accepts_handles_and_tiktok_profile_links(self):
         accounts = proxy._parse_accounts(
             "demo.one\n@demo_two\nhttps://www.tiktok.com/@demo.three/?lang=en\n"
@@ -553,7 +572,9 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn('const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v1";', page)
             self.assertIn("const cachedStatePromise=readCachedDashboardStateAsync();", page)
             self.assertIn("const latestMetaPromise=loadPublicLatestMeta().catch(()=>null);", page)
-            self.assertIn("if(cachedState)applyCachedDashboardState(cachedState);", page)
+            self.assertIn("const cacheTrusted=!!(cachedState&&dashboardValidationIsFresh(cachedMs));", page)
+            self.assertIn("if(cacheTrusted)applyCachedDashboardState(cachedState);", page)
+            self.assertIn("if(!cacheTrusted)applyCachedDashboardState(cachedState);", page)
             self.assertIn("cachedMs>=latestMetaMs-1000", page)
             self.assertIn("await dashboardCacheSet(DASHBOARD_LATEST_CACHE_KEY,latestPayload);", page)
             self.assertIn("function deferPublicHistoryRefresh(latestChanged)", page)
@@ -562,6 +583,14 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn("if(!isPublicMode()||!supabase.length)", page)
             self.assertIn('document.addEventListener("visibilitychange"', page)
             self.assertIn('window.addEventListener("focus",refreshPublicDashboardQuiet)', page)
+            self.assertIn('id="publicPageNav"', page)
+            self.assertIn('.public-page-nav .mini-btn[hidden]{display:none!important}', page)
+            self.assertIn('id="publicPagePrevBtn"', page)
+            self.assertIn('id="publicPageNextBtn"', page)
+            self.assertNotIn('class="page-switch', page)
+            self.assertNotIn("setTimeout(loadPublicDashboard,600)", page)
+            self.assertIn("loadPublicDashboard();", page)
+            self.assertIn('await fetch(backendUrl(path,params)', page)
             self.assertNotIn('backendFetchJson("/run-scheduled",{wait:"1"}', page)
             self.assertNotIn("function tickScheduler()", page)
             self.assertNotIn("setInterval(tickScheduler", page)
