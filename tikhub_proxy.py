@@ -551,7 +551,7 @@ def _first_addr_url(value):
             text = "https:" + text
         return text if text.startswith(("http://", "https://")) else ""
     if isinstance(value, dict):
-        for key in ("url_list", "urlList", "urls"):
+        for key in ("url_list", "urlList", "UrlList", "URLList", "urls"):
             urls = value.get(key)
             if isinstance(urls, list):
                 for url in urls:
@@ -563,7 +563,7 @@ def _first_addr_url(value):
                 if text:
                     return text
         for key in (
-            "url", "uri", "play_url", "playUrl", "download_url", "downloadUrl",
+            "url", "Url", "URL", "uri", "play_url", "playUrl", "download_url", "downloadUrl",
             "original_video_url", "originalVideoUrl", "watermark_free_url", "watermarkFreeUrl",
         ):
             text = _first_addr_url(value.get(key))
@@ -587,22 +587,32 @@ def _video_play_url_from_item(item):
             "play_addr_h264", "playAddrH264", "play_addr",
             "playAddr", "play_addr_bytevc1", "playAddrBytevc1",
             "play_addr_265", "playAddr265", "play_addr_lowbr", "playAddrLowbr",
-            "play_url", "playUrl",
+            "play_url", "playUrl", "PlayAddrStruct", "playAddrStruct",
         ):
             containers.append(video.get(key))
-        bit_rates = video.get("bit_rate") or video.get("bitRate") or video.get("bit_rates") or []
+        bit_rates = (
+            video.get("bit_rate") or video.get("bitRate") or video.get("bit_rates")
+            or video.get("bitrateInfo") or video.get("BitrateInfo") or []
+        )
         if isinstance(bit_rates, list):
             for item_rate in bit_rates:
                 if isinstance(item_rate, dict):
-                    for key in ("play_addr", "playAddr", "play_addr_h264", "playAddrH264", "play_url", "playUrl"):
+                    for key in (
+                        "play_addr", "playAddr", "play_addr_h264", "playAddrH264",
+                        "play_url", "playUrl", "PlayAddr", "PlayAddrStruct", "playAddrStruct",
+                    ):
                         containers.append(item_rate.get(key))
-        for key in ("download_addr", "downloadAddr", "download_url", "downloadUrl"):
+        for key in (
+            "download_addr", "downloadAddr", "download_url", "downloadUrl",
+            "DownloadAddr", "DownloadAddrStruct", "downloadAddrStruct",
+        ):
             containers.append(video.get(key))
     # Some TikHub response versions expose the media address on the item/data
     # object instead of nesting it under `video`.
     for key in (
         "play_addr_h264", "playAddrH264", "play_addr", "playAddr",
-        "play_url", "playUrl", "download_addr", "downloadAddr",
+        "play_url", "playUrl", "PlayAddrStruct", "playAddrStruct",
+        "download_addr", "downloadAddr", "DownloadAddr", "DownloadAddrStruct",
         "download_url", "downloadUrl", "url_list", "urlList",
         "original_video_url", "originalVideoUrl", "watermark_free_url", "watermarkFreeUrl",
     ):
@@ -623,7 +633,7 @@ def _video_play_url_from_tree(obj, depth=0):
             return url
         for key in (
             "aweme_detail", "awemeDetail", "item_info", "itemInfo",
-            "item", "aweme", "video_detail", "videoDetail", "data",
+            "item", "itemStruct", "aweme", "video_detail", "videoDetail", "data",
         ):
             if key in obj:
                 url = _video_play_url_from_tree(obj.get(key), depth + 1)
@@ -636,7 +646,11 @@ def _video_play_url_from_tree(obj, depth=0):
                     url = _video_play_url_from_tree(item, depth + 1)
                     if url:
                         return url
-        for value in obj.values():
+        for key, value in obj.items():
+            # A TikTok work's background music also has a `playUrl`.  It must
+            # never be accepted as the work's video source.
+            if str(key).lower() in ("music", "music_info", "musicinfo"):
+                continue
             if isinstance(value, (dict, list)):
                 url = _video_play_url_from_tree(value, depth + 1)
                 if url:

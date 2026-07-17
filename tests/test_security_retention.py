@@ -223,6 +223,23 @@ class PlaySourceResolutionTests(unittest.TestCase):
             }),
             "https://cdn.example/camel.mp4",
         )
+        self.assertEqual(
+            proxy._video_play_url_from_tree({
+                "data": {
+                    "itemInfo": {
+                        "itemStruct": {
+                            "music": {"playUrl": "https://cdn.example/audio.mp3"},
+                            "video": {
+                                "PlayAddrStruct": {
+                                    "UrlList": ["https://cdn.example/new-web-video.mp4"],
+                                },
+                            },
+                        },
+                    },
+                },
+            }),
+            "https://cdn.example/new-web-video.mp4",
+        )
 
     def test_id_resolvers_fall_back_to_share_link_resolver(self):
         calls = []
