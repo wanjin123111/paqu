@@ -693,6 +693,16 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertIn('JSON.stringify({ accounts: raw, mode: "append" })', admin_js)
         self.assertIn('loadingMessage: "正在确认账号已进入监控池"', admin_js)
         self.assertIn('const missing = (payload.added || []).filter', admin_js)
+        self.assertIn('id="accountDiscoveryInput"', admin_html)
+        self.assertIn('id="accountDiscoveryRunBtn"', admin_html)
+        self.assertIn('id="accountDiscoveryLoadBtn"', admin_html)
+        self.assertIn('id="accountDiscoveryDirectBtn"', admin_html)
+        self.assertIn('id="accountDiscoveryAddAllBtn"', admin_html)
+        self.assertIn('id="accountDiscoveryBody"', admin_html)
+        self.assertIn('/discover-accounts?mode=accounts', admin_js)
+        self.assertIn('data-add-discovered', admin_js)
+        self.assertIn('function addAllDiscoveredAccounts()', admin_js)
+        self.assertIn('function addDirectDiscoveryAccounts()', admin_js)
         admin_js = (root / "admin.js").read_text(encoding="utf-8")
         self.assertIn('report = await api(`/supabase/latest?t=${Date.now()}`', admin_js)
         self.assertIn('report = await api(`/public_reports/latest_report.json?t=${Date.now()}`', admin_js)
@@ -783,22 +793,15 @@ class DiscoveryWorksTests(unittest.TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["works"][0]["source_endpoint"], "account-posts")
 
-    def test_both_frontends_expose_account_and_work_modes(self):
+    def test_account_discovery_is_admin_only(self):
         root = pathlib.Path(proxy.ROOT)
         for name in ("index.html", "tikhub-report-frontend.html"):
             page = (root / name).read_text(encoding="utf-8")
-            self.assertIn('id="discoverModeSelect"', page)
-            self.assertIn('<option value="works">作品</option>', page)
-            self.assertIn('mode:discoveryMode', page)
-            self.assertIn('粘贴 TikTok 作品链接、账号主页链接或输入关键词', page)
-            self.assertNotIn('id="discoverSecretInput"', page)
-            self.assertNotIn('id="discoverSecretSaveBtn"', page)
-            self.assertNotIn('id="discoverLimitInput"', page)
-            self.assertIn('id="backendSecretInline"', page)
-            self.assertIn('粘贴 TikTok 账号主页链接或输入 @账号', page)
-            self.assertIn('openDiscoveredSeries', page)
-            self.assertIn('整剧列表/下载', page)
-            self.assertNotIn('throw new Error("missing SCHEDULE_SECRET")', page)
+            self.assertNotIn('id="discoverTabBtn"', page)
+            self.assertNotIn('id="discoverToolbar"', page)
+            self.assertNotIn('/discover-accounts', page)
+            self.assertNotIn('discoveryMode', page)
+            self.assertNotIn('发现账号 / 作品', page)
         self.assertEqual(
             (root / "index.html").read_bytes(),
             (root / "tikhub-report-frontend.html").read_bytes(),

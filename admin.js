@@ -41,6 +41,11 @@
     editorSourceKeys: [],
     editorDramaId: "",
     editorBoundAccounts: [],
+    discoveryAccounts: [],
+    discoveryGeneratedAt: "",
+    discoveryBusy: false,
+    discoveryMessage: "",
+    discoveryLoaded: false,
   };
 
   const titles = {
@@ -405,6 +410,7 @@
       $("accountSource").textContent = `来源：后端监控池 ${state.backendAccounts.length} 个账号`;
       renderStats();
       renderAccounts();
+      renderAccountDiscovery();
       renderAccountBindingPicker();
       if (showMessage) toast(`已读取 ${state.backendAccounts.length} 个监控账号`);
     } catch (error) {
@@ -422,7 +428,7 @@
     if (name === "review") renderReview();
     if (name === "claimed") renderClaimed();
     if (name === "dramas") renderDramas();
-    if (name === "accounts") renderAccounts();
+    if (name === "accounts") { renderAccounts(); renderAccountDiscovery(); }
   }
 
   function renderStats() {
@@ -539,6 +545,161 @@
       : `<div class="card empty" style="grid-column:1/-1"><strong>没有找到账号</strong>请调整搜索条件或刷新后端账号池</div>`;
   }
 
+  function setDiscoveryStatus(message, kind = "") {
+    state.discoveryMessage = message || "";
+    const node = $("accountDiscoveryStatus");
+    if (!node) return;
+    node.textContent = state.discoveryMessage || "输入账号主页链接、@账号或昵称后开始搜索";
+    node.className = `account-discovery-status ${kind}`.trim();
+  }
+
+  function discoveryErrorSummary(payload) {
+    const errors = Array.isArray(payload?.errors) ? payload.errors : [];
+    return errors.map((item) => {
+      if (typeof item === "string") return item;
+      if (!item) return "";
+      return `${item.source ? `[${item.source}] ` : ""}${item.message || item.error || ""}${item.hint ? ` ${item.hint}` : ""}`.trim();
+    }).filter(Boolean).slice(0, 2).join("；");
+  }
+
+  function monitoredAccountSet() {
+    return new Set(state.backendAccounts.map((account) => text(account).replace(/^@+/, "").toLowerCase()).filter(Boolean));
+  }
+
+  function renderAccountDiscovery() {
+    const body = $("accountDiscoveryBody");
+    const wrap = $("accountDiscoveryTableWrap");
+    if (!body || !wrap) return;
+    const monitored = monitoredAccountSet();
+    const rows = state.discoveryAccounts.map((row) => ({
+      ...row,
+      account: text(row.account).replace(/^@+/, ""),
+      already_monitored: Boolean(row.already_monitored || monitored.has(text(row.account).replace(/^@+/, "").toLowerCase())),
+    })).sort((a, b) => Math.max(number(b.sample_max_views), number(b.total_views), number(b.followers)) - Math.max(number(a.sample_max_views), number(a.total_views), number(a.followers)));
+    const available = rows.filter((row) => row.account && !row.already_monitored);
+    $("accountDiscoveryAddAllBtn").disabled = state.discoveryBusy || !available.length;
+    ["accountDiscoveryRunBtn", "accountDiscoveryLoadBtn", "accountDiscoveryDirectBtn"].forEach((id) => { $(id).disabled = state.discoveryBusy; });
+    wrap.hidden = !state.discoveryLoaded && !state.discoveryBusy && !rows.length;
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="8"><div class="candidate-empty"><strong>${state.discoveryBusy ? "正在搜索 TikTok 账号" : "没有候选账号"}</strong>${escapeHtml(state.discoveryMessage || "输入主页链接、@账号或昵称关键词后点击“搜索账号”")}</div></td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map((row) => {
+      const account = row.account;
+      const profile = text(row.profile_url) || `https://www.tiktok.com/@${encodeURIComponent(account)}`;
+      const sampleLink = text(row.sample_video_link);
+      const keywords = Array.isArray(row.source_keywords) ? row.source_keywords.join(" / ") : text(row.source_keywords);
+      const avatar = text(row.avatar);
+      return `<tr>
+        <td><div class="candidate-profile">${avatar ? `<img class="candidate-avatar" src="${escapeHtml(avatar)}" alt="" loading="lazy" />` : `<div class="avatar" style="border-radius:50%">${escapeHtml((row.nickname || account).slice(0, 2).toUpperCase())}</div>`}<div><div class="account-name">${escapeHtml(row.nickname || account)}</div><a class="account-handle" href="${escapeHtml(profile)}" target="_blank" rel="noopener noreferrer">@${escapeHtml(account)}</a></div></div></td>
+        <td class="metric">${formatNumber(row.followers)}</td><td class="metric">${formatNumber(row.dramas || row.sample_video_count)}</td><td class="metric">${formatNumber(row.total_views || row.sample_views)}</td>
+        <td class="metric">${sampleLink ? `<a href="${escapeHtml(sampleLink)}" target="_blank" rel="noopener noreferrer">${formatNumber(row.sample_max_views)}</a>` : formatNumber(row.sample_max_views)}</td>
+        <td><div class="candidate-keywords">${escapeHtml(keywords || "—")}</div></td><td><span class="badge ${row.already_monitored ? "owned" : "pending"}">${row.already_monitored ? "已监控" : "候选"}</span></td>
+        <td><div class="action-row"><a class="btn small" href="${escapeHtml(profile)}" target="_blank" rel="noopener noreferrer">看主页</a><button class="btn small primary" data-add-discovered="${escapeHtml(account)}" ${row.already_monitored ? "disabled" : ""}>${row.already_monitored ? "已加入" : "加入监控"}</button></div></td></tr>`;
+    }).join("");
+  }
+
+  function loadDiscoveryPayload(payload) {
+    state.discoveryAccounts = Array.isArray(payload?.accounts) ? payload.accounts : [];
+    state.discoveryGeneratedAt = payload?.generated_at || "";
+    state.discoveryLoaded = true;
+  }
+
+  async function loadAccountDiscoveryLatest() {
+    if (!requireAdminSession("读取上次账号搜索结果")) return;
+    state.discoveryBusy = true;
+    setDiscoveryStatus("正在读取上次账号搜索结果...");
+    renderAccountDiscovery();
+    try {
+      const payload = await api(`/discover-accounts?mode=accounts&t=${Date.now()}`, { headers: adminHeaders(), loadingMessage: "正在读取上次账号搜索结果" });
+      loadDiscoveryPayload(payload);
+      setDiscoveryStatus(state.discoveryAccounts.length ? `已读取 ${state.discoveryAccounts.length} 个候选账号${state.discoveryGeneratedAt ? ` · ${formatTime(state.discoveryGeneratedAt)}` : ""}` : "上次搜索没有候选账号", state.discoveryAccounts.length ? "good" : "");
+    } catch (error) {
+      setDiscoveryStatus(`读取失败：${error.message}`, "bad");
+      toast(error.message, true);
+    } finally {
+      state.discoveryBusy = false;
+      renderAccountDiscovery();
+    }
+  }
+
+  async function runAccountDiscovery() {
+    if (state.discoveryBusy || !requireAdminSession("搜索账号")) return;
+    const keywords = text($("accountDiscoveryInput").value);
+    if (!keywords) return setDiscoveryStatus("请输入 TikTok 主页链接、@账号或昵称关键词", "bad");
+    state.discoveryBusy = true;
+    state.discoveryLoaded = true;
+    setDiscoveryStatus("正在读取 TikTok 账号主页和短剧数据，通常 1 分钟内完成...");
+    renderAccountDiscovery();
+    try {
+      const params = new URLSearchParams({ mode: "accounts", run: "1", keywords, queries: keywords, limit: "40", min_followers: "0", min_dramas: "0", max_videos: "20" });
+      const payload = await api(`/discover-accounts?${params.toString()}`, { headers: adminHeaders(), loadingMessage: "正在搜索 TikTok 账号", loadingDetail: "正在读取账号主页和短剧样本，请稍候" });
+      loadDiscoveryPayload(payload);
+      const detail = discoveryErrorSummary(payload);
+      setDiscoveryStatus(state.discoveryAccounts.length ? `搜索完成 · 候选 ${state.discoveryAccounts.length} 个` : `本次没有找到账号${detail ? `：${detail}` : "，请检查输入后重试"}`, state.discoveryAccounts.length ? "good" : "bad");
+    } catch (error) {
+      setDiscoveryStatus(`搜索失败：${error.message}`, "bad");
+      toast(error.message, true);
+    } finally {
+      state.discoveryBusy = false;
+      renderAccountDiscovery();
+    }
+  }
+
+  function directAccountNames(raw) {
+    const result = [];
+    const seen = new Set();
+    for (const part of text(raw).split(/[\s,，;；]+/)) {
+      const urlMatch = part.match(/tiktok\.com\/@([^/?#]+)/i);
+      const account = decodeURIComponent(urlMatch ? urlMatch[1] : part).replace(/^@+/, "").trim();
+      const key = account.toLowerCase();
+      if (!account || !/^[A-Za-z0-9._]+$/.test(account) || seen.has(key)) continue;
+      seen.add(key); result.push(account);
+    }
+    return result;
+  }
+
+  async function addDiscoveryAccounts(accounts, label = "账号") {
+    const clean = cleanBoundAccounts(accounts);
+    if (!clean.length || state.discoveryBusy || !requireAdminSession("添加监控账号")) return;
+    state.discoveryBusy = true;
+    setDiscoveryStatus(`正在把 ${clean.length} 个${label}加入后端监控池...`);
+    renderAccountDiscovery();
+    try {
+      const payload = await api("/discover-accounts", { method: "POST", headers: adminHeaders(true), body: JSON.stringify({ accounts: clean }), loadingMessage: "正在添加监控账号" });
+      const verified = await api(`/schedule-accounts?t=${Date.now()}`, { headers: adminHeaders(), loadingMessage: "正在确认账号已进入后端监控池" });
+      state.backendAccounts = verified.accounts || [];
+      const monitored = monitoredAccountSet();
+      const missing = clean.filter((account) => !monitored.has(account.toLowerCase()));
+      if (missing.length) throw new Error(`账号池确认失败：${missing.join("、")}`);
+      state.discoveryAccounts.forEach((row) => { if (monitored.has(text(row.account).toLowerCase())) row.already_monitored = true; });
+      $("accountSource").textContent = `来源：后端监控池 ${state.backendAccounts.length} 个账号`;
+      const added = Array.isArray(payload.added) ? payload.added.length : 0;
+      setDiscoveryStatus(`已新增 ${added} 个账号，${clean.length - added} 个已存在`, "good");
+      renderStats(); renderAccounts(); renderAccountBindingPicker();
+      toast(added ? `已新增 ${added} 个监控账号` : "这些账号已在监控池中");
+    } catch (error) {
+      setDiscoveryStatus(`加入失败：${error.message}`, "bad");
+      toast(error.message, true);
+    } finally {
+      state.discoveryBusy = false;
+      renderAccountDiscovery();
+    }
+  }
+
+  async function addAllDiscoveredAccounts() {
+    const monitored = monitoredAccountSet();
+    const accounts = state.discoveryAccounts.map((row) => text(row.account).replace(/^@+/, "")).filter((account) => account && !monitored.has(account.toLowerCase()));
+    if (!accounts.length) return setDiscoveryStatus("候选账号都已经在监控池", "good");
+    await addDiscoveryAccounts(accounts, "候选账号");
+  }
+
+  async function addDirectDiscoveryAccounts() {
+    const accounts = directAccountNames($("accountDiscoveryInput").value);
+    if (!accounts.length) return setDiscoveryStatus("直接加入只接受 @账号或 TikTok 主页链接；昵称请先搜索后再选择", "bad");
+    await addDiscoveryAccounts(accounts, "账号");
+  }
+
   function reviewRows() {
     const query = text($("reviewSearch").value).toLowerCase();
     const filter = $("reviewFilter").value;
@@ -646,6 +807,7 @@
     renderStats();
     renderDashboard();
     renderAccounts();
+    renderAccountDiscovery();
     renderReview();
     renderClaimed();
     renderDramas();
@@ -850,6 +1012,13 @@
   $("loadBackendAccountsBtn").addEventListener("click", () => loadBackendAccounts());
   $("addAccountBtn").addEventListener("click", () => { if (requireAdminSession("添加账号")) $("accountDialog").showModal(); });
   $("saveAccountsBtn").addEventListener("click", (event) => { event.preventDefault(); addAccounts(); });
+  $("accountDiscoveryRunBtn").addEventListener("click", runAccountDiscovery);
+  $("accountDiscoveryLoadBtn").addEventListener("click", loadAccountDiscoveryLatest);
+  $("accountDiscoveryDirectBtn").addEventListener("click", addDirectDiscoveryAccounts);
+  $("accountDiscoveryAddAllBtn").addEventListener("click", addAllDiscoveredAccounts);
+  $("accountDiscoveryInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); runAccountDiscovery(); }
+  });
   $("newDramaBtn").addEventListener("click", () => openDramaEditor());
   $("newDramaBtn2").addEventListener("click", () => openDramaEditor());
   $("saveDramaBtn").addEventListener("click", (event) => { event.preventDefault(); saveEditor(); });
@@ -896,6 +1065,8 @@
   $("settingsExportBtn").addEventListener("click", exportCatalog);
 
   document.addEventListener("click", (event) => {
+    const discoveredButton = event.target.closest("[data-add-discovered]");
+    if (discoveredButton) return addDiscoveryAccounts([discoveredButton.dataset.addDiscovered], "候选账号");
     const sourceButton = event.target.closest("[data-edit-source]");
     if (sourceButton) return openSourceEditor([sourceButton.dataset.editSource]);
     const dramaButton = event.target.closest("[data-edit-drama]");
