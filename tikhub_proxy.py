@@ -594,10 +594,11 @@ def _video_play_url_from_item(item):
     containers = []
     if isinstance(video, dict):
         for key in (
+            "PlayAddrStruct", "playAddrStruct",
             "play_addr_h264", "playAddrH264", "play_addr",
             "playAddr", "play_addr_bytevc1", "playAddrBytevc1",
             "play_addr_265", "playAddr265", "play_addr_lowbr", "playAddrLowbr",
-            "play_url", "playUrl", "PlayAddrStruct", "playAddrStruct",
+            "play_url", "playUrl",
         ):
             containers.append(video.get(key))
         bit_rates = (

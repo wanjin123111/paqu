@@ -243,6 +243,7 @@ class PlaySourceResolutionTests(unittest.TestCase):
         self.assertEqual(
             proxy._video_play_url_from_tree({
                 "video": {
+                    "playAddr": "https://v16-webapp-prime.us.tiktok.com/video/legacy-blocked",
                     "PlayAddrStruct": {
                         "UrlList": [
                             "https://v16-webapp-prime.us.tiktok.com/video/blocked",
