@@ -80,6 +80,12 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://paqu-tikhub-proxy.o
 TIKTOK_AID = os.environ.get("TIKTOK_AID", "1233").strip() or "1233"
 TIKTOK_REGION = os.environ.get("TIKTOK_REGION", "US").strip() or "US"
 TIKTOK_LANGUAGE = os.environ.get("TIKTOK_LANGUAGE", "en").strip() or "en"
+# Optional server-side TikTok login session.  Some short-drama episodes are no
+# longer exposed as anonymous public videos even though their metadata remains
+# visible.  Operators can supply a legitimate TikTok Cookie header here; it is
+# used only by the backend resolver/media relay and is never returned to the
+# browser, report JSON, generated downloader, or logs.
+TIKTOK_SESSION_COOKIE = os.environ.get("TIKTOK_SESSION_COOKIE", "").strip()
 SCHEDULE_SECRET = os.environ.get("SCHEDULE_SECRET", "").strip()
 ADMIN_SESSION_COOKIE_NAME = "paqu_admin_session"
 ADMIN_SESSION_MAX_AGE = _env_int("ADMIN_SESSION_MAX_AGE", 86400, 300, 2592000)
@@ -1125,7 +1131,10 @@ def _video_play_cache_store(video_id, source, now=None):
         VIDEO_PLAY_URL_CACHE[video_id] = {
             "url": url,
             "tt_chain_token": source.get("tt_chain_token") or "",
+            "cookie": source.get("cookie") or "",
             "endpoint": source.get("endpoint") or "",
+            "error_code": source.get("error_code") or "",
+            "error": source.get("error") or "",
             "ts": now or time.time(),
         }
 
@@ -1146,8 +1155,10 @@ def _get_video_play_source(video_id, started=None, uid=""):
         cached_url = cached.get("url", "")
         ttl = VIDEO_PLAY_URL_CACHE_TTL_SECONDS if cached_url else VIDEO_PLAY_NEGATIVE_CACHE_TTL_SECONDS
         if ttl and now - cached.get("ts", 0) < ttl:
-            return dict(cached) if cached_url else {}
+            return dict(cached)
     failures = []
+    login_required = False
+    removed_or_unavailable = False
 
     # TikHub's Web V2 resolver is the most stable current fallback for older or
     # region-limited TikTok posts.  Its URLs require the returned
@@ -1171,6 +1182,8 @@ def _get_video_play_source(video_id, started=None, uid=""):
         if source.get("url"):
             _video_play_cache_store(clean_id, source, now)
             return source
+        login_required = login_required or _payload_is_short_drama_login_gated(data)
+        removed_or_unavailable = removed_or_unavailable or _payload_reports_video_removed(data)
         failures.append("%s: no media address" % endpoint.rsplit("/", 1)[-1])
 
     for endpoint in SINGLE_VIDEO_EP_CANDIDATES:
@@ -1194,6 +1207,8 @@ def _get_video_play_source(video_id, started=None, uid=""):
         if source.get("url"):
             _video_play_cache_store(clean_id, source, now)
             return source
+        login_required = login_required or _payload_is_short_drama_login_gated(data)
+        removed_or_unavailable = removed_or_unavailable or _payload_reports_video_removed(data)
         failures.append("%s: no media address" % endpoint.rsplit("/", 1)[-1])
 
     # The share-link resolver follows a separate TikHub parsing path and is an
@@ -1219,15 +1234,50 @@ def _get_video_play_source(video_id, started=None, uid=""):
             if source.get("url"):
                 _video_play_cache_store(clean_id, source, now)
                 return source
+            login_required = login_required or _payload_is_short_drama_login_gated(data)
+            removed_or_unavailable = removed_or_unavailable or _payload_reports_video_removed(data)
             failures.append("%s: no media address" % endpoint.rsplit("/", 1)[-1])
 
-    _video_play_cache_store(clean_id, {}, now)
+    # Final fallback: inspect the real TikTok work page.  This supports public
+    # response-shape changes and, when TIKTOK_SESSION_COOKIE is configured,
+    # content that TikTok intentionally exposes only to an authenticated user.
+    work_source = _fetch_tiktok_work_page_source(uid, clean_id)
+    if work_source.get("url"):
+        _video_play_cache_store(clean_id, work_source, now)
+        return work_source
+    login_required = login_required or work_source.get("error_code") == "tiktok_login_required"
+    removed_or_unavailable = (
+        removed_or_unavailable
+        or work_source.get("error_code") == "video_removed_or_unavailable"
+    )
+    if login_required:
+        failure = {
+            "error_code": "tiktok_login_required",
+            "error": (
+                "该短剧已被 TikTok 设为登录后观看；请在后端配置有效的 "
+                "TIKTOK_SESSION_COOKIE 后重试。"
+            ),
+            "endpoint": work_source.get("endpoint") or "tiktok-work-page",
+        }
+    elif removed_or_unavailable:
+        failure = {
+            "error_code": "video_removed_or_unavailable",
+            "error": "TikTok/TikHub 当前将该作品标记为已删除或不可播放。",
+            "endpoint": work_source.get("endpoint") or "tikhub",
+        }
+    else:
+        failure = {
+            "error_code": "play_source_unavailable",
+            "error": "当前上游没有返回可用播放地址，请稍后重试。",
+            "endpoint": work_source.get("endpoint") or "resolver-chain",
+        }
+    _video_play_cache_store(clean_id, failure, now)
     print("[video-play] unresolved video_id=%s account=%s attempts=%s" % (
         clean_id,
         (uid or "-").strip().lstrip("@"),
         " | ".join(failures[-5:]) or "no resolver attempted",
     ), flush=True)
-    return {}
+    return failure
 
 
 def _get_video_play_url(video_id, started=None, uid=""):
@@ -1296,6 +1346,131 @@ def _video_play_source_from_payload(data, endpoint=""):
         "tt_chain_token": _video_play_cookie_from_tree(data),
         "endpoint": endpoint or "",
     }
+
+
+def _payload_reports_video_removed(data):
+    status_code = _to_int(_deep_find(data, ("status_code", "statusCode")))
+    status_message = _to_text(
+        _deep_find(data, ("status_msg", "statusMsg", "message", "error_message")),
+        300,
+    ).lower()
+    return status_code == 2053 or "video has been removed" in status_message
+
+
+def _payload_is_short_drama_login_gated(data):
+    if not isinstance(data, (dict, list)) or _video_play_url_from_tree(data):
+        return False
+    try:
+        text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        return False
+    lowered = text.lower()
+    has_drama = any(marker in lowered for marker in (
+        '"dramainfo"', '"drama_info"', '"dramavideodata"',
+        "short-drama-login-gated-surface",
+    ))
+    is_preview = '"ispreview":true' in lowered or '"previewtype":4' in lowered
+    return has_drama and (is_preview or '"playaddr":""' in lowered or '"play_addr":{}' in lowered)
+
+
+def _clean_cookie_header(value):
+    """Return a CR/LF-safe Cookie header without logging or exposing it."""
+    raw = _to_text(value, 16384).replace("\r", "").replace("\n", "").strip()
+    parts = []
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        name, cookie_value = part.split("=", 1)
+        name = re.sub(r"[^A-Za-z0-9_!#$%&'*+.^`|~-]", "", name.strip())
+        if name:
+            parts.append(name + "=" + cookie_value.strip())
+    return "; ".join(parts)
+
+
+def _merge_cookie_headers(*values):
+    merged = {}
+    order = []
+    for value in values:
+        for part in _clean_cookie_header(value).split("; "):
+            if not part or "=" not in part:
+                continue
+            name, cookie_value = part.split("=", 1)
+            if name not in merged:
+                order.append(name)
+            merged[name] = cookie_value
+    return "; ".join(name + "=" + merged[name] for name in order)
+
+
+def _response_cookie_header(headers):
+    values = headers.get_all("Set-Cookie") if hasattr(headers, "get_all") else []
+    cookies = []
+    for value in values or []:
+        jar = SimpleCookie()
+        try:
+            jar.load(value)
+        except Exception:
+            continue
+        for name, morsel in jar.items():
+            cookies.append(name + "=" + morsel.value)
+    return _merge_cookie_headers(*cookies)
+
+
+def _fetch_tiktok_work_page_source(uid, video_id):
+    account = _to_text(uid, 80).strip().lstrip("@")
+    clean_id = _clean_drama_id(video_id)
+    if not account or not clean_id:
+        return {}
+    url = _build_tiktok_video_url(account, clean_id)
+    headers = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": TIKTOK_HOST + "/@" + account,
+        "User-Agent": DEFAULT_UA,
+    }
+    session_cookie = _clean_cookie_header(TIKTOK_SESSION_COOKIE)
+    if session_cookie:
+        headers["Cookie"] = session_cookie
+    try:
+        TIKTOK_RATE_LIMITER.wait()
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req, timeout=VIDEO_PLAY_RESOLVE_TIMEOUT_SECONDS) as resp:
+            page = resp.read(4 * 1024 * 1024).decode("utf-8", "replace")
+            response_cookie = _response_cookie_header(resp.headers)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return {
+                "error_code": "tiktok_login_required",
+                "error": "TikTok requires an authenticated session for this work.",
+                "endpoint": "tiktok-work-page",
+            }
+        return {}
+    except Exception:
+        return {}
+
+    cookie = _merge_cookie_headers(session_cookie, response_cookie)
+    for payload in _script_json_from_html(page):
+        source = _video_play_source_from_payload(payload, "tiktok-work-page")
+        if source.get("url"):
+            source["cookie"] = cookie
+            return source
+    lowered = page.lower()
+    gated = "short-drama-login-gated-surface" in lowered
+    if not gated:
+        gated = any(_payload_is_short_drama_login_gated(payload) for payload in _script_json_from_html(page))
+    if gated:
+        return {
+            "error_code": "tiktok_login_required",
+            "error": "TikTok requires an authenticated session for this short drama.",
+            "endpoint": "tiktok-work-page",
+        }
+    if "video has been removed" in lowered or "video currently unavailable" in lowered:
+        return {
+            "error_code": "video_removed_or_unavailable",
+            "error": "TikTok reports that this work is unavailable.",
+            "endpoint": "tiktok-work-page",
+        }
+    return {}
 
 
 def _get_playlist_id(playlist):
@@ -4833,9 +5008,12 @@ def _open_video_download(source, uid, range_header=""):
         "Referer": TIKTOK_HOST + ("/@" + uid if uid else "/"),
         "User-Agent": DEFAULT_UA,
     }
+    cookie = _clean_cookie_header(source.get("cookie"))
     token = _to_text(source.get("tt_chain_token"), 4096).strip()
     if token:
-        headers["Cookie"] = "tt_chain_token=" + token
+        cookie = _merge_cookie_headers(cookie, "tt_chain_token=" + token)
+    if cookie:
+        headers["Cookie"] = cookie
     if range_header:
         headers["Range"] = _to_text(range_header, 200)
     return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECONDS)
@@ -5008,9 +5186,15 @@ foreach ($item in $items) {
       return
     }
     Write-Host "Downloading: $file"
-    & curl.exe -sS -L --fail --retry 3 --retry-delay 2 --connect-timeout 20 -A $ua -e $referer -o $out $url
+    & curl.exe -sS -L --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 20 -A $ua -e $referer -o $out $url
     if ($LASTEXITCODE -ne 0) {
-      throw "curl failed: $file"
+      $detail = ""
+      if (Test-Path -LiteralPath $out) {
+        try { $detail = (Get-Content -LiteralPath $out -Raw -Encoding UTF8).Trim() } catch {}
+        Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+      }
+      if ($detail.Length -gt 500) { $detail = $detail.Substring(0, 500) }
+      throw ("curl failed: " + $file + $(if ($detail) { " - " + $detail } else { "" }))
     }
   }
   $jobs = @($jobs) + @($job)
@@ -6303,7 +6487,7 @@ class Handler(BaseHTTPRequestHandler):
         for attempt in range(2):
             source = _get_video_play_source(video_id, uid=uid)
             if not source.get("url"):
-                last_error = TikHubError("play source unavailable")
+                last_error = TikHubError(source.get("error") or "play source unavailable")
                 break
             try:
                 upstream = _open_video_download(source, uid, self.headers.get("Range", ""))
@@ -6318,10 +6502,19 @@ class Handler(BaseHTTPRequestHandler):
                 last_error = exc
                 break
         if upstream is None:
-            code = getattr(last_error, "code", 502)
-            self._send_json(502 if not isinstance(code, int) or code < 400 else code, {
+            source = source if isinstance(source, dict) else {}
+            error_code = source.get("error_code") or "video_source_download_failed"
+            if error_code == "tiktok_login_required":
+                status = 409
+            elif error_code == "video_removed_or_unavailable":
+                status = 410
+            else:
+                code = getattr(last_error, "code", 502)
+                status = 502 if not isinstance(code, int) or code < 400 else code
+            self._send_json(status, {
                 "ok": False,
-                "error": "video source download failed",
+                "error_code": error_code,
+                "error": source.get("error") or "video source download failed",
                 "video_id": _clean_drama_id(video_id),
             })
             return
@@ -6450,21 +6643,35 @@ class Handler(BaseHTTPRequestHandler):
             return
         prefer_play = target_norm in ("", "play", "source", "direct", "media")
         link = ""
+        source = {}
         if video_id:
             if prefer_play:
                 # Resolve once before returning a signed relay URL.  Keeping the
                 # compatibility wrapper here also gives callers/tests a single
                 # stable resolver entry point while /drama-media refreshes an
                 # expired upstream CDN URL again at download time.
-                if _get_video_play_url(video_id, uid=uid):
+                source = _get_video_play_source(video_id, uid=uid)
+                if source.get("url"):
                     link = _video_media_ticket_url(uid, video_id)
             else:
                 link = _build_tiktok_video_url(uid, video_id)
         if not link and drama_id:
             link = _get_drama_episode_link(drama_id, uid, target=target)
         if not link:
-            status = 502 if prefer_play else 404
-            payload = {"ok": False, "error": "play source unavailable" if prefer_play else "drama link not found"}
+            error_code = source.get("error_code") if prefer_play and isinstance(source, dict) else ""
+            if error_code == "tiktok_login_required":
+                status = 409
+            elif error_code == "video_removed_or_unavailable":
+                status = 410
+            else:
+                status = 502 if prefer_play else 404
+            payload = {
+                "ok": False,
+                "error_code": error_code or ("play_source_unavailable" if prefer_play else "drama_link_not_found"),
+                "error": (
+                    source.get("error") if prefer_play and isinstance(source, dict) else ""
+                ) or ("play source unavailable" if prefer_play else "drama link not found"),
+            }
             if video_id:
                 payload["video_id"] = _clean_drama_id(video_id)
                 payload["work_url"] = _build_tiktok_video_url(uid, video_id)

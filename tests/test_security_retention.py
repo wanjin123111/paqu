@@ -104,7 +104,10 @@ class PrivateAccessTests(unittest.TestCase):
     def test_header_authenticated_video_source_returns_url(self):
         handler = self.make_handler(headers={"X-Schedule-Secret": "expected-secret"})
         with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
-                mock.patch.object(proxy, "_get_video_play_url", return_value="https://media.example/video.mp4"):
+                mock.patch.object(proxy, "_get_video_play_source", return_value={
+                    "url": "https://media.example/video.mp4",
+                    "cookie": "sessionid=must-not-leak",
+                }):
             handler._resolve_drama_link({
                 "uid": ["demo"],
                 "video_id": ["123"],
@@ -124,11 +127,15 @@ class PrivateAccessTests(unittest.TestCase):
         self.assertEqual(params["video_id"], ["123"])
         self.assertIn("expires", params)
         self.assertIn("sig", params)
+        self.assertNotIn("must-not-leak", json.dumps(payload))
 
     def test_failed_video_source_does_not_masquerade_as_tiktok_work_page(self):
         handler = self.make_handler(headers={"X-Schedule-Secret": "expected-secret"})
         with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
-                mock.patch.object(proxy, "_get_video_play_url", return_value=""):
+                mock.patch.object(proxy, "_get_video_play_source", return_value={
+                    "error_code": "play_source_unavailable",
+                    "error": "play source unavailable",
+                }):
             handler._resolve_drama_link({
                 "uid": ["demo"],
                 "video_id": ["123"],
@@ -257,6 +264,96 @@ class PlaySourceResolutionTests(unittest.TestCase):
         self.assertEqual(source["url"], "https://www.tiktok.com/aweme/v1/play/?video_id=123")
         self.assertEqual(source["tt_chain_token"], "token-value")
         self.assertTrue(source["endpoint"].endswith("fetch_post_detail_v2"))
+
+    def test_tiktok_work_page_uses_server_session_without_exposing_it(self):
+        payload = {
+            "__DEFAULT_SCOPE__": {
+                "webapp.video-detail": {
+                    "itemInfo": {
+                        "itemStruct": {
+                            "id": "123",
+                            "video": {"playAddr": "https://cdn.example/session-video.mp4"},
+                        },
+                    },
+                },
+            },
+        }
+        page = (
+            '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">'
+            + json.dumps(payload)
+            + "</script>"
+        ).encode("utf-8")
+
+        class Headers:
+            def get_all(self, _name):
+                return ["tt_chain_token=fresh-token; Path=/; Secure"]
+
+        class Response:
+            headers = Headers()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit=-1):
+                return page
+
+        captured = {}
+
+        def fake_urlopen(request, timeout=None):
+            captured["cookie"] = request.headers.get("Cookie", "")
+            captured["timeout"] = timeout
+            return Response()
+
+        with mock.patch.object(proxy, "TIKTOK_SESSION_COOKIE", "sessionid=private-session"), \
+                mock.patch.object(proxy.TIKTOK_RATE_LIMITER, "wait"), \
+                mock.patch.object(proxy.urllib.request, "urlopen", side_effect=fake_urlopen):
+            source = proxy._fetch_tiktok_work_page_source("demo", "123")
+
+        self.assertEqual(source["url"], "https://cdn.example/session-video.mp4")
+        self.assertIn("sessionid=private-session", captured["cookie"])
+        self.assertIn("tt_chain_token=fresh-token", source["cookie"])
+
+    def test_short_drama_login_gate_is_reported_precisely(self):
+        page = b'<div data-e2e="short-drama-login-gated-surface">login</div>'
+
+        class Headers:
+            def get_all(self, _name):
+                return []
+
+        class Response:
+            headers = Headers()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit=-1):
+                return page
+
+        with mock.patch.object(proxy, "TIKTOK_SESSION_COOKIE", ""), \
+                mock.patch.object(proxy.TIKTOK_RATE_LIMITER, "wait"), \
+                mock.patch.object(proxy.urllib.request, "urlopen", return_value=Response()):
+            source = proxy._fetch_tiktok_work_page_source("demo", "123")
+
+        self.assertEqual(source["error_code"], "tiktok_login_required")
+
+    def test_negative_cache_retains_actionable_failure_reason(self):
+        failure = {
+            "error_code": "tiktok_login_required",
+            "error": "login required",
+            "endpoint": "tiktok-work-page",
+        }
+        proxy._video_play_cache_store("123", failure, now=time.time())
+        with mock.patch.object(proxy, "_send_tikhub_get") as tikhub_get:
+            source = proxy._get_video_play_source("123", uid="demo")
+
+        self.assertEqual(source["error_code"], "tiktok_login_required")
+        tikhub_get.assert_not_called()
 
     def test_signed_media_ticket_expires_and_cannot_be_changed(self):
         with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"):
