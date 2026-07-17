@@ -453,6 +453,7 @@ class AdminCatalogTests(unittest.TestCase):
                     "director": "导演丙",
                     "cast": "演员丁",
                     "aliases": ["旧剧名", "旧剧名"],
+                    "bound_accounts": ["account-manual", "@account-manual"],
                     "notes": "内部备注",
                     "online": True,
                     "order": 1,
@@ -479,6 +480,7 @@ class AdminCatalogTests(unittest.TestCase):
         catalog = proxy._sanitize_admin_catalog(self.sample_catalog())
 
         self.assertEqual(catalog["dramas"]["drama-company-1"]["aliases"], ["旧剧名"])
+        self.assertEqual(catalog["dramas"]["drama-company-1"]["bound_accounts"], ["account-manual"])
         self.assertEqual(catalog["sources"]["account-d|400"]["status"], "pending")
         self.assertEqual(catalog["sources"]["account-d|400"]["drama_id"], "")
 
@@ -515,7 +517,7 @@ class AdminCatalogTests(unittest.TestCase):
         drama = payload["dramas"][0]
         self.assertEqual(drama["total_views"], 2000)
         self.assertEqual(drama["episodes"], 60)
-        self.assertEqual(drama["accounts"], ["account-a", "account-b"])
+        self.assertEqual(drama["accounts"], ["account-a", "account-b", "account-manual"])
         self.assertEqual(drama["source_count"], 2)
         self.assertEqual(drama["notes"], "")
 
@@ -672,6 +674,11 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertEqual(admin_html.count('data-close-dialog="accountDialog"'), 2)
         self.assertRegex(admin_html, r'id="ignoreFromEdit"[^>]+type="button"')
         self.assertRegex(admin_html, r'id="saveDramaBtn"[^>]+type="button"')
+        self.assertNotIn('id="exportDraftBtn"', admin_html)
+        self.assertNotIn('>查看前台</a>', admin_html)
+        self.assertIn('id="accountBindingSearch"', admin_html)
+        self.assertIn('id="accountBindingList"', admin_html)
+        self.assertIn('bound_accounts: cleanBoundAccounts(state.editorBoundAccounts)', admin_js)
         self.assertIn('id="adminLoading"', admin_html)
         self.assertIn('data-view="claimed"', admin_html)
         self.assertIn('id="view-claimed"', admin_html)

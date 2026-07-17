@@ -3779,6 +3779,11 @@ def _sanitize_admin_catalog(payload):
         if drama_id in dramas:
             continue
         created_at = _to_text(raw.get("created_at"), 60) or _catalog_now()
+        raw_bound_accounts = raw.get("bound_accounts") or []
+        if isinstance(raw_bound_accounts, list):
+            bound_accounts = _parse_accounts("\n".join(str(item) for item in raw_bound_accounts[:5000]))
+        else:
+            bound_accounts = _parse_accounts(str(raw_bound_accounts))
         dramas[drama_id] = {
             "id": drama_id,
             "chinese_title": _to_text(raw.get("chinese_title") or raw.get("cn"), 300),
@@ -3788,6 +3793,7 @@ def _sanitize_admin_catalog(payload):
             "director": _to_text(raw.get("director"), 160),
             "cast": _to_text(raw.get("cast"), 500),
             "aliases": _catalog_aliases(raw.get("aliases")),
+            "bound_accounts": bound_accounts,
             "notes": _to_text(raw.get("notes"), 2000),
             "online": _catalog_bool(raw.get("online")),
             "order": max(1, min(_to_int(raw.get("order")) or len(dramas) + 1, 1000000)),
@@ -4030,7 +4036,11 @@ def _curated_catalog_payload(include_offline=False):
             continue
         keys = grouped_keys.get(drama_id, [])
         sources = [source_map[key] for key in keys if key in source_map]
-        accounts = sorted({item.get("account") for item in sources if item.get("account")})
+        source_accounts = [item.get("account") for item in sources if item.get("account")]
+        accounts = sorted(
+            set(source_accounts + list(drama.get("bound_accounts") or [])),
+            key=lambda value: str(value).lower(),
+        )
         total_views = sum(_to_int(item.get("views")) for item in sources)
         episodes = max([_to_int(item.get("episodes")) for item in sources] or [0])
         latest_publish_time = max([item.get("publish_time") or "" for item in sources] or [""])

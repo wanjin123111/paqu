@@ -40,6 +40,7 @@
     activeView: "dashboard",
     editorSourceKeys: [],
     editorDramaId: "",
+    editorBoundAccounts: [],
   };
 
   const titles = {
@@ -261,9 +262,12 @@
   function aggregateDramas() {
     return Object.entries(state.catalog.dramas).map(([id, drama]) => {
       const sources = dramaSources(id);
+      const sourceAccounts = sources.map((row) => row.account).filter(Boolean);
+      const boundAccounts = cleanBoundAccounts(drama.bound_accounts || []);
       return {
         id, ...drama, sources,
-        accounts: [...new Set(sources.map((row) => row.account).filter(Boolean))],
+        bound_accounts: boundAccounts,
+        accounts: cleanBoundAccounts([...sourceAccounts, ...boundAccounts]),
         total_views: sources.reduce((sum, row) => sum + number(row.views), 0),
         episodes: Math.max(0, ...sources.map((row) => number(row.episodes))),
       };
@@ -401,6 +405,7 @@
       $("accountSource").textContent = `来源：后端监控池 ${state.backendAccounts.length} 个账号`;
       renderStats();
       renderAccounts();
+      renderAccountBindingPicker();
       if (showMessage) toast(`已读取 ${state.backendAccounts.length} 个监控账号`);
     } catch (error) {
       toast(error.message, true);
@@ -466,6 +471,54 @@
       map.set(key, current);
     }
     return [...map.values()];
+  }
+
+  function cleanBoundAccounts(values) {
+    const items = Array.isArray(values) ? values : [values];
+    const seen = new Set();
+    const result = [];
+    for (const value of items) {
+      const account = text(value).replace(/^@/, "");
+      const key = account.toLowerCase();
+      if (!account || seen.has(key)) continue;
+      seen.add(key);
+      result.push(account);
+    }
+    return result;
+  }
+
+  function accountBindingPool() {
+    const details = new Map(state.accounts.map((row) => [text(row.account).toLowerCase(), row]));
+    const rows = state.backendAccounts.map((account) => {
+      const clean = text(account).replace(/^@/, "");
+      const detail = details.get(clean.toLowerCase()) || {};
+      return { account: clean, nickname: detail.nickname || clean };
+    }).filter((row) => row.account);
+    const known = new Set(rows.map((row) => row.account.toLowerCase()));
+    for (const account of state.editorBoundAccounts) {
+      if (!known.has(account.toLowerCase())) rows.push({ account, nickname: account, missing: true });
+    }
+    return rows;
+  }
+
+  function setEditorBoundAccounts(accounts) {
+    state.editorBoundAccounts = cleanBoundAccounts(accounts);
+    if ($("accountBindingSearch")) $("accountBindingSearch").value = "";
+    renderAccountBindingPicker();
+  }
+
+  function renderAccountBindingPicker() {
+    const list = $("accountBindingList");
+    if (!list) return;
+    const query = text($("accountBindingSearch")?.value).replace(/^@/, "").toLowerCase();
+    const selected = new Set(state.editorBoundAccounts.map((account) => account.toLowerCase()));
+    const rows = accountBindingPool().filter((row) => !query || `${row.account} ${row.nickname}`.toLowerCase().includes(query))
+      .sort((a, b) => Number(selected.has(b.account.toLowerCase())) - Number(selected.has(a.account.toLowerCase())) || text(a.nickname).localeCompare(text(b.nickname), "zh-CN"));
+    $("accountBindingCount").textContent = `已选择 ${state.editorBoundAccounts.length} 个账号`;
+    list.innerHTML = rows.length ? rows.map((row) => `
+      <label class="account-binding-option"><input type="checkbox" data-bind-account="${escapeHtml(row.account)}" ${selected.has(row.account.toLowerCase()) ? "checked" : ""} />
+      <span><strong>${escapeHtml(row.nickname || row.account)}</strong><small>@${escapeHtml(row.account)}${row.missing ? " · 已不在当前监控池" : ""}</small></span></label>`).join("")
+      : `<div class="account-binding-empty">${state.backendAccounts.length ? "没有匹配的账号" : "账号池尚未加载，请稍候或刷新后台数据"}</div>`;
   }
 
   function renderAccounts() {
@@ -637,6 +690,7 @@
     const drama = selected === "__new__" ? null : state.catalog.dramas[selected];
     editorDramaOptions(selected);
     fillEditor(drama, sources[0]);
+    setEditorBoundAccounts(drama?.bound_accounts || []);
     $("attachGroup").style.display = "grid";
     $("editTitle").textContent = state.editorSourceKeys.length > 1 ? `合并认领 ${state.editorSourceKeys.length} 条作品来源` : "认领公司短剧";
     $("editSubtitle").textContent = "可归入已有短剧，实现多账号同剧合并统计";
@@ -655,6 +709,7 @@
     const drama = dramaId ? state.catalog.dramas[dramaId] : null;
     editorDramaOptions("__new__");
     fillEditor(drama, null);
+    setEditorBoundAccounts(drama?.bound_accounts || []);
     $("attachGroup").style.display = "none";
     $("editTitle").textContent = drama ? "编辑公司短剧" : "新建公司短剧";
     $("editSubtitle").textContent = drama ? `${dramaSources(dramaId).length} 条抓取来源已绑定` : "可先建立资料，之后再从作品认领中绑定来源";
@@ -673,6 +728,7 @@
       writer: text($("editWriter").value), producer: text($("editProducer").value),
       director: text($("editDirector").value), cast: text($("editCast").value), aliases: [...new Set(aliases)],
       order: Math.max(1, number($("editOrder").value) || nextOrder()), online: $("editOnline").checked,
+      bound_accounts: cleanBoundAccounts(state.editorBoundAccounts),
       notes: text($("editNotes").value), created_at: existing.created_at || new Date().toISOString(), updated_at: new Date().toISOString(),
     };
   }
@@ -801,8 +857,21 @@
   $("editAttach").addEventListener("change", () => {
     const value = $("editAttach").value;
     const source = state.editorSourceKeys.length ? state.sourceMap.get(state.editorSourceKeys[0]) : null;
-    fillEditor(value === "__new__" ? null : state.catalog.dramas[value], source);
+    const drama = value === "__new__" ? null : state.catalog.dramas[value];
+    fillEditor(drama, source);
+    setEditorBoundAccounts(drama?.bound_accounts || []);
     $("saveDramaBtn").textContent = value === "__new__" ? "保存并认领" : "保存并合并";
+  });
+  $("accountBindingSearch").addEventListener("input", renderAccountBindingPicker);
+  $("accountBindingList").addEventListener("change", (event) => {
+    const checkbox = event.target.closest("[data-bind-account]");
+    if (!checkbox) return;
+    const account = text(checkbox.dataset.bindAccount).replace(/^@/, "");
+    const selected = new Map(state.editorBoundAccounts.map((item) => [item.toLowerCase(), item]));
+    if (checkbox.checked) selected.set(account.toLowerCase(), account);
+    else selected.delete(account.toLowerCase());
+    state.editorBoundAccounts = [...selected.values()];
+    renderAccountBindingPicker();
   });
   $("reviewSearch").addEventListener("input", () => { state.reviewPage = 1; renderReview(); });
   $("reviewFilter").addEventListener("change", () => { state.reviewPage = 1; renderReview(); });
@@ -824,7 +893,6 @@
   $("accountFilter").addEventListener("change", renderAccounts);
   $("dramaSearch").addEventListener("input", renderDramas);
   $("dramaFilter").addEventListener("change", renderDramas);
-  $("exportDraftBtn").addEventListener("click", exportCatalog);
   $("settingsExportBtn").addEventListener("click", exportCatalog);
 
   document.addEventListener("click", (event) => {

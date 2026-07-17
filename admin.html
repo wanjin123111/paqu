@@ -55,6 +55,7 @@
     .permission-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);font-size:11px;font-weight:700}.permission-list{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}.permission-item{display:flex;align-items:center;gap:6px;padding:7px 9px;border-radius:7px;background:#f5f6fa;color:var(--muted);font-size:10.5px;line-height:1.3}.permission-item::before{content:"○";color:#a2a6b5}.permission-item.granted{background:var(--green-soft);color:#167653}.permission-item.granted::before{content:"✓";color:var(--green);font-weight:900}
     dialog{border:0;border-radius:15px;padding:0;box-shadow:0 24px 80px rgba(27,30,44,.25);width:min(680px,calc(100vw - 28px));color:var(--ink)}dialog::backdrop{background:rgba(21,23,32,.52);backdrop-filter:blur(3px)}
     .modal-head{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.modal-head h3{margin:0;font-size:16px}.modal-close{border:0;background:transparent;color:var(--muted);font-size:22px}.modal-body{padding:19px 20px;max-height:70vh;overflow:auto}.modal-foot{padding:14px 20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:10px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.form-group{display:grid;gap:6px}.form-group.full{grid-column:1/-1}.form-group label{font-size:11px;color:#5d6172;font-weight:700}.form-group .field{width:100%}.hint{font-size:10.5px;color:var(--muted);line-height:1.5}.source-box{background:var(--surface-2);border-radius:10px;padding:12px;font-size:11px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:8px}.source-box strong{color:var(--ink)}
+    .account-binding{border:1px solid var(--line);border-radius:10px;background:var(--surface-2);padding:10px}.account-binding-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.account-binding-head strong{font-size:11px}.account-binding-count{font-size:10.5px;color:var(--purple-dark);font-weight:700}.account-binding-list{display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:176px;overflow:auto;padding-right:3px}.account-binding-option{display:flex;align-items:center;gap:9px;min-width:0;padding:8px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}.account-binding-option:hover{border-color:#b8b4ff}.account-binding-option input{width:15px;height:15px;accent-color:var(--purple);flex:0 0 auto}.account-binding-option span{min-width:0}.account-binding-option strong,.account-binding-option small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.account-binding-option strong{font-size:11px}.account-binding-option small{margin-top:2px;color:var(--muted);font-size:10px}.account-binding-empty{grid-column:1/-1;padding:18px 10px;text-align:center;color:var(--muted);font-size:11px}
     .switch-line{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:9px}.switch{position:relative;width:38px;height:21px}.switch input{opacity:0;width:0;height:0}.switch i{position:absolute;inset:0;border-radius:99px;background:#c9cbd5;transition:.16s}.switch i:before{content:"";position:absolute;width:17px;height:17px;left:2px;top:2px;border-radius:50%;background:white;transition:.16s}.switch input:checked+i{background:var(--purple)}.switch input:checked+i:before{transform:translateX(17px)}
     .toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,18px);opacity:0;pointer-events:none;background:#171923;color:#fff;border-radius:10px;padding:11px 15px;font-size:12px;z-index:99;transition:.18s}.toast.show{opacity:1;transform:translate(-50%,0)}
     .admin-loading{position:fixed;inset:0;z-index:120;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(244,245,249,.82);backdrop-filter:blur(5px)}
@@ -65,7 +66,7 @@
     .menu-btn{display:none}
     @media(max-width:1120px){.stats{grid-template-columns:repeat(2,1fr)}.dashboard-grid{grid-template-columns:1fr}.account-grid{grid-template-columns:repeat(2,1fr)}}
     @media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:-260px;width:246px;transition:.2s}.sidebar.open{left:0;box-shadow:30px 0 80px rgba(0,0,0,.22)}.menu-btn{display:inline-flex}.topbar{height:auto;min-height:68px;padding:12px 15px}.content{padding:17px 14px 35px}.top-title p,.status-pill{display:none}.stats{grid-template-columns:1fr 1fr}.account-grid{grid-template-columns:1fr}.section-head{align-items:flex-start;flex-direction:column}.queue-item{grid-template-columns:minmax(0,1fr) auto}.queue-item>:nth-child(2),.queue-item>:nth-child(3){display:none}.form-grid{grid-template-columns:1fr}.form-group.full{grid-column:auto}}
-    @media(max-width:480px){.stats{grid-template-columns:1fr}.top-actions .btn span{display:none}.search{min-width:100%}.source-box{grid-template-columns:1fr}}
+    @media(max-width:480px){.stats{grid-template-columns:1fr}.top-actions .btn span{display:none}.search{min-width:100%}.source-box,.account-binding-list{grid-template-columns:1fr}}
     @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
   </style>
 </head>
@@ -130,7 +131,7 @@
       </section>
 
       <section class="view" id="view-dramas">
-        <div class="section-head"><div><h2>公司短剧</h2><p>维护剧名、主创人员、来源绑定、上架状态和前台顺序</p></div><div class="section-actions"><button class="btn" id="exportDraftBtn">导出配置 JSON</button><a class="btn" href="/catalog">查看前台</a><button class="btn primary" id="newDramaBtn2">＋ 新建短剧</button></div></div>
+        <div class="section-head"><div><h2>公司短剧</h2><p>维护剧名、主创人员、来源绑定、上架状态和前台顺序</p></div><div class="section-actions"><button class="btn primary" id="newDramaBtn2">＋ 新建短剧</button></div></div>
         <div class="toolbar"><input class="field search" id="dramaSearch" placeholder="搜索剧名、编剧、制作或账号" /><select class="field" id="dramaFilter"><option value="all">全部短剧</option><option value="live">前台已上架</option><option value="draft">未上架</option></select><span class="muted" id="dramaCount" style="font-size:11px"></span></div>
         <div class="table-wrap"><table class="data-table"><thead><tr><th>顺序</th><th>短剧</th><th>发布账号</th><th>编剧</th><th>制作/制片</th><th>汇总播放</th><th>前台状态</th><th>操作</th></tr></thead><tbody id="dramaBody"></tbody></table></div>
       </section>
@@ -155,6 +156,7 @@
       <div class="form-grid" style="margin-top:16px">
         <input type="hidden" id="editKey" />
         <div class="form-group full" id="attachGroup"><label for="editAttach">归入哪一部公司短剧</label><select class="field" id="editAttach"><option value="__new__">新建一部公司短剧</option></select><div class="hint">选择已有短剧，可以把不同 TikTok 账号的发布记录合并统计。</div></div>
+        <div class="form-group full" id="accountBindingGroup"><label for="accountBindingSearch">绑定发布账号</label><input class="field" id="accountBindingSearch" type="search" autocomplete="off" placeholder="搜索账号池中的昵称或 @账号" /><div class="account-binding"><div class="account-binding-head"><strong>后端监控账号池</strong><span class="account-binding-count" id="accountBindingCount">已选择 0 个账号</span></div><div class="account-binding-list" id="accountBindingList"></div></div><div class="hint">可从账号池搜索并绑定多个发布账号。通过作品认领产生的来源绑定仍会自动保留。</div></div>
         <div class="form-group"><label for="editCn">中文剧名 *</label><input class="field" id="editCn" required /></div>
         <div class="form-group"><label for="editEn">英文剧名 *</label><input class="field" id="editEn" required /></div>
         <div class="form-group"><label for="editWriter">编剧 *</label><input class="field" id="editWriter" required placeholder="内部人员姓名" /></div>
@@ -181,6 +183,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/admin.js?v=20260715-8"></script>
+<script src="/admin.js?v=20260717-1"></script>
 </body>
 </html>
