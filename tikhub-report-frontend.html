@@ -82,11 +82,13 @@
   body.public-mode .report-page{min-height:100vh;padding:18px 16px 26px}
   .catalog-frame{display:block;width:100%;height:calc(100vh - 108px);min-height:620px;border:1px solid var(--line);border-radius:16px;background:var(--paper);box-shadow:var(--shadow)}
   body.public-mode .report-page .foot-note{width:calc(100vw - 32px);max-width:none;margin:14px auto 0}
-  body.public-mode .public-page-nav{display:flex;position:fixed;top:34px;right:28px;z-index:70;gap:10px}
+  body.public-mode .public-page-nav{display:flex;position:fixed;top:34px;right:28px;z-index:70;max-width:calc(100vw - 56px);justify-content:flex-end;flex-wrap:wrap;gap:10px}
   body.public-mode .public-page-nav .mini-btn[hidden]{display:none!important}
   body.public-mode.catalog-view .public-page-nav,
   body.public-mode.report-view .public-page-nav{top:78px}
   body.public-mode .public-page-nav .mini-btn{box-shadow:0 10px 24px rgba(15,23,42,.14)}
+  body.public-mode .public-page-nav .public-drama-search{border-color:var(--accent);color:var(--accent);font-weight:700}
+  body.public-mode .public-page-nav .public-drama-search:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-press)}
   body.public-mode .public-page-nav .public-page-next{background:var(--accent);color:#fff;border-color:var(--accent)}
   body.public-mode .public-page-nav .public-page-next:hover{background:var(--accent-press);color:#fff;border-color:var(--accent-press);text-decoration:none}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -591,6 +593,8 @@
 </header>
 
 <nav class="public-page-nav" id="publicPageNav" aria-label="公开页面导航">
+  <button class="mini-btn public-drama-search" id="publicDramaSearchBtn" type="button">搜索短剧</button>
+  <button class="mini-btn public-page-home" id="publicPageHomeBtn" type="button" hidden>返回首页</button>
   <button class="mini-btn public-page-prev" id="publicPagePrevBtn" type="button" hidden></button>
   <button class="mini-btn public-page-next" id="publicPageNextBtn" type="button"></button>
 </nav>
@@ -1493,7 +1497,9 @@ const PUBLIC_PAGE_LABELS={dashboard:"运营看板",catalog:"公司短剧榜单",
 function updatePublicPageNav(){
   if(!isPublicMode())return;
   const index=PUBLIC_PAGE_ORDER.indexOf(publicPageView);
-  const prev=$("publicPagePrevBtn"), next=$("publicPageNextBtn");
+  const search=$("publicDramaSearchBtn"), home=$("publicPageHomeBtn"), prev=$("publicPagePrevBtn"), next=$("publicPageNextBtn");
+  if(search)search.hidden=publicPageView!=="dashboard";
+  if(home)home.hidden=publicPageView==="dashboard";
   if(prev){
     prev.hidden=index<=0;
     if(index>0)prev.textContent="上一页："+PUBLIC_PAGE_LABELS[PUBLIC_PAGE_ORDER[index-1]];
@@ -1502,6 +1508,17 @@ function updatePublicPageNav(){
     next.hidden=index<0||index>=PUBLIC_PAGE_ORDER.length-1;
     if(index>=0&&index<PUBLIC_PAGE_ORDER.length-1)next.textContent="下一页："+PUBLIC_PAGE_LABELS[PUBLIC_PAGE_ORDER[index+1]];
   }
+}
+function openPublicDramaSearch(){
+  if(!isPublicMode())return;
+  setPublicPageView("report");
+  resultView="detail";
+  resetDetailPage();
+  renderResultTable();
+  window.requestAnimationFrame(()=>{
+    const input=$("detailSearchInput");
+    if(input){input.focus();input.select();}
+  });
 }
 function setPublicPageView(view){
   if(!isPublicMode())return;
@@ -4468,8 +4485,10 @@ function init(){
     document.addEventListener("click",closeHistoryMenu);
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeHistoryMenu();});
   }
-  const catalogPageBtn=$("catalogPageBtn"), publicPagePrev=$("publicPagePrevBtn"), publicPageNext=$("publicPageNextBtn");
+  const catalogPageBtn=$("catalogPageBtn"), publicDramaSearch=$("publicDramaSearchBtn"), publicPageHome=$("publicPageHomeBtn"), publicPagePrev=$("publicPagePrevBtn"), publicPageNext=$("publicPageNextBtn");
   if(catalogPageBtn)catalogPageBtn.addEventListener("click",()=>setPublicPageView("catalog"));
+  if(publicDramaSearch)publicDramaSearch.addEventListener("click",openPublicDramaSearch);
+  if(publicPageHome)publicPageHome.addEventListener("click",()=>setPublicPageView("dashboard"));
   if(publicPagePrev)publicPagePrev.addEventListener("click",()=>{
     const index=PUBLIC_PAGE_ORDER.indexOf(publicPageView);
     if(index>0)setPublicPageView(PUBLIC_PAGE_ORDER[index-1]);
