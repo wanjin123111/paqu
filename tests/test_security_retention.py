@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.parse
 from unittest import mock
 
 import tikhub_proxy as proxy
@@ -111,11 +112,18 @@ class PrivateAccessTests(unittest.TestCase):
                 "redirect": ["0"],
             })
 
-        self.assertEqual(handler.responses, [(200, {
-            "ok": True,
-            "url": "https://media.example/video.mp4",
-            "target": "play",
-        })])
+        self.assertEqual(len(handler.responses), 1)
+        status, payload = handler.responses[0]
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["target"], "play")
+        parsed = urllib.parse.urlparse(payload["url"])
+        params = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(parsed.path, "/drama-media")
+        self.assertEqual(params["uid"], ["demo"])
+        self.assertEqual(params["video_id"], ["123"])
+        self.assertIn("expires", params)
+        self.assertIn("sig", params)
 
     def test_failed_video_source_does_not_masquerade_as_tiktok_work_page(self):
         handler = self.make_handler(headers={"X-Schedule-Secret": "expected-secret"})
@@ -230,7 +238,34 @@ class PlaySourceResolutionTests(unittest.TestCase):
             share_calls[0][1]["share_url"],
             "https://www.tiktok.com/@aidramalabs_anime2/video/7638351465085455629",
         )
-        self.assertTrue(calls[0][0].endswith("fetch_one_video_v3"))
+        self.assertTrue(calls[0][0].endswith("fetch_post_detail_v2"))
+
+    def test_web_play_source_preserves_chain_token(self):
+        payload = {
+            "data": {
+                "tt_chain_token": "token-value",
+                "aweme_detail": {
+                    "video": {
+                        "play_addr": {"url_list": ["https://www.tiktok.com/aweme/v1/play/?video_id=123"]},
+                    },
+                },
+            },
+        }
+        with mock.patch.object(proxy, "_send_tikhub_get", return_value=payload):
+            source = proxy._get_video_play_source("123", uid="demo")
+
+        self.assertEqual(source["url"], "https://www.tiktok.com/aweme/v1/play/?video_id=123")
+        self.assertEqual(source["tt_chain_token"], "token-value")
+        self.assertTrue(source["endpoint"].endswith("fetch_post_detail_v2"))
+
+    def test_signed_media_ticket_expires_and_cannot_be_changed(self):
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"):
+            url = proxy._video_media_ticket_url("demo", "123", expires=2000, origin="https://example.test")
+            params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            signature = params["sig"][0]
+            self.assertTrue(proxy._video_media_ticket_valid("demo", "123", "2000", signature, now=1500))
+            self.assertFalse(proxy._video_media_ticket_valid("demo", "124", "2000", signature, now=1500))
+            self.assertFalse(proxy._video_media_ticket_valid("demo", "123", "2000", signature, now=2001))
 
 
 class LocalDownloaderScriptTests(unittest.TestCase):
@@ -240,10 +275,10 @@ class LocalDownloaderScriptTests(unittest.TestCase):
             "episode_no": 1,
             "title": "Episode 1",
         }
-        with mock.patch.object(proxy, "_drama_episode_summary", return_value=summary), \
-                mock.patch.object(proxy, "_episode_direct_play_url", return_value="https://media.example/1.mp4"):
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
+                mock.patch.object(proxy, "_drama_episode_summary", return_value=summary):
             script_bytes, count, errors = proxy._build_drama_local_downloader_script(
-                "demo", "drama-1", [{"aweme_id": "123"}]
+                "demo", "drama-1", [{"aweme_id": "123"}], origin="https://example.test"
             )
 
         script = script_bytes.decode("utf-8-sig")
@@ -255,6 +290,7 @@ class LocalDownloaderScriptTests(unittest.TestCase):
         self.assertIn('$folderPrefix + "-*"', script)
         self.assertIn("$existingDir.FullName", script)
         self.assertNotIn("$jobs += Start-Job", script)
+        self.assertIn("https://example.test/drama-media?", script)
 
 
 class AdminCatalogTests(unittest.TestCase):

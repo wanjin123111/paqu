@@ -76,6 +76,7 @@ def _env_bool(name, default):
 
 TIKHUB_HOST = os.environ.get("TIKHUB_HOST", "https://api.tikhub.io").rstrip("/")
 TIKTOK_HOST = os.environ.get("TIKTOK_HOST", "https://www.tiktok.com").rstrip("/")
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://paqu-tikhub-proxy.onrender.com").strip().rstrip("/")
 TIKTOK_AID = os.environ.get("TIKTOK_AID", "1233").strip() or "1233"
 TIKTOK_REGION = os.environ.get("TIKTOK_REGION", "US").strip() or "US"
 TIKTOK_LANGUAGE = os.environ.get("TIKTOK_LANGUAGE", "en").strip() or "en"
@@ -138,6 +139,7 @@ VIDEO_PLAY_URL_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_URL_CACHE_TTL_SECONDS", 
 VIDEO_PLAY_NEGATIVE_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_NEGATIVE_CACHE_TTL_SECONDS", 20, 0, 300)
 VIDEO_PLAY_RESOLVE_TIMEOUT_SECONDS = _env_int("VIDEO_PLAY_RESOLVE_TIMEOUT_SECONDS", 25, 5, 120)
 VIDEO_PLAY_RESOLVE_RETRIES = _env_int("VIDEO_PLAY_RESOLVE_RETRIES", 2, 1, 4)
+VIDEO_MEDIA_TICKET_TTL_SECONDS = _env_int("VIDEO_MEDIA_TICKET_TTL_SECONDS", 172800, 300, 604800)
 DRAMA_LINK_PAGE_SIZE = _env_int("DRAMA_LINK_PAGE_SIZE", 50, 1, 50)
 DRAMA_LINK_MAX_EPISODES = _env_int("DRAMA_LINK_MAX_EPISODES", 500, 1, 5000)
 DRAMA_ZIP_MAX_EPISODES = _env_int("DRAMA_ZIP_MAX_EPISODES", DRAMA_LINK_MAX_EPISODES, 1, 5000)
@@ -253,8 +255,13 @@ SINGLE_VIDEO_EP_CANDIDATES = [
     "/api/v1/tiktok/app/v3/fetch_one_video",
     "/api/v1/tiktok/app/v3/fetch_one_video_v2",
 ]
+WEB_SINGLE_VIDEO_EP_CANDIDATES = [
+    "/api/v1/tiktok/web/fetch_post_detail_v2",
+    "/api/v1/tiktok/web/fetch_post_detail",
+]
 SHARE_VIDEO_EP_CANDIDATES = [
     ("/api/v1/tiktok/app/v3/fetch_one_video_by_share_url_v2", "share_url"),
+    ("/api/v1/tiktok/app/v3/fetch_one_video_by_share_url", "share_url"),
     ("/api/v1/hybrid/video_data", "url"),
 ]
 DISCOVERY_SEARCH_ENDPOINTS = {
@@ -549,7 +556,10 @@ def _first_addr_url(value):
                 text = _first_addr_url(urls)
                 if text:
                     return text
-        for key in ("url", "uri", "play_url", "playUrl", "download_url", "downloadUrl"):
+        for key in (
+            "url", "uri", "play_url", "playUrl", "download_url", "downloadUrl",
+            "original_video_url", "originalVideoUrl", "watermark_free_url", "watermarkFreeUrl",
+        ):
             text = _first_addr_url(value.get(key))
             if text:
                 return text
@@ -588,6 +598,7 @@ def _video_play_url_from_item(item):
         "play_addr_h264", "playAddrH264", "play_addr", "playAddr",
         "play_url", "playUrl", "download_addr", "downloadAddr",
         "download_url", "downloadUrl", "url_list", "urlList",
+        "original_video_url", "originalVideoUrl", "watermark_free_url", "watermarkFreeUrl",
     ):
         containers.append(item.get(key))
     for container in containers:
@@ -1103,17 +1114,31 @@ def _get_video_id(video):
     return "" if found is None else str(found)
 
 
-def _video_play_cache_store(video_id, url, now=None):
+def _video_play_cache_store(video_id, source, now=None):
+    if isinstance(source, str):
+        source = {"url": source}
+    source = dict(source or {})
+    url = source.get("url") or ""
     if not VIDEO_PLAY_URL_CACHE_TTL_SECONDS and (url or not VIDEO_PLAY_NEGATIVE_CACHE_TTL_SECONDS):
         return
     with VIDEO_PLAY_URL_CACHE_LOCK:
-        VIDEO_PLAY_URL_CACHE[video_id] = {"url": url or "", "ts": now or time.time()}
+        VIDEO_PLAY_URL_CACHE[video_id] = {
+            "url": url,
+            "tt_chain_token": source.get("tt_chain_token") or "",
+            "endpoint": source.get("endpoint") or "",
+            "ts": now or time.time(),
+        }
 
 
-def _get_video_play_url(video_id, started=None, uid=""):
+def _video_play_cache_remove(video_id):
+    with VIDEO_PLAY_URL_CACHE_LOCK:
+        VIDEO_PLAY_URL_CACHE.pop(_clean_drama_id(video_id), None)
+
+
+def _get_video_play_source(video_id, started=None, uid=""):
     clean_id = _clean_drama_id(video_id)
     if not clean_id or (started is not None and _runtime_exceeded(started)):
-        return ""
+        return {}
     now = time.time()
     with VIDEO_PLAY_URL_CACHE_LOCK:
         cached = VIDEO_PLAY_URL_CACHE.get(clean_id)
@@ -1121,11 +1146,36 @@ def _get_video_play_url(video_id, started=None, uid=""):
         cached_url = cached.get("url", "")
         ttl = VIDEO_PLAY_URL_CACHE_TTL_SECONDS if cached_url else VIDEO_PLAY_NEGATIVE_CACHE_TTL_SECONDS
         if ttl and now - cached.get("ts", 0) < ttl:
-            return cached_url
+            return dict(cached) if cached_url else {}
     failures = []
+
+    # TikHub's Web V2 resolver is the most stable current fallback for older or
+    # region-limited TikTok posts.  Its URLs require the returned
+    # tt_chain_token cookie, which is retained in the source object and used by
+    # our protected media relay/downloaders below.
+    for endpoint in WEB_SINGLE_VIDEO_EP_CANDIDATES:
+        if started is not None and _runtime_exceeded(started):
+            return {}
+        try:
+            data = _send_tikhub_get(
+                endpoint,
+                {"itemId": clean_id, "region": TIKTOK_REGION},
+                "TikHub web single video endpoint",
+                timeout=VIDEO_PLAY_RESOLVE_TIMEOUT_SECONDS,
+                retries=VIDEO_PLAY_RESOLVE_RETRIES,
+            )
+        except TikHubError as exc:
+            failures.append("%s: %s" % (endpoint.rsplit("/", 1)[-1], str(exc)[:180]))
+            continue
+        source = _video_play_source_from_payload(data, endpoint)
+        if source.get("url"):
+            _video_play_cache_store(clean_id, source, now)
+            return source
+        failures.append("%s: no media address" % endpoint.rsplit("/", 1)[-1])
+
     for endpoint in SINGLE_VIDEO_EP_CANDIDATES:
         if started is not None and _runtime_exceeded(started):
-            return ""
+            return {}
         params = {"aweme_id": clean_id}
         if endpoint.endswith("_v3"):
             params["region"] = TIKTOK_REGION
@@ -1140,10 +1190,10 @@ def _get_video_play_url(video_id, started=None, uid=""):
         except TikHubError as exc:
             failures.append("%s: %s" % (endpoint.rsplit("/", 1)[-1], str(exc)[:180]))
             continue
-        url = _video_play_url_from_tree(data)
-        if url:
-            _video_play_cache_store(clean_id, url, now)
-            return url
+        source = _video_play_source_from_payload(data, endpoint)
+        if source.get("url"):
+            _video_play_cache_store(clean_id, source, now)
+            return source
         failures.append("%s: no media address" % endpoint.rsplit("/", 1)[-1])
 
     # The share-link resolver follows a separate TikHub parsing path and is an
@@ -1153,7 +1203,7 @@ def _get_video_play_url(video_id, started=None, uid=""):
     if share_url:
         for endpoint, param_name in SHARE_VIDEO_EP_CANDIDATES:
             if started is not None and _runtime_exceeded(started):
-                return ""
+                return {}
             try:
                 data = _send_tikhub_get(
                     endpoint,
@@ -1165,19 +1215,87 @@ def _get_video_play_url(video_id, started=None, uid=""):
             except TikHubError as exc:
                 failures.append("%s: %s" % (endpoint.rsplit("/", 1)[-1], str(exc)[:180]))
                 continue
-            url = _video_play_url_from_tree(data)
-            if url:
-                _video_play_cache_store(clean_id, url, now)
-                return url
+            source = _video_play_source_from_payload(data, endpoint)
+            if source.get("url"):
+                _video_play_cache_store(clean_id, source, now)
+                return source
             failures.append("%s: no media address" % endpoint.rsplit("/", 1)[-1])
 
-    _video_play_cache_store(clean_id, "", now)
+    _video_play_cache_store(clean_id, {}, now)
     print("[video-play] unresolved video_id=%s account=%s attempts=%s" % (
         clean_id,
         (uid or "-").strip().lstrip("@"),
         " | ".join(failures[-5:]) or "no resolver attempted",
     ), flush=True)
-    return ""
+    return {}
+
+
+def _get_video_play_url(video_id, started=None, uid=""):
+    return _get_video_play_source(video_id, started, uid).get("url", "")
+
+
+def _video_media_ticket_signature(uid, video_id, expires):
+    if not SCHEDULE_SECRET:
+        return ""
+    payload = "%s\n%s\n%s" % (
+        _to_text(uid, 80).strip().lstrip("@"),
+        _clean_drama_id(video_id),
+        int(expires),
+    )
+    return hmac.new(
+        SCHEDULE_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        "sha256",
+    ).hexdigest()
+
+
+def _video_media_ticket_url(uid, video_id, expires=None, origin=""):
+    clean_id = _clean_drama_id(video_id)
+    if not clean_id or not SCHEDULE_SECRET:
+        return ""
+    expires = int(expires or (time.time() + VIDEO_MEDIA_TICKET_TTL_SECONDS))
+    params = {
+        "uid": _to_text(uid, 80).strip().lstrip("@"),
+        "video_id": clean_id,
+        "expires": str(expires),
+        "sig": _video_media_ticket_signature(uid, clean_id, expires),
+    }
+    path = "/drama-media?" + urllib.parse.urlencode(params)
+    return (origin or "").rstrip("/") + path
+
+
+def _video_media_ticket_valid(uid, video_id, expires, signature, now=None):
+    try:
+        expires = int(expires)
+    except (TypeError, ValueError):
+        return False
+    now = int(now or time.time())
+    if expires < now or expires > now + VIDEO_MEDIA_TICKET_TTL_SECONDS + 300:
+        return False
+    expected = _video_media_ticket_signature(uid, video_id, expires)
+    return bool(expected and signature and hmac.compare_digest(expected, str(signature)))
+
+
+def _video_play_cookie_from_tree(data):
+    token = _deep_find(data, ("tt_chain_token", "ttChainToken", "chain_token", "chainToken"))
+    token = _to_text(token, 4096).strip()
+    if not token:
+        return ""
+    # TikHub returns the cookie value rather than an entire Cookie header.  Do
+    # not allow response data to inject additional cookie fields or headers.
+    token = token.split(";", 1)[0].replace("\r", "").replace("\n", "").strip()
+    return token
+
+
+def _video_play_source_from_payload(data, endpoint=""):
+    url = _video_play_url_from_tree(data)
+    if not url:
+        return {}
+    return {
+        "url": url,
+        "tt_chain_token": _video_play_cookie_from_tree(data),
+        "endpoint": endpoint or "",
+    }
 
 
 def _get_playlist_id(playlist):
@@ -4671,12 +4789,21 @@ def _attachment_header(filename):
     )
 
 
-def _episode_direct_play_url(item, started=None, uid=""):
-    url = _video_play_url_from_item(item)
-    if url:
-        return url
+def _episode_direct_play_source(item, started=None, uid=""):
     video_id = _get_video_id(item)
-    return _get_video_play_url(video_id, started, uid) if video_id else ""
+    if video_id:
+        source = _get_video_play_source(video_id, started, uid)
+        if source.get("url"):
+            return source
+    # Historical reports can contain a usable direct address.  Keep it as the
+    # final fallback, but resolve by video ID first so expired CDN URLs are not
+    # preferred over a fresh address.
+    url = _video_play_url_from_item(item)
+    return {"url": url, "tt_chain_token": "", "endpoint": "report"} if url else {}
+
+
+def _episode_direct_play_url(item, started=None, uid=""):
+    return _episode_direct_play_source(item, started, uid).get("url", "")
 
 
 def _media_extension(content_type, url):
@@ -4693,13 +4820,24 @@ def _media_extension(content_type, url):
     return ".mp4"
 
 
-def _open_video_download(url, uid):
+def _open_video_download(source, uid, range_header=""):
+    if isinstance(source, str):
+        source = {"url": source}
+    source = dict(source or {})
+    url = source.get("url") or ""
+    if not url:
+        raise TikHubError("play source not found")
     headers = {
         "Accept": "*/*",
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": TIKTOK_HOST + ("/@" + uid if uid else "/"),
         "User-Agent": DEFAULT_UA,
     }
+    token = _to_text(source.get("tt_chain_token"), 4096).strip()
+    if token:
+        headers["Cookie"] = "tt_chain_token=" + token
+    if range_header:
+        headers["Range"] = _to_text(range_header, 200)
     return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=DRAMA_ZIP_DOWNLOAD_TIMEOUT_SECONDS)
 
 
@@ -4710,10 +4848,11 @@ def _download_episode_to_temp(index, item, account, started=None):
     title = summary.get("title") or ("Episode %s" % episode_no)
     temp_path = ""
     try:
-        direct_url = _episode_direct_play_url(item, started, account)
+        source = _episode_direct_play_source(item, started, account)
+        direct_url = source.get("url") or ""
         if not direct_url:
             raise TikHubError("play source not found")
-        with _open_video_download(direct_url, account) as resp:
+        with _open_video_download(source, account) as resp:
             final_url = resp.geturl() or direct_url
             ext = _media_extension(resp.headers.get("Content-Type", ""), final_url)
             size = 0
@@ -4763,10 +4902,11 @@ def _powershell_single_quoted(value):
     return "'" + _to_text(value).replace("'", "''") + "'"
 
 
-def _build_drama_local_downloader_script(account, drama_id, episode_items):
-    started = time.time()
+def _build_drama_local_downloader_script(account, drama_id, episode_items, origin=""):
     used_names = set()
     items, errors = [], []
+    origin = (origin or PUBLIC_BASE_URL).rstrip("/")
+    ticket_expires = int(time.time() + VIDEO_MEDIA_TICKET_TTL_SECONDS)
 
     def prepare(index, item):
         summary = _drama_episode_summary(item, account, index)
@@ -4774,9 +4914,9 @@ def _build_drama_local_downloader_script(account, drama_id, episode_items):
         episode_no = summary.get("episode_no") or index
         title = summary.get("title") or ("Episode %s" % episode_no)
         try:
-            direct_url = _episode_direct_play_url(item, started, account)
+            direct_url = _video_media_ticket_url(account, video_id, ticket_expires, origin)
             if not direct_url:
-                raise TikHubError("play source not found")
+                raise TikHubError("protected download URL could not be prepared")
             base = "%03d-%s" % (_to_int(episode_no) or index, _safe_download_name(title, 70))
             if video_id:
                 base += "-" + _safe_download_name(video_id[-10:], 12)
@@ -5441,8 +5581,9 @@ def _render_drama_episode_list_page(uid, drama_id, episodes):
       if(action==="open-json"){
         var data=await response.json();
         if(!data||!data.url)throw new Error("后端没有返回可用播放地址");
-        if(popup)popup.location.replace(data.url);
-        else window.open(data.url,"_blank","noopener");
+        var mediaUrl=new URL(data.url,location.href).toString();
+        if(popup)popup.location.replace(mediaUrl);
+        else window.open(mediaUrl,"_blank","noopener");
         setStatus("密码验证成功，已打开最新播放源。",true);
       }else if(action==="navigate"){
         if(popup)popup.location.replace(response.url);
@@ -5878,6 +6019,8 @@ class Handler(BaseHTTPRequestHandler):
             self._admin_access_endpoint(qs)
         elif parsed.path == "/curated-catalog":
             self._curated_catalog_endpoint(qs)
+        elif parsed.path == "/drama-media":
+            self._serve_drama_media(qs)
         elif parsed.path == "/drama-link":
             self._resolve_drama_link(qs)
         elif parsed.path == "/supabase/latest":
@@ -5965,6 +6108,15 @@ class Handler(BaseHTTPRequestHandler):
         client = (self.client_address[0] if self.client_address else "").lower()
         return ALLOW_LOOPBACK_PRIVATE_ACCESS and client in ("127.0.0.1", "::1")
 
+    def _request_origin(self):
+        proto = str(self.headers.get("X-Forwarded-Proto", "") or "").split(",", 1)[0].strip().lower()
+        if proto not in ("http", "https"):
+            proto = "https" if os.environ.get("RENDER") else "http"
+        host = str(self.headers.get("Host", "") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9.-]+(?::\d{1,5})?", host):
+            return PUBLIC_BASE_URL
+        return "%s://%s" % (proto, host)
+
     def _send_local_download_unavailable(self):
         body = """<!doctype html>
 <html lang="zh-CN">
@@ -6027,7 +6179,9 @@ class Handler(BaseHTTPRequestHandler):
             if not episode_items:
                 self._send_json(404, {"ok": False, "error": "no episodes found"})
                 return
-            script, count, errors = _build_drama_local_downloader_script(account, drama_id, episode_items)
+            script, count, errors = _build_drama_local_downloader_script(
+                account, drama_id, episode_items, origin=self._request_origin()
+            )
             script = _wrap_powershell_downloader_cmd(script)
         except Exception as exc:
             self._send_json(500, {"ok": False, "error": str(exc)})
@@ -6135,6 +6289,73 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
+    def _serve_drama_media(self, qs):
+        uid = (qs.get("uid", [""])[0] or "").strip().lstrip("@")
+        video_id = qs.get("video_id", [""])[0] or qs.get("item_id", [""])[0]
+        expires = qs.get("expires", [""])[0]
+        signature = qs.get("sig", [""])[0]
+        if not _video_media_ticket_valid(uid, video_id, expires, signature):
+            self._send_json(403, {"ok": False, "error": "download link expired or invalid"})
+            return
+
+        upstream = None
+        last_error = None
+        for attempt in range(2):
+            source = _get_video_play_source(video_id, uid=uid)
+            if not source.get("url"):
+                last_error = TikHubError("play source unavailable")
+                break
+            try:
+                upstream = _open_video_download(source, uid, self.headers.get("Range", ""))
+                break
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if attempt == 0 and exc.code in (401, 403, 404, 410):
+                    _video_play_cache_remove(video_id)
+                    continue
+                break
+            except Exception as exc:
+                last_error = exc
+                break
+        if upstream is None:
+            code = getattr(last_error, "code", 502)
+            self._send_json(502 if not isinstance(code, int) or code < 400 else code, {
+                "ok": False,
+                "error": "video source download failed",
+                "video_id": _clean_drama_id(video_id),
+            })
+            return
+
+        try:
+            status = getattr(upstream, "status", None) or upstream.getcode() or 200
+            content_type = upstream.headers.get("Content-Type", "video/mp4")
+            if "text/html" in content_type.lower():
+                upstream.close()
+                self._send_json(502, {"ok": False, "error": "video source returned a web page"})
+                return
+            self.send_response(status)
+            self._cors()
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Content-Type", content_type)
+            for name in ("Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"):
+                value = upstream.headers.get(name)
+                if value:
+                    self.send_header(name, value)
+            self.end_headers()
+            while True:
+                chunk = upstream.read(DRAMA_ZIP_CHUNK_BYTES)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            try:
+                upstream.close()
+            except Exception:
+                pass
+
     def _resolve_drama_link(self, qs):
         uid = (qs.get("uid", [""])[0] or qs.get("account", [""])[0]).strip().lstrip("@")
         drama_id = qs.get("drama_id", [""])[0] or qs.get("dramaID", [""])[0]
@@ -6231,7 +6452,12 @@ class Handler(BaseHTTPRequestHandler):
         link = ""
         if video_id:
             if prefer_play:
-                link = _get_video_play_url(video_id, uid=uid)
+                # Resolve once before returning a signed relay URL.  Keeping the
+                # compatibility wrapper here also gives callers/tests a single
+                # stable resolver entry point while /drama-media refreshes an
+                # expired upstream CDN URL again at download time.
+                if _get_video_play_url(video_id, uid=uid):
+                    link = _video_media_ticket_url(uid, video_id)
             else:
                 link = _build_tiktok_video_url(uid, video_id)
         if not link and drama_id:
