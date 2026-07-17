@@ -421,10 +421,14 @@ class LocalDownloaderScriptTests(unittest.TestCase):
         self.assertNotIn("$jobs += Start-Job", script)
         self.assertIn("https://example.test/drama-media?", script)
         self.assertIn('"work_url": "https://www.tiktok.com/@demo/video/123"', script)
-        self.assertIn("--cookies-from-browser chrome", script)
+        self.assertNotIn("--cookies-from-browser chrome", script)
+        self.assertIn("--cookies-from-browser firefox", script)
+        self.assertIn("Get cookies.txt LOCALLY", script)
+        self.assertIn("应用绑定加密", script)
+        self.assertIn("TIKHUB_TIKTOK_COOKIE_FILE", script)
         self.assertIn("SHA2-256SUMS", script)
         self.assertIn('"tiktok_login_required"', script)
-        self.assertIn("$maxJobs = if ($useBrowserCookies) { 2 } else { 4 }", script)
+        self.assertIn("$maxJobs = if ($useSessionCookies) { 2 } else { 4 }", script)
 
 
 class AdminCatalogTests(unittest.TestCase):

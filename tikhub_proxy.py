@@ -5182,8 +5182,8 @@ $errors = $errorsJson | ConvertFrom-Json
 New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
 $itemsJson | Out-File -LiteralPath (Join-Path $downloadDir "download_items.json") -Encoding utf8
 $errorsJson | Out-File -LiteralPath (Join-Path $downloadDir "prepare_errors.json") -Encoding utf8
-$useBrowserCookies = $false
-$cookieJar = Join-Path $env:TEMP ("tikhub_chrome_" + [guid]::NewGuid().ToString("N") + ".txt")
+$useSessionCookies = $false
+$cookieJar = Join-Path $env:TEMP ("tikhub_tiktok_" + [guid]::NewGuid().ToString("N") + ".txt")
 $ytDlp = ""
 
 function Install-VerifiedYtDlp {
@@ -5194,7 +5194,7 @@ function Install-VerifiedYtDlp {
   New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
   $download = $binary + ".download"
   $checksums = Join-Path $toolsDir "SHA2-256SUMS"
-  Write-Host "Preparing the official local TikTok downloader..."
+  Write-Host "Preparing the verified local downloader..."
   Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile $download
   Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS" -OutFile $checksums
   $line = Get-Content -LiteralPath $checksums | Where-Object { $_ -match "\\syt-dlp\\.exe$" } | Select-Object -First 1
@@ -5212,6 +5212,97 @@ function Install-VerifiedYtDlp {
   return $binary
 }
 
+function Test-TikTokCookieFile {
+  param([string]$Path)
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return $false }
+  try {
+    $header = Get-Content -LiteralPath $Path -TotalCount 2 -ErrorAction Stop
+    if (-not (@($header) -match '^# (?:HTTP Cookie File|Netscape HTTP Cookie File)')) { return $false }
+    return [bool](Select-String -LiteralPath $Path -Pattern 'tiktok\\.com\\t' -Quiet -ErrorAction Stop)
+  } catch {
+    return $false
+  }
+}
+
+function Copy-TikTokCookiesOnly {
+  param([string]$Source, [string]$Destination)
+  if (-not (Test-TikTokCookieFile $Source)) { return $false }
+  $cookieRows = @(Get-Content -LiteralPath $Source | Where-Object {
+    $_ -match '^(?:#HttpOnly_)?[^\\t]*tiktok\\.com\\t'
+  })
+  if ($cookieRows.Count -eq 0) { return $false }
+  @('# Netscape HTTP Cookie File', '# TikHub temporary TikTok-only cookie jar') + $cookieRows |
+    Set-Content -LiteralPath $Destination -Encoding ASCII
+  return $true
+}
+
+function Get-DownloadsFolders {
+  $folders = @()
+  try {
+    $shellFolders = Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders'
+    $configured = $shellFolders.'{374DE290-123F-4565-9164-39C4925E467B}'
+    if ($configured) { $folders += [Environment]::ExpandEnvironmentVariables($configured) }
+  } catch {}
+  if ($env:USERPROFILE) { $folders += (Join-Path $env:USERPROFILE 'Downloads') }
+  return @($folders | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique)
+}
+
+function Find-TikTokCookieExport {
+  $explicit = $env:TIKHUB_TIKTOK_COOKIE_FILE
+  if ($explicit -and (Test-TikTokCookieFile $explicit)) { return $explicit }
+  $folders = @($baseDir) + @(Get-DownloadsFolders)
+  $files = @()
+  foreach ($folder in ($folders | Select-Object -Unique)) {
+    $files += @(Get-ChildItem -LiteralPath $folder -File -Filter '*.txt' -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -match '(?i)(tiktok.*cookie|cookie.*tiktok|^cookies(?: \\(\\d+\\))?\\.txt$)' })
+  }
+  foreach ($file in ($files | Sort-Object LastWriteTime -Descending)) {
+    if (Test-TikTokCookieFile $file.FullName) { return $file.FullName }
+  }
+  return ""
+}
+
+function Test-TikTokSession {
+  param([string]$CookieFile, [string]$WorkUrl)
+  if (-not (Test-TikTokCookieFile $CookieFile)) { return $false }
+  & $ytDlp --cookies $CookieFile --user-agent $ua --add-header 'Referer:https://www.tiktok.com/' --no-playlist --simulate --no-warnings $WorkUrl | Out-Host
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Try-FirefoxTikTokSession {
+  param([string]$WorkUrl)
+  Remove-Item -LiteralPath $cookieJar -Force -ErrorAction SilentlyContinue
+  & $ytDlp --cookies-from-browser firefox --cookies $cookieJar --user-agent $ua --add-header 'Referer:https://www.tiktok.com/' --no-playlist --simulate --no-warnings $WorkUrl | Out-Host
+  return ($LASTEXITCODE -eq 0 -and (Test-TikTokCookieFile $cookieJar))
+}
+
+function Import-TikTokCookieExport {
+  param([string]$Source, [string]$WorkUrl)
+  Remove-Item -LiteralPath $cookieJar -Force -ErrorAction SilentlyContinue
+  if (-not (Copy-TikTokCookiesOnly $Source $cookieJar)) { return $false }
+  return (Test-TikTokSession $cookieJar $WorkUrl)
+}
+
+function Request-ChromeTikTokCookieExport {
+  param([string]$WorkUrl)
+  $extensionUrl = 'https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc'
+  Write-Host ""
+  Write-Host "当前 Chrome 使用“应用绑定加密”保护登录信息。"
+  Write-Host "本机下载器不能直接解密，因此关闭 Chrome 后重试也不会生效。"
+  Write-Host ""
+  Write-Host "请为已经登录的 Chrome 完成一次本地授权（登录失效后再更新）："
+  Write-Host "1. 在自动打开的页面安装推荐扩展：Get cookies.txt LOCALLY。"
+  Write-Host "2. 回到已经登录的 tiktok.com 页面。"
+  Write-Host "3. 点击该扩展，只导出当前 TikTok 站点的 cookies。"
+  Write-Host "4. 保持默认 .txt 文件名保存到下载目录，然后返回此窗口。"
+  try { Start-Process $extensionUrl } catch { Write-Host $extensionUrl }
+  $null = Read-Host "导出完成后按 Enter 继续"
+  $export = Find-TikTokCookieExport
+  if (-not $export) { return $false }
+  Write-Host ("Found TikTok cookie export: " + $export)
+  return (Import-TikTokCookieExport $export $WorkUrl)
+}
+
 $firstItem = @($items) | Select-Object -First 1
 if ($null -ne $firstItem) {
   $probe = Join-Path $env:TEMP ("tikhub_probe_" + [guid]::NewGuid().ToString("N") + ".tmp")
@@ -5225,19 +5316,24 @@ if ($null -ne $firstItem) {
     Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
   }
   if ($probeCode -ne 0 -and $probeDetail -match '"error_code"\\s*:\\s*"tiktok_login_required"') {
-    $useBrowserCookies = $true
+    $useSessionCookies = $true
     $ytDlp = Install-VerifiedYtDlp
     Write-Host ""
-    Write-Host "This drama requires your logged-in TikTok session."
-    Write-Host "Save your browser work and completely exit Chrome, then return here."
-    Read-Host "Press Enter after Chrome is fully closed"
-    if (Get-Process chrome -ErrorAction SilentlyContinue) {
-      throw "Chrome is still running. Fully exit Chrome and run this script again."
+    Write-Host "这部短剧需要使用你已经登录的 TikTok 会话。"
+    $sessionReady = $false
+    $export = Find-TikTokCookieExport
+    if ($export) {
+      Write-Host ("Trying the latest local TikTok cookie export: " + $export)
+      $sessionReady = Import-TikTokCookieExport $export $firstItem.work_url
     }
-    & $ytDlp --cookies-from-browser chrome --cookies $cookieJar --no-playlist --simulate --no-warnings $firstItem.work_url
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $cookieJar)) {
+    if (-not $sessionReady) {
+      Write-Host "正在检查本机 Firefox 的 TikTok 登录状态……"
+      $sessionReady = Try-FirefoxTikTokSession $firstItem.work_url
+    }
+    if (-not $sessionReady) { $sessionReady = Request-ChromeTikTokCookieExport $firstItem.work_url }
+    if (-not $sessionReady) {
       Remove-Item -LiteralPath $cookieJar -Force -ErrorAction SilentlyContinue
-      throw "Could not read the logged-in Chrome TikTok session."
+      throw "没有找到可用的 TikTok 登录会话。请重新导出 tiktok.com cookies 后再运行。"
     }
     Write-Host "TikTok login session loaded. Starting all episodes..."
   } elseif ($probeCode -ne 0) {
@@ -5246,7 +5342,7 @@ if ($null -ne $firstItem) {
   }
 }
 
-$maxJobs = if ($useBrowserCookies) { 2 } else { 4 }
+$maxJobs = if ($useSessionCookies) { 2 } else { 4 }
 $jobs = @()
 
 function Receive-FinishedJobs {
@@ -5268,16 +5364,16 @@ foreach ($item in $items) {
     $jobs = @(Receive-FinishedJobs $jobs)
     Start-Sleep -Milliseconds 500
   }
-  $job = Start-Job -ArgumentList $item.url, $item.work_url, $item.file, $downloadDir, $ua, $referer, $useBrowserCookies, $ytDlp, $cookieJar -ScriptBlock {
-    param($url, $workUrl, $file, $dir, $ua, $referer, $useBrowserCookies, $ytDlp, $cookieJar)
+  $job = Start-Job -ArgumentList $item.url, $item.work_url, $item.file, $downloadDir, $ua, $referer, $useSessionCookies, $ytDlp, $cookieJar -ScriptBlock {
+    param($url, $workUrl, $file, $dir, $ua, $referer, $useSessionCookies, $ytDlp, $cookieJar)
     $out = Join-Path $dir $file
     if (Test-Path -LiteralPath $out) {
       Write-Host "Skip existing: $file"
       return
     }
     Write-Host "Downloading: $file"
-    if ($useBrowserCookies) {
-      & $ytDlp --cookies $cookieJar --no-playlist --no-overwrites --no-part --format best --output $out $workUrl
+    if ($useSessionCookies) {
+      & $ytDlp --cookies $cookieJar --user-agent $ua --add-header 'Referer:https://www.tiktok.com/' --no-playlist --no-overwrites --no-part --format best --output $out $workUrl
     } else {
       & curl.exe -sS -L --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 20 -A $ua -e $referer -o $out $url
     }
@@ -5288,7 +5384,7 @@ foreach ($item in $items) {
         Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
       }
       if ($detail.Length -gt 500) { $detail = $detail.Substring(0, 500) }
-      throw ("curl failed: " + $file + $(if ($detail) { " - " + $detail } else { "" }))
+      throw ("Download failed: " + $file + $(if ($detail) { " - " + $detail } else { "" }))
     }
   }
   $jobs = @($jobs) + @($job)
