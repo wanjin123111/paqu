@@ -135,6 +135,9 @@ TIKHUB_RPS_LIMIT = _env_int("TIKHUB_RPS_LIMIT", 18, 1, 1000)
 # Keep those requests paced as well when multiple accounts run concurrently.
 TIKTOK_RPS_LIMIT = _env_int("TIKTOK_RPS_LIMIT", 8, 1, 1000)
 VIDEO_PLAY_URL_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_URL_CACHE_TTL_SECONDS", 600, 0, 86400)
+VIDEO_PLAY_NEGATIVE_CACHE_TTL_SECONDS = _env_int("VIDEO_PLAY_NEGATIVE_CACHE_TTL_SECONDS", 20, 0, 300)
+VIDEO_PLAY_RESOLVE_TIMEOUT_SECONDS = _env_int("VIDEO_PLAY_RESOLVE_TIMEOUT_SECONDS", 25, 5, 120)
+VIDEO_PLAY_RESOLVE_RETRIES = _env_int("VIDEO_PLAY_RESOLVE_RETRIES", 2, 1, 4)
 DRAMA_LINK_PAGE_SIZE = _env_int("DRAMA_LINK_PAGE_SIZE", 50, 1, 50)
 DRAMA_LINK_MAX_EPISODES = _env_int("DRAMA_LINK_MAX_EPISODES", 500, 1, 5000)
 DRAMA_ZIP_MAX_EPISODES = _env_int("DRAMA_ZIP_MAX_EPISODES", DRAMA_LINK_MAX_EPISODES, 1, 5000)
@@ -246,9 +249,9 @@ PLAYLIST_VIDEO_EP_CANDIDATES = [
     "/api/v1/tiktok/web/fetch_play_list_videos",
 ]
 SINGLE_VIDEO_EP_CANDIDATES = [
+    "/api/v1/tiktok/app/v3/fetch_one_video_v3",
     "/api/v1/tiktok/app/v3/fetch_one_video",
     "/api/v1/tiktok/app/v3/fetch_one_video_v2",
-    "/api/v1/tiktok/app/v3/fetch_one_video_v3",
 ]
 SHARE_VIDEO_EP_CANDIDATES = [
     ("/api/v1/tiktok/app/v3/fetch_one_video_by_share_url_v2", "share_url"),
@@ -529,24 +532,31 @@ def _video_link_from_item(uid, item):
 
 
 def _first_addr_url(value):
+    if isinstance(value, str):
+        text = html.unescape(value).strip()
+        if text.startswith("//"):
+            text = "https:" + text
+        return text if text.startswith(("http://", "https://")) else ""
     if isinstance(value, dict):
         for key in ("url_list", "urlList", "urls"):
             urls = value.get(key)
             if isinstance(urls, list):
                 for url in urls:
-                    text = _to_text(url)
-                    if text.startswith("http"):
+                    text = _first_addr_url(url)
+                    if text:
                         return text
-            elif isinstance(urls, str) and urls.startswith("http"):
-                return urls
-        for key in ("url", "uri"):
-            text = _to_text(value.get(key))
-            if text.startswith("http"):
+            else:
+                text = _first_addr_url(urls)
+                if text:
+                    return text
+        for key in ("url", "uri", "play_url", "playUrl", "download_url", "downloadUrl"):
+            text = _first_addr_url(value.get(key))
+            if text:
                 return text
     elif isinstance(value, list):
         for item in value:
-            text = _to_text(item)
-            if text.startswith("http"):
+            text = _first_addr_url(item)
+            if text:
                 return text
     return ""
 
@@ -555,21 +565,31 @@ def _video_play_url_from_item(item):
     if not isinstance(item, dict):
         return ""
     video = item.get("video")
-    if not isinstance(video, dict):
-        return ""
     containers = []
+    if isinstance(video, dict):
+        for key in (
+            "play_addr_h264", "playAddrH264", "play_addr",
+            "playAddr", "play_addr_bytevc1", "playAddrBytevc1",
+            "play_addr_265", "playAddr265", "play_addr_lowbr", "playAddrLowbr",
+            "play_url", "playUrl",
+        ):
+            containers.append(video.get(key))
+        bit_rates = video.get("bit_rate") or video.get("bitRate") or video.get("bit_rates") or []
+        if isinstance(bit_rates, list):
+            for item_rate in bit_rates:
+                if isinstance(item_rate, dict):
+                    for key in ("play_addr", "playAddr", "play_addr_h264", "playAddrH264", "play_url", "playUrl"):
+                        containers.append(item_rate.get(key))
+        for key in ("download_addr", "downloadAddr", "download_url", "downloadUrl"):
+            containers.append(video.get(key))
+    # Some TikHub response versions expose the media address on the item/data
+    # object instead of nesting it under `video`.
     for key in (
-        "play_addr_h264", "playAddrH264", "play_addr",
-        "playAddr", "play_addr_bytevc1", "playAddrBytevc1",
+        "play_addr_h264", "playAddrH264", "play_addr", "playAddr",
+        "play_url", "playUrl", "download_addr", "downloadAddr",
+        "download_url", "downloadUrl", "url_list", "urlList",
     ):
-        containers.append(video.get(key))
-    bit_rates = video.get("bit_rate") or video.get("bitRate") or []
-    if isinstance(bit_rates, list):
-        for item_rate in bit_rates:
-            if isinstance(item_rate, dict):
-                containers.append(item_rate.get("play_addr") or item_rate.get("playAddr"))
-    for key in ("download_addr", "downloadAddr"):
-        containers.append(video.get(key))
+        containers.append(item.get(key))
     for container in containers:
         url = _first_addr_url(container)
         if url:
@@ -1083,16 +1103,26 @@ def _get_video_id(video):
     return "" if found is None else str(found)
 
 
-def _get_video_play_url(video_id, started=None):
+def _video_play_cache_store(video_id, url, now=None):
+    if not VIDEO_PLAY_URL_CACHE_TTL_SECONDS and (url or not VIDEO_PLAY_NEGATIVE_CACHE_TTL_SECONDS):
+        return
+    with VIDEO_PLAY_URL_CACHE_LOCK:
+        VIDEO_PLAY_URL_CACHE[video_id] = {"url": url or "", "ts": now or time.time()}
+
+
+def _get_video_play_url(video_id, started=None, uid=""):
     clean_id = _clean_drama_id(video_id)
     if not clean_id or (started is not None and _runtime_exceeded(started)):
         return ""
     now = time.time()
-    if VIDEO_PLAY_URL_CACHE_TTL_SECONDS:
-        with VIDEO_PLAY_URL_CACHE_LOCK:
-            cached = VIDEO_PLAY_URL_CACHE.get(clean_id)
-            if cached and now - cached.get("ts", 0) < VIDEO_PLAY_URL_CACHE_TTL_SECONDS:
-                return cached.get("url", "")
+    with VIDEO_PLAY_URL_CACHE_LOCK:
+        cached = VIDEO_PLAY_URL_CACHE.get(clean_id)
+    if cached:
+        cached_url = cached.get("url", "")
+        ttl = VIDEO_PLAY_URL_CACHE_TTL_SECONDS if cached_url else VIDEO_PLAY_NEGATIVE_CACHE_TTL_SECONDS
+        if ttl and now - cached.get("ts", 0) < ttl:
+            return cached_url
+    failures = []
     for endpoint in SINGLE_VIDEO_EP_CANDIDATES:
         if started is not None and _runtime_exceeded(started):
             return ""
@@ -1100,15 +1130,53 @@ def _get_video_play_url(video_id, started=None):
         if endpoint.endswith("_v3"):
             params["region"] = TIKTOK_REGION
         try:
-            data = _send_tikhub_get(endpoint, params, "TikHub single video endpoint")
-        except TikHubError:
+            data = _send_tikhub_get(
+                endpoint,
+                params,
+                "TikHub single video endpoint",
+                timeout=VIDEO_PLAY_RESOLVE_TIMEOUT_SECONDS,
+                retries=VIDEO_PLAY_RESOLVE_RETRIES,
+            )
+        except TikHubError as exc:
+            failures.append("%s: %s" % (endpoint.rsplit("/", 1)[-1], str(exc)[:180]))
             continue
         url = _video_play_url_from_tree(data)
         if url:
-            if VIDEO_PLAY_URL_CACHE_TTL_SECONDS:
-                with VIDEO_PLAY_URL_CACHE_LOCK:
-                    VIDEO_PLAY_URL_CACHE[clean_id] = {"url": url, "ts": now}
+            _video_play_cache_store(clean_id, url, now)
             return url
+        failures.append("%s: no media address" % endpoint.rsplit("/", 1)[-1])
+
+    # The share-link resolver follows a separate TikHub parsing path and is an
+    # important fallback for short-drama episodes that the ID endpoint cannot
+    # currently resolve (region/response-version differences are common).
+    share_url = _build_tiktok_video_url(uid, clean_id)
+    if share_url:
+        for endpoint, param_name in SHARE_VIDEO_EP_CANDIDATES:
+            if started is not None and _runtime_exceeded(started):
+                return ""
+            try:
+                data = _send_tikhub_get(
+                    endpoint,
+                    {param_name: share_url},
+                    "TikHub share link video endpoint",
+                    timeout=VIDEO_PLAY_RESOLVE_TIMEOUT_SECONDS,
+                    retries=VIDEO_PLAY_RESOLVE_RETRIES,
+                )
+            except TikHubError as exc:
+                failures.append("%s: %s" % (endpoint.rsplit("/", 1)[-1], str(exc)[:180]))
+                continue
+            url = _video_play_url_from_tree(data)
+            if url:
+                _video_play_cache_store(clean_id, url, now)
+                return url
+            failures.append("%s: no media address" % endpoint.rsplit("/", 1)[-1])
+
+    _video_play_cache_store(clean_id, "", now)
+    print("[video-play] unresolved video_id=%s account=%s attempts=%s" % (
+        clean_id,
+        (uid or "-").strip().lstrip("@"),
+        " | ".join(failures[-5:]) or "no resolver attempted",
+    ), flush=True)
     return ""
 
 
@@ -2974,12 +3042,12 @@ def _get_drama_episode_link(drama_id, uid, started=None, target="play"):
             play_url = _video_play_url_from_item(item)
             if play_url:
                 return play_url
-            play_url = _get_video_play_url(_get_video_id(item), started)
+            play_url = _get_video_play_url(_get_video_id(item), started, uid)
             if play_url:
                 return play_url
         if not fallback:
             fallback = _video_link_from_item(uid, item)
-    return fallback
+    return "" if prefer_play else fallback
 
 
 def _get_tiktok_drama_library(secuid, uid, started=None, max_pages=None, timeout=90, retries=None, include_episode_publish_time=True):
@@ -4603,12 +4671,12 @@ def _attachment_header(filename):
     )
 
 
-def _episode_direct_play_url(item, started=None):
+def _episode_direct_play_url(item, started=None, uid=""):
     url = _video_play_url_from_item(item)
     if url:
         return url
     video_id = _get_video_id(item)
-    return _get_video_play_url(video_id, started) if video_id else ""
+    return _get_video_play_url(video_id, started, uid) if video_id else ""
 
 
 def _media_extension(content_type, url):
@@ -4642,7 +4710,7 @@ def _download_episode_to_temp(index, item, account, started=None):
     title = summary.get("title") or ("Episode %s" % episode_no)
     temp_path = ""
     try:
-        direct_url = _episode_direct_play_url(item, started)
+        direct_url = _episode_direct_play_url(item, started, account)
         if not direct_url:
             raise TikHubError("play source not found")
         with _open_video_download(direct_url, account) as resp:
@@ -4699,33 +4767,46 @@ def _build_drama_local_downloader_script(account, drama_id, episode_items):
     started = time.time()
     used_names = set()
     items, errors = [], []
-    for index, item in enumerate(episode_items, 1):
+
+    def prepare(index, item):
         summary = _drama_episode_summary(item, account, index)
         video_id = summary.get("video_id") or ""
         episode_no = summary.get("episode_no") or index
         title = summary.get("title") or ("Episode %s" % episode_no)
         try:
-            direct_url = _episode_direct_play_url(item, started)
+            direct_url = _episode_direct_play_url(item, started, account)
             if not direct_url:
                 raise TikHubError("play source not found")
             base = "%03d-%s" % (_to_int(episode_no) or index, _safe_download_name(title, 70))
             if video_id:
                 base += "-" + _safe_download_name(video_id[-10:], 12)
-            filename = _unique_archive_name(base + _media_extension("", direct_url), used_names)
-            items.append({
+            return True, base + _media_extension("", direct_url), {
                 "episode": episode_no,
                 "video_id": video_id,
                 "title": title,
-                "file": filename,
                 "url": direct_url,
-            })
+            }
         except Exception as exc:
-            errors.append({
+            return False, "", {
                 "episode": episode_no,
                 "video_id": video_id,
                 "title": title,
                 "error": str(exc),
-            })
+            }
+
+    max_workers = min(LOCAL_DOWNLOAD_WORKERS, max(1, len(episode_items)))
+    prepared = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(prepare, index, item) for index, item in enumerate(episode_items, 1)]
+        for future in concurrent.futures.as_completed(futures):
+            prepared.append(future.result())
+    prepared.sort(key=lambda result: _to_int(result[2].get("episode")) or 0)
+    for ok, base_name, result in prepared:
+        if ok:
+            result["file"] = _unique_archive_name(base_name, used_names)
+            items.append(result)
+        else:
+            errors.append(result)
     stamp = datetime.datetime.now(BEIJING_TZ).strftime("%Y%m%d-%H%M%S")
     folder_prefix = _safe_download_name("%s-%s" % (account or "account", _clean_drama_id(drama_id) or "drama"), 100)
     folder_name = _safe_download_name("%s-%s" % (folder_prefix, stamp), 120)
@@ -6150,13 +6231,18 @@ class Handler(BaseHTTPRequestHandler):
         link = ""
         if video_id:
             if prefer_play:
-                link = _get_video_play_url(video_id)
-            if not link:
+                link = _get_video_play_url(video_id, uid=uid)
+            else:
                 link = _build_tiktok_video_url(uid, video_id)
         if not link and drama_id:
             link = _get_drama_episode_link(drama_id, uid, target=target)
         if not link:
-            self._send_json(404, {"ok": False, "error": "drama link not found"})
+            status = 502 if prefer_play else 404
+            payload = {"ok": False, "error": "play source unavailable" if prefer_play else "drama link not found"}
+            if video_id:
+                payload["video_id"] = _clean_drama_id(video_id)
+                payload["work_url"] = _build_tiktok_video_url(uid, video_id)
+            self._send_json(status, payload)
             return
         if redirect:
             self.send_response(302)

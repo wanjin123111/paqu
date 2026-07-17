@@ -117,6 +117,22 @@ class PrivateAccessTests(unittest.TestCase):
             "target": "play",
         })])
 
+    def test_failed_video_source_does_not_masquerade_as_tiktok_work_page(self):
+        handler = self.make_handler(headers={"X-Schedule-Secret": "expected-secret"})
+        with mock.patch.object(proxy, "SCHEDULE_SECRET", "expected-secret"), \
+                mock.patch.object(proxy, "_get_video_play_url", return_value=""):
+            handler._resolve_drama_link({
+                "uid": ["demo"],
+                "video_id": ["123"],
+                "target": ["play"],
+                "redirect": ["1"],
+            })
+
+        code, payload = handler.responses[0]
+        self.assertEqual(code, 502)
+        self.assertEqual(payload["error"], "play source unavailable")
+        self.assertEqual(payload["work_url"], "https://www.tiktok.com/@demo/video/123")
+
     def test_zip_download_requires_and_accepts_header_secret(self):
         denied = self.make_handler()
         denied._send_drama_episode_zip = mock.Mock()
@@ -170,6 +186,51 @@ class EpisodePageSecurityTests(unittest.TestCase):
         self.assertIn("target=local_script", page)
         self.assertNotIn("?secret=", page)
         self.assertNotIn("&secret=", page)
+
+
+class PlaySourceResolutionTests(unittest.TestCase):
+    def setUp(self):
+        with proxy.VIDEO_PLAY_URL_CACHE_LOCK:
+            proxy.VIDEO_PLAY_URL_CACHE.clear()
+
+    def tearDown(self):
+        with proxy.VIDEO_PLAY_URL_CACHE_LOCK:
+            proxy.VIDEO_PLAY_URL_CACHE.clear()
+
+    def test_play_url_parser_supports_new_response_shapes(self):
+        self.assertEqual(
+            proxy._video_play_url_from_tree({"data": {"play_url": "https://cdn.example/direct.mp4?a=1&amp;b=2"}}),
+            "https://cdn.example/direct.mp4?a=1&b=2",
+        )
+        self.assertEqual(
+            proxy._video_play_url_from_tree({
+                "aweme_detail": {"video": {"playAddr": {"urlList": ["https://cdn.example/camel.mp4"]}}}
+            }),
+            "https://cdn.example/camel.mp4",
+        )
+
+    def test_id_resolvers_fall_back_to_share_link_resolver(self):
+        calls = []
+
+        def fake_get(endpoint, params, _label, **_kwargs):
+            calls.append((endpoint, params))
+            if endpoint.endswith("fetch_one_video_by_share_url_v2"):
+                return {"data": {"aweme_detail": {"video": {
+                    "play_addr": {"url_list": ["https://cdn.example/fallback.mp4"]},
+                }}}}
+            return {"data": {"aweme_detail": {"video": {}}}}
+
+        with mock.patch.object(proxy, "_send_tikhub_get", side_effect=fake_get):
+            url = proxy._get_video_play_url("7638351465085455629", uid="aidramalabs_anime2")
+
+        self.assertEqual(url, "https://cdn.example/fallback.mp4")
+        share_calls = [call for call in calls if call[0].endswith("fetch_one_video_by_share_url_v2")]
+        self.assertEqual(len(share_calls), 1)
+        self.assertEqual(
+            share_calls[0][1]["share_url"],
+            "https://www.tiktok.com/@aidramalabs_anime2/video/7638351465085455629",
+        )
+        self.assertTrue(calls[0][0].endswith("fetch_one_video_v3"))
 
 
 class LocalDownloaderScriptTests(unittest.TestCase):
