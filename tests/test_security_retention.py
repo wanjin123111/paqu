@@ -240,6 +240,20 @@ class PlaySourceResolutionTests(unittest.TestCase):
             }),
             "https://cdn.example/new-web-video.mp4",
         )
+        self.assertEqual(
+            proxy._video_play_url_from_tree({
+                "video": {
+                    "PlayAddrStruct": {
+                        "UrlList": [
+                            "https://v16-webapp-prime.us.tiktok.com/video/blocked",
+                            "https://v19-webapp-prime.us.tiktok.com/video/blocked",
+                            "https://www.tiktok.com/aweme/v1/play/?video_id=123",
+                        ],
+                    },
+                },
+            }),
+            "https://www.tiktok.com/aweme/v1/play/?video_id=123",
+        )
 
     def test_id_resolvers_fall_back_to_share_link_resolver(self):
         calls = []

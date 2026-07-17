@@ -554,10 +554,20 @@ def _first_addr_url(value):
         for key in ("url_list", "urlList", "UrlList", "URLList", "urls"):
             urls = value.get(key)
             if isinstance(urls, list):
+                candidates = []
                 for url in urls:
                     text = _first_addr_url(url)
                     if text:
-                        return text
+                        candidates.append(text)
+                if candidates:
+                    # TikHub's Web V2 response can list Akamai `webapp-prime`
+                    # hosts first even though those hosts reject requests from
+                    # cloud servers.  Its `www.tiktok.com` play endpoint is the
+                    # durable public entry point and redirects to a working CDN.
+                    candidates.sort(key=lambda item: (
+                        0 if urllib.parse.urlparse(item).hostname in ("tiktok.com", "www.tiktok.com") else 1,
+                    ))
+                    return candidates[0]
             else:
                 text = _first_addr_url(urls)
                 if text:
