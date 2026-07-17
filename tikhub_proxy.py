@@ -5128,6 +5128,7 @@ def _build_drama_local_downloader_script(account, drama_id, episode_items, origi
                 "video_id": video_id,
                 "title": title,
                 "url": direct_url,
+                "work_url": _build_tiktok_video_url(account, video_id),
             }
         except Exception as exc:
             return False, "", {
@@ -5181,7 +5182,71 @@ $errors = $errorsJson | ConvertFrom-Json
 New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
 $itemsJson | Out-File -LiteralPath (Join-Path $downloadDir "download_items.json") -Encoding utf8
 $errorsJson | Out-File -LiteralPath (Join-Path $downloadDir "prepare_errors.json") -Encoding utf8
-$maxJobs = 4
+$useBrowserCookies = $false
+$cookieJar = Join-Path $env:TEMP ("tikhub_chrome_" + [guid]::NewGuid().ToString("N") + ".txt")
+$ytDlp = ""
+
+function Install-VerifiedYtDlp {
+  $toolsDir = Join-Path $baseDir ".tikhub-tools"
+  $binary = Join-Path $toolsDir "yt-dlp.exe"
+  if (Test-Path -LiteralPath $binary) { return $binary }
+
+  New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+  $download = $binary + ".download"
+  $checksums = Join-Path $toolsDir "SHA2-256SUMS"
+  Write-Host "Preparing the official local TikTok downloader..."
+  Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile $download
+  Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS" -OutFile $checksums
+  $line = Get-Content -LiteralPath $checksums | Where-Object { $_ -match "\\syt-dlp\\.exe$" } | Select-Object -First 1
+  if (-not $line) {
+    Remove-Item -LiteralPath $download -Force -ErrorAction SilentlyContinue
+    throw "Could not verify yt-dlp.exe: checksum entry missing"
+  }
+  $expected = (($line.Trim() -split "\\s+")[0]).ToUpperInvariant()
+  $actual = (Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash.ToUpperInvariant()
+  if ($actual -ne $expected) {
+    Remove-Item -LiteralPath $download -Force -ErrorAction SilentlyContinue
+    throw "Could not verify yt-dlp.exe: SHA256 mismatch"
+  }
+  Move-Item -LiteralPath $download -Destination $binary -Force
+  return $binary
+}
+
+$firstItem = @($items) | Select-Object -First 1
+if ($null -ne $firstItem) {
+  $probe = Join-Path $env:TEMP ("tikhub_probe_" + [guid]::NewGuid().ToString("N") + ".tmp")
+  & curl.exe -sS -L --fail-with-body --connect-timeout 20 --max-time 60 --range 0-0 -A $ua -e $referer -o $probe $firstItem.url
+  $probeCode = $LASTEXITCODE
+  $probeDetail = ""
+  if (Test-Path -LiteralPath $probe) {
+    if ($probeCode -ne 0) {
+      try { $probeDetail = Get-Content -LiteralPath $probe -Raw -Encoding UTF8 } catch {}
+    }
+    Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+  }
+  if ($probeCode -ne 0 -and $probeDetail -match '"error_code"\\s*:\\s*"tiktok_login_required"') {
+    $useBrowserCookies = $true
+    $ytDlp = Install-VerifiedYtDlp
+    Write-Host ""
+    Write-Host "This drama requires your logged-in TikTok session."
+    Write-Host "Save your browser work and completely exit Chrome, then return here."
+    Read-Host "Press Enter after Chrome is fully closed"
+    if (Get-Process chrome -ErrorAction SilentlyContinue) {
+      throw "Chrome is still running. Fully exit Chrome and run this script again."
+    }
+    & $ytDlp --cookies-from-browser chrome --cookies $cookieJar --no-playlist --simulate --no-warnings $firstItem.work_url
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $cookieJar)) {
+      Remove-Item -LiteralPath $cookieJar -Force -ErrorAction SilentlyContinue
+      throw "Could not read the logged-in Chrome TikTok session."
+    }
+    Write-Host "TikTok login session loaded. Starting all episodes..."
+  } elseif ($probeCode -ne 0) {
+    if ($probeDetail.Length -gt 500) { $probeDetail = $probeDetail.Substring(0, 500) }
+    throw ("Download preflight failed" + $(if ($probeDetail) { ": " + $probeDetail } else { "" }))
+  }
+}
+
+$maxJobs = if ($useBrowserCookies) { 2 } else { 4 }
 $jobs = @()
 
 function Receive-FinishedJobs {
@@ -5203,15 +5268,19 @@ foreach ($item in $items) {
     $jobs = @(Receive-FinishedJobs $jobs)
     Start-Sleep -Milliseconds 500
   }
-  $job = Start-Job -ArgumentList $item.url, $item.file, $downloadDir, $ua, $referer -ScriptBlock {
-    param($url, $file, $dir, $ua, $referer)
+  $job = Start-Job -ArgumentList $item.url, $item.work_url, $item.file, $downloadDir, $ua, $referer, $useBrowserCookies, $ytDlp, $cookieJar -ScriptBlock {
+    param($url, $workUrl, $file, $dir, $ua, $referer, $useBrowserCookies, $ytDlp, $cookieJar)
     $out = Join-Path $dir $file
     if (Test-Path -LiteralPath $out) {
       Write-Host "Skip existing: $file"
       return
     }
     Write-Host "Downloading: $file"
-    & curl.exe -sS -L --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 20 -A $ua -e $referer -o $out $url
+    if ($useBrowserCookies) {
+      & $ytDlp --cookies $cookieJar --no-playlist --no-overwrites --no-part --format best --output $out $workUrl
+    } else {
+      & curl.exe -sS -L --fail-with-body --retry 3 --retry-delay 2 --connect-timeout 20 -A $ua -e $referer -o $out $url
+    }
     if ($LASTEXITCODE -ne 0) {
       $detail = ""
       if (Test-Path -LiteralPath $out) {
@@ -5228,6 +5297,10 @@ foreach ($item in $items) {
 while ($jobs.Count -gt 0) {
   $jobs = @(Receive-FinishedJobs $jobs)
   Start-Sleep -Milliseconds 500
+}
+
+if (Test-Path -LiteralPath $cookieJar) {
+  Remove-Item -LiteralPath $cookieJar -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ""

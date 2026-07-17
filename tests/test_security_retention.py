@@ -420,6 +420,11 @@ class LocalDownloaderScriptTests(unittest.TestCase):
         self.assertIn("$existingDir.FullName", script)
         self.assertNotIn("$jobs += Start-Job", script)
         self.assertIn("https://example.test/drama-media?", script)
+        self.assertIn('"work_url": "https://www.tiktok.com/@demo/video/123"', script)
+        self.assertIn("--cookies-from-browser chrome", script)
+        self.assertIn("SHA2-256SUMS", script)
+        self.assertIn('"tiktok_login_required"', script)
+        self.assertIn("$maxJobs = if ($useBrowserCookies) { 2 } else { 4 }", script)
 
 
 class AdminCatalogTests(unittest.TestCase):
