@@ -850,6 +850,8 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn('id="publicPageHomeBtn"', page)
             self.assertIn('id="publicPagePrevBtn"', page)
             self.assertIn('id="publicPageNextBtn"', page)
+            self.assertIn('body.public-mode #dashboardCard .dashboard-head{padding-right:500px}', page)
+            self.assertIn('body.public-mode #dashboardCard .dashboard-head{padding-top:96px}', page)
             self.assertIn("function openPublicDramaSearch()", page)
             self.assertIn('detailSearchText=query;', page)
             self.assertIn('publicDramaSearchForm.addEventListener("submit"', page)
