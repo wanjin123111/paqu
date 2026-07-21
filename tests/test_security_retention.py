@@ -430,6 +430,16 @@ class LocalDownloaderScriptTests(unittest.TestCase):
         self.assertIn('"tiktok_login_required"', script)
         self.assertIn("$maxJobs = if ($useSessionCookies) { 2 } else { 4 }", script)
 
+    def test_cmd_wrapper_uses_windows_line_endings_and_keeps_failure_pause(self):
+        wrapped = proxy._wrap_powershell_downloader_cmd(
+            b'Write-Host "wrapper test"\nRead-Host "Press Enter to close"\n'
+        )
+
+        self.assertTrue(wrapped.startswith(b"@echo off\r\n"))
+        self.assertNotIn(b"\n", wrapped.replace(b"\r\n", b""))
+        self.assertIn(b"\r\npause\r\nexit /b\r\n__POWERSHELL__\r\n", wrapped)
+        self.assertIn(b'Write-Host "wrapper test"\r\n', wrapped)
+
 
 class AdminCatalogTests(unittest.TestCase):
     def setUp(self):

@@ -5447,7 +5447,13 @@ pause
 exit /b
 __POWERSHELL__
 """
-    return (wrapper + script_text).encode("utf-8")
+    # cmd.exe does not parse LF-only batch files reliably.  In particular,
+    # downloaded wrappers can be split in the middle of SET/PowerShell lines,
+    # causing the console to exit before the final PAUSE is reached.  Keep the
+    # wrapper BOM-free, but normalize every line (including the embedded
+    # PowerShell payload) to native Windows CRLF endings.
+    combined = (wrapper + script_text).replace("\r\n", "\n").replace("\r", "\n")
+    return combined.replace("\n", "\r\n").encode("utf-8")
 
 
 def _local_download_job_snapshot(job_id):
