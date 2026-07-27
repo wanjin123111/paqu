@@ -25,6 +25,7 @@
     catalog: emptyCatalog(),
     sources: [],
     sourceMap: new Map(),
+    titleAccountIndex: new Map(),
     accounts: [],
     backendAccounts: [],
     generatedAt: "",
@@ -41,6 +42,9 @@
     editorSourceKeys: [],
     editorDramaId: "",
     editorBoundAccounts: [],
+    editorManualBoundAccounts: [],
+    editorAutoMatchedAccounts: [],
+    editorExcludedBoundAccounts: new Set(),
     discoveryAccounts: [],
     discoveryGeneratedAt: "",
     discoveryBusy: false,
@@ -220,6 +224,10 @@
     return `${text(account).toLowerCase()}|${cleanId || text(title).toLowerCase()}`;
   }
 
+  function normalizeDramaTitle(value) {
+    return text(value).normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  }
+
   function normalizePublicReport(report) {
     const sources = (report.dramas_detail || []).map((row) => {
       const account = text(pick(row, ["Account / 账号", "账号", "a"])).replace(/^@/, "");
@@ -251,6 +259,17 @@
   function setSourceRows(rows) {
     state.sources = Array.isArray(rows) ? rows : [];
     state.sourceMap = new Map(state.sources.map((row) => [row.key, row]));
+    state.titleAccountIndex = new Map();
+    for (const row of state.sources) {
+      const account = text(row.account).replace(/^@/, "");
+      if (!account) continue;
+      for (const title of [row.chinese_title, row.english_title]) {
+        const key = normalizeDramaTitle(title);
+        if (!key) continue;
+        if (!state.titleAccountIndex.has(key)) state.titleAccountIndex.set(key, new Set());
+        state.titleAccountIndex.get(key).add(account);
+      }
+    }
   }
 
   function sourceStatus(key) {
@@ -411,7 +430,8 @@
       renderStats();
       renderAccounts();
       renderAccountDiscovery();
-      renderAccountBindingPicker();
+      if ($("editDialog")?.open) syncEditorTitleAccounts();
+      else renderAccountBindingPicker();
       if (showMessage) toast(`已读取 ${state.backendAccounts.length} 个监控账号`);
     } catch (error) {
       toast(error.message, true);
@@ -507,10 +527,70 @@
     return rows;
   }
 
-  function setEditorBoundAccounts(accounts) {
-    state.editorBoundAccounts = cleanBoundAccounts(accounts);
-    if ($("accountBindingSearch")) $("accountBindingSearch").value = "";
+  function editorTitleTerms() {
+    return [...new Set([
+      $("editCn")?.value,
+      $("editEn")?.value,
+      ...text($("editAliases")?.value).split(/\r?\n|,|\uFF0C/),
+    ].map(normalizeDramaTitle).filter(Boolean))];
+  }
+
+  function titleMatchedAccounts() {
+    const monitored = new Set(state.backendAccounts.map((account) => text(account).replace(/^@/, "").toLowerCase()).filter(Boolean));
+    const matched = new Map();
+    for (const title of editorTitleTerms()) {
+      for (const account of state.titleAccountIndex.get(title) || []) {
+        const clean = text(account).replace(/^@/, "");
+        const key = clean.toLowerCase();
+        if (clean && monitored.has(key)) matched.set(key, clean);
+      }
+    }
+    return [...matched.values()];
+  }
+
+  function renderAccountBindingMatchStatus() {
+    const node = $("accountBindingMatchStatus");
+    if (!node) return;
+    const terms = editorTitleTerms();
+    const matched = state.editorAutoMatchedAccounts;
+    const excluded = state.editorExcludedBoundAccounts;
+    const selectedMatches = matched.filter((account) => !excluded.has(account.toLowerCase()));
+    if (!terms.length) {
+      node.textContent = "填写中文剧名、英文剧名或历史别名后，将自动匹配监控账号。";
+      node.className = "account-binding-match";
+    } else if (!state.backendAccounts.length) {
+      node.textContent = "监控账号池尚未加载，加载完成后会按剧名自动匹配。";
+      node.className = "account-binding-match";
+    } else if (!matched.length) {
+      node.textContent = "暂未匹配到发布账号，可继续手动搜索选择。";
+      node.className = "account-binding-match empty-match";
+    } else {
+      const accounts = selectedMatches.map((account) => `@${account}`).join("、");
+      node.textContent = selectedMatches.length
+        ? `已根据剧名匹配 ${matched.length} 个账号并自动选择：${accounts}。可继续手动调整。`
+        : `已根据剧名匹配 ${matched.length} 个账号，但已被手动取消。`;
+      node.className = "account-binding-match matched";
+    }
+  }
+
+  function syncEditorTitleAccounts() {
+    const matched = titleMatchedAccounts();
+    state.editorAutoMatchedAccounts = matched;
+    const selected = new Map(state.editorManualBoundAccounts.map((account) => [account.toLowerCase(), account]));
+    for (const account of matched) {
+      if (!state.editorExcludedBoundAccounts.has(account.toLowerCase())) selected.set(account.toLowerCase(), account);
+    }
+    state.editorBoundAccounts = [...selected.values()];
     renderAccountBindingPicker();
+    renderAccountBindingMatchStatus();
+  }
+
+  function setEditorBoundAccounts(accounts) {
+    state.editorManualBoundAccounts = cleanBoundAccounts(accounts);
+    state.editorAutoMatchedAccounts = [];
+    state.editorExcludedBoundAccounts = new Set();
+    if ($("accountBindingSearch")) $("accountBindingSearch").value = "";
+    syncEditorTitleAccounts();
   }
 
   function renderAccountBindingPicker() {
@@ -518,12 +598,13 @@
     if (!list) return;
     const query = text($("accountBindingSearch")?.value).replace(/^@/, "").toLowerCase();
     const selected = new Set(state.editorBoundAccounts.map((account) => account.toLowerCase()));
+    const matched = new Set(state.editorAutoMatchedAccounts.map((account) => account.toLowerCase()));
     const rows = accountBindingPool().filter((row) => !query || `${row.account} ${row.nickname}`.toLowerCase().includes(query))
       .sort((a, b) => Number(selected.has(b.account.toLowerCase())) - Number(selected.has(a.account.toLowerCase())) || text(a.nickname).localeCompare(text(b.nickname), "zh-CN"));
     $("accountBindingCount").textContent = `已选择 ${state.editorBoundAccounts.length} 个账号`;
     list.innerHTML = rows.length ? rows.map((row) => `
       <label class="account-binding-option"><input type="checkbox" data-bind-account="${escapeHtml(row.account)}" ${selected.has(row.account.toLowerCase()) ? "checked" : ""} />
-      <span><strong>${escapeHtml(row.nickname || row.account)}</strong><small>@${escapeHtml(row.account)}${row.missing ? " · 已不在当前监控池" : ""}</small></span></label>`).join("")
+      <span><strong>${escapeHtml(row.nickname || row.account)}${matched.has(row.account.toLowerCase()) ? '<em class="title-match-badge">剧名匹配</em>' : ""}</strong><small>@${escapeHtml(row.account)}${row.missing ? " · 已不在当前监控池" : ""}</small></span></label>`).join("")
       : `<div class="account-binding-empty">${state.backendAccounts.length ? "没有匹配的账号" : "账号池尚未加载，请稍候或刷新后台数据"}</div>`;
   }
 
@@ -1032,15 +1113,22 @@
     $("saveDramaBtn").textContent = value === "__new__" ? "保存并认领" : "保存并合并";
   });
   $("accountBindingSearch").addEventListener("input", renderAccountBindingPicker);
+  ["editCn", "editEn", "editAliases"].forEach((id) => $(id).addEventListener("input", syncEditorTitleAccounts));
   $("accountBindingList").addEventListener("change", (event) => {
     const checkbox = event.target.closest("[data-bind-account]");
     if (!checkbox) return;
     const account = text(checkbox.dataset.bindAccount).replace(/^@/, "");
-    const selected = new Map(state.editorBoundAccounts.map((item) => [item.toLowerCase(), item]));
-    if (checkbox.checked) selected.set(account.toLowerCase(), account);
-    else selected.delete(account.toLowerCase());
-    state.editorBoundAccounts = [...selected.values()];
-    renderAccountBindingPicker();
+    const key = account.toLowerCase();
+    const selected = new Map(state.editorManualBoundAccounts.map((item) => [item.toLowerCase(), item]));
+    if (checkbox.checked) {
+      selected.set(key, account);
+      state.editorExcludedBoundAccounts.delete(key);
+    } else {
+      selected.delete(key);
+      state.editorExcludedBoundAccounts.add(key);
+    }
+    state.editorManualBoundAccounts = [...selected.values()];
+    syncEditorTitleAccounts();
   });
   $("reviewSearch").addEventListener("input", () => { state.reviewPage = 1; renderReview(); });
   $("reviewFilter").addEventListener("change", () => { state.reviewPage = 1; renderReview(); });
