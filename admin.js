@@ -50,6 +50,7 @@
     discoveryBusy: false,
     discoveryMessage: "",
     discoveryLoaded: false,
+    discoveryRequestVersion: 0,
   };
 
   const titles = {
@@ -686,19 +687,33 @@
     state.discoveryLoaded = true;
   }
 
+  function clearAccountDiscovery() {
+    state.discoveryRequestVersion += 1;
+    state.discoveryAccounts = [];
+    state.discoveryGeneratedAt = "";
+    state.discoveryBusy = false;
+    state.discoveryLoaded = false;
+    setDiscoveryStatus("");
+    renderAccountDiscovery();
+  }
+
   async function loadAccountDiscoveryLatest() {
     if (!requireAdminSession("读取上次账号搜索结果")) return;
+    const requestVersion = ++state.discoveryRequestVersion;
     state.discoveryBusy = true;
     setDiscoveryStatus("正在读取上次账号搜索结果...");
     renderAccountDiscovery();
     try {
       const payload = await api(`/discover-accounts?mode=accounts&t=${Date.now()}`, { headers: adminHeaders(), loadingMessage: "正在读取上次账号搜索结果" });
+      if (requestVersion !== state.discoveryRequestVersion) return;
       loadDiscoveryPayload(payload);
       setDiscoveryStatus(state.discoveryAccounts.length ? `已读取 ${state.discoveryAccounts.length} 个候选账号${state.discoveryGeneratedAt ? ` · ${formatTime(state.discoveryGeneratedAt)}` : ""}` : "上次搜索没有候选账号", state.discoveryAccounts.length ? "good" : "");
     } catch (error) {
+      if (requestVersion !== state.discoveryRequestVersion) return;
       setDiscoveryStatus(`读取失败：${error.message}`, "bad");
       toast(error.message, true);
     } finally {
+      if (requestVersion !== state.discoveryRequestVersion) return;
       state.discoveryBusy = false;
       renderAccountDiscovery();
     }
@@ -708,6 +723,9 @@
     if (state.discoveryBusy || !requireAdminSession("搜索账号")) return;
     const keywords = text($("accountDiscoveryInput").value);
     if (!keywords) return setDiscoveryStatus("请输入 TikTok 主页链接、@账号或昵称关键词", "bad");
+    const requestVersion = ++state.discoveryRequestVersion;
+    state.discoveryAccounts = [];
+    state.discoveryGeneratedAt = "";
     state.discoveryBusy = true;
     state.discoveryLoaded = true;
     setDiscoveryStatus("正在读取 TikTok 账号主页和短剧数据，通常 1 分钟内完成...");
@@ -715,13 +733,16 @@
     try {
       const params = new URLSearchParams({ mode: "accounts", run: "1", keywords, queries: keywords, limit: "40", min_followers: "0", min_dramas: "0", max_videos: "20" });
       const payload = await api(`/discover-accounts?${params.toString()}`, { headers: adminHeaders(), loadingMessage: "正在搜索 TikTok 账号", loadingDetail: "正在读取账号主页和短剧样本，请稍候" });
+      if (requestVersion !== state.discoveryRequestVersion || !text($("accountDiscoveryInput").value)) return;
       loadDiscoveryPayload(payload);
       const detail = discoveryErrorSummary(payload);
       setDiscoveryStatus(state.discoveryAccounts.length ? `搜索完成 · 候选 ${state.discoveryAccounts.length} 个` : `本次没有找到账号${detail ? `：${detail}` : "，请检查输入后重试"}`, state.discoveryAccounts.length ? "good" : "bad");
     } catch (error) {
+      if (requestVersion !== state.discoveryRequestVersion) return;
       setDiscoveryStatus(`搜索失败：${error.message}`, "bad");
       toast(error.message, true);
     } finally {
+      if (requestVersion !== state.discoveryRequestVersion) return;
       state.discoveryBusy = false;
       renderAccountDiscovery();
     }
@@ -1052,32 +1073,6 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  async function addAccounts() {
-    if (!requireAdminSession("添加账号")) return;
-    const raw = text($("newAccounts").value);
-    if (!raw) return toast("请输入至少一个 TikTok 账号或主页链接", true);
-    try {
-      const payload = await api("/schedule-accounts", {
-        method: "POST", headers: adminHeaders(true), body: JSON.stringify({ accounts: raw, mode: "append" }),
-        loadingMessage: "正在添加监控账号",
-      });
-      const verified = await api(`/schedule-accounts?t=${Date.now()}`, {
-        headers: adminHeaders(), loadingMessage: "正在确认账号已进入监控池",
-      });
-      state.backendAccounts = verified.accounts || [];
-      const monitored = new Set(state.backendAccounts.map((account) => text(account).toLowerCase()));
-      const missing = (payload.added || []).filter((account) => !monitored.has(text(account).toLowerCase()));
-      if (missing.length) throw new Error(`账号池确认失败：${missing.join("、")}`);
-      $("accountSource").textContent = `来源：后端监控池 ${state.backendAccounts.length} 个账号`;
-      $("newAccounts").value = "";
-      $("accountDialog").close();
-      renderAll();
-      toast(payload.added_count ? `已新增 ${payload.added_count} 个监控账号` : "输入账号均已存在，无需重复添加");
-    } catch (error) {
-      toast(error.message, true);
-    }
-  }
-
   document.querySelectorAll(".nav-btn[data-view]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
   document.querySelectorAll("[data-jump]").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.jump)));
   $("menuBtn").addEventListener("click", () => $("sidebar").classList.toggle("open"));
@@ -1087,16 +1082,15 @@
     if (dialog?.open) dialog.close();
   }));
   $("editForm").addEventListener("submit", (event) => event.preventDefault());
-  $("accountForm").addEventListener("submit", (event) => event.preventDefault());
   $("refreshBtn").addEventListener("click", () => loadAdminCatalog(true));
   $("reloadCatalogBtn").addEventListener("click", () => loadAdminCatalog(true));
-  $("loadBackendAccountsBtn").addEventListener("click", () => loadBackendAccounts());
-  $("addAccountBtn").addEventListener("click", () => { if (requireAdminSession("添加账号")) $("accountDialog").showModal(); });
-  $("saveAccountsBtn").addEventListener("click", (event) => { event.preventDefault(); addAccounts(); });
   $("accountDiscoveryRunBtn").addEventListener("click", runAccountDiscovery);
   $("accountDiscoveryLoadBtn").addEventListener("click", loadAccountDiscoveryLatest);
   $("accountDiscoveryDirectBtn").addEventListener("click", addDirectDiscoveryAccounts);
   $("accountDiscoveryAddAllBtn").addEventListener("click", addAllDiscoveredAccounts);
+  $("accountDiscoveryInput").addEventListener("input", (event) => {
+    if (!text(event.target.value)) clearAccountDiscovery();
+  });
   $("accountDiscoveryInput").addEventListener("keydown", (event) => {
     if (event.key === "Enter") { event.preventDefault(); runAccountDiscovery(); }
   });

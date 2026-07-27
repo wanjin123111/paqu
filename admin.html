@@ -124,7 +124,7 @@
           </div>
           <div class="table-wrap discovery-table-wrap" id="accountDiscoveryTableWrap" hidden><table class="data-table discovery-table"><thead><tr><th>候选账号</th><th>粉丝</th><th>短剧数</th><th>短剧播放</th><th>样本最高播放</th><th>来源关键词</th><th>状态</th><th>操作</th></tr></thead><tbody id="accountDiscoveryBody"></tbody></table></div>
         </div>
-        <div class="section-head"><div><h2>监控账号池</h2><p>管理定时抓取的 TikTok 发布账号</p></div><div class="section-actions"><button class="btn" id="loadBackendAccountsBtn">读取后端账号池</button><button class="btn primary" id="addAccountBtn">＋ 添加监控账号</button></div></div>
+        <div class="section-head"><div><h2>监控账号池</h2><p>管理定时抓取的 TikTok 发布账号；通过上方搜索加入的账号会自动显示在这里</p></div></div>
         <div class="toolbar"><input class="field search" id="accountSearch" placeholder="搜索账号或昵称" /><select class="field" id="accountFilter"><option value="all">全部账号</option><option value="healthy">抓取正常</option><option value="error">需要检查</option></select><span class="muted" id="accountSource" style="font-size:11px">来源：最新报表</span></div>
         <div class="account-grid" id="accountGrid"></div>
       </section>
@@ -186,16 +186,8 @@
   </form>
 </dialog>
 
-<dialog id="accountDialog">
-  <form method="dialog" id="accountForm">
-    <div class="modal-head"><div><h3>添加监控账号</h3><div class="hint">新增后会进入后端动态监控池</div></div><button class="modal-close" type="button" data-close-dialog="accountDialog" aria-label="关闭">×</button></div>
-    <div class="modal-body"><div class="form-group"><label for="newAccounts">TikTok 账号或主页链接</label><textarea class="field" id="newAccounts" rows="6" placeholder="一行一个，例如：&#10;loveshotsfans&#10;https://www.tiktok.com/@reelshortapp"></textarea><div class="hint">系统会自动去重，已经监控的账号不会重复添加。</div></div></div>
-    <div class="modal-foot"><span></span><div class="section-actions"><button class="btn" type="button" data-close-dialog="accountDialog">取消</button><button class="btn primary" id="saveAccountsBtn" type="button">添加到后端</button></div></div>
-  </form>
-</dialog>
-
 <div class="toast" id="toast"></div>
 
-<script src="/admin.js?v=20260727-1"></script>
+<script src="/admin.js?v=20260727-2"></script>
 </body>
 </html>
