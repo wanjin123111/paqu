@@ -20,7 +20,7 @@
  端口被占用?把下面的 PORT 改个数字,网页代理框也跟着改。
 ==============================================================================
 """
-import os, posixpath, mimetypes, base64, json, datetime, csv, gzip, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures, uuid
+import os, posixpath, mimetypes, base64, json, datetime, csv, gzip, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures, uuid, gc
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
@@ -128,7 +128,11 @@ SCHEDULE_TRANSLATE_TITLES = _env_bool("SCHEDULE_TRANSLATE_TITLES", True)
 SCHEDULE_DELAY_MS = _env_int("SCHEDULE_DELAY_MS", 300, 0, 60000)
 SCHEDULE_RETRIES = _env_int("SCHEDULE_RETRIES", 4, 1, 10)
 SCHEDULE_MAX_RUNTIME_SECONDS = _env_int("SCHEDULE_MAX_RUNTIME_SECONDS", 600, 30, 7200)
-SCHEDULE_ACCOUNT_WORKERS = _env_int("SCHEDULE_ACCOUNT_WORKERS", 4, 1, 16)
+SCHEDULE_ACCOUNT_WORKER_CAP = _env_int("SCHEDULE_ACCOUNT_WORKER_CAP", 2, 1, 16)
+SCHEDULE_ACCOUNT_WORKERS = min(
+    _env_int("SCHEDULE_ACCOUNT_WORKERS", 2, 1, 16),
+    SCHEDULE_ACCOUNT_WORKER_CAP,
+)
 INTERNAL_SCHEDULER_ENABLED = _env_bool("INTERNAL_SCHEDULER_ENABLED", False)
 INTERNAL_SCHEDULE_TIMES = os.environ.get("INTERNAL_SCHEDULE_TIMES", "00:00,12:00").strip()
 INTERNAL_SCHEDULER_POLL_SECONDS = _env_int("INTERNAL_SCHEDULER_POLL_SECONDS", 15, 5, 300)
@@ -160,6 +164,7 @@ SCHEDULE_SAVE_EPISODE_HISTORY = _env_bool("SCHEDULE_SAVE_EPISODE_HISTORY", True)
 SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_DRAMAS", 0, 0, 20000)
 SCHEDULE_EPISODE_HISTORY_MAX_EPISODES = _env_int("SCHEDULE_EPISODE_HISTORY_MAX_EPISODES", DRAMA_LINK_MAX_EPISODES, 0, 5000)
 SCHEDULE_EPISODE_HISTORY_DELAY_MS = _env_int("SCHEDULE_EPISODE_HISTORY_DELAY_MS", SCHEDULE_DELAY_MS, 0, 60000)
+SCHEDULE_EPISODE_HISTORY_FLUSH_DRAMAS = _env_int("SCHEDULE_EPISODE_HISTORY_FLUSH_DRAMAS", 10, 1, 100)
 DRAMA_EPISODE_HISTORY_MAX_POINTS = _env_int("DRAMA_EPISODE_HISTORY_MAX_POINTS", 160, 20, 1000)
 REPORT_RETENTION_DAYS = _env_int("REPORT_RETENTION_DAYS", 30, 1, 30)
 DRAMA_EPISODE_HISTORY_MAX_AGE_DAYS = _env_int(
@@ -195,14 +200,18 @@ TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 SUPABASE_ENABLED = _env_bool("SUPABASE_ENABLED", True)
-SUPABASE_BATCH_SIZE = _env_int("SUPABASE_BATCH_SIZE", 100, 1, 500)
+SUPABASE_BATCH_SIZE = _env_int("SUPABASE_BATCH_SIZE", 50, 1, 500)
 SUPABASE_SCHEDULE_ACCOUNTS = _env_bool("SUPABASE_SCHEDULE_ACCOUNTS", True)
 SUPABASE_SCHEDULE_ACCOUNT_CACHE_SECONDS = _env_int("SUPABASE_SCHEDULE_ACCOUNT_CACHE_SECONDS", 60, 0, 3600)
 SUPABASE_REPORT_READ = _env_bool("SUPABASE_REPORT_READ", True)
 SUPABASE_REPORT_HISTORY_LIMIT = _env_int("SUPABASE_REPORT_HISTORY_LIMIT", 30, 1, 200)
 SUPABASE_USER_AGENT = "paqu-tikhub-proxy/1.0"
 SUPABASE_SCHEDULE_ACCOUNT_CACHE = {"expires_at": 0, "accounts": [], "error": ""}
-SUPABASE_REPORT_CACHE_MAX_ITEMS = _env_int("SUPABASE_REPORT_CACHE_MAX_ITEMS", 12, 1, 30)
+SUPABASE_REPORT_CACHE_ITEM_CAP = _env_int("SUPABASE_REPORT_CACHE_ITEM_CAP", 1, 1, 30)
+SUPABASE_REPORT_CACHE_MAX_ITEMS = min(
+    _env_int("SUPABASE_REPORT_CACHE_MAX_ITEMS", 1, 1, 30),
+    SUPABASE_REPORT_CACHE_ITEM_CAP,
+)
 SUPABASE_LATEST_CACHE_SECONDS = _env_int("SUPABASE_LATEST_CACHE_SECONDS", 120, 0, 3600)
 SUPABASE_REPORT_CACHE = {"latest": None, "latest_expires_at": 0, "by_id": {}}
 SUPABASE_REPORT_CACHE_LOCK = threading.Lock()
@@ -1014,6 +1023,13 @@ def _save_drama_detail_cache():
         with open(tmp, "w", encoding="utf-8") as handle:
             json.dump(cache, handle, ensure_ascii=False, indent=2)
         os.replace(tmp, DRAMA_DETAIL_CACHE_FILE)
+
+
+def _release_drama_detail_cache():
+    """Release the large in-memory detail cache after a scheduled scrape."""
+    global DRAMA_DETAIL_CACHE
+    with DRAMA_DETAIL_CACHE_LOCK:
+        DRAMA_DETAIL_CACHE = None
 
 
 def _deep_find(obj, keys, depth=0):
@@ -3619,13 +3635,40 @@ def _csv_blob(columns, rows):
     return "\ufeff" + out.getvalue()
 
 
-def _write_text_file(name, content):
+def _report_file_path(name):
     os.makedirs(REPORTS_DIR, exist_ok=True)
     path = os.path.normpath(os.path.join(REPORTS_DIR, name))
-    if not path.startswith(REPORTS_DIR):
+    try:
+        safe = os.path.commonpath((os.path.normpath(REPORTS_DIR), path)) == os.path.normpath(REPORTS_DIR)
+    except ValueError:
+        safe = False
+    if not safe:
         raise RuntimeError("bad report path")
+    return path
+
+
+def _write_text_file(name, content):
+    path = _report_file_path(name)
     with open(path, "w", encoding="utf-8", newline="") as handle:
         handle.write(content)
+    return path
+
+
+def _write_csv_file(name, columns, rows):
+    """Write rows directly so a multi-megabyte CSV is never duplicated in RAM."""
+    path = _report_file_path(name)
+    with open(path, "w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
+def _write_json_file(name, payload):
+    """Stream JSON encoding to disk instead of building one giant string."""
+    path = _report_file_path(name)
+    with open(path, "w", encoding="utf-8", newline="") as handle:
+        json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
     return path
 
 
@@ -4102,16 +4145,22 @@ def _supabase_timestamp(value, fallback_now=False):
 
 
 def _supabase_upsert(table, rows, on_conflict):
-    clean_rows = [row for row in (rows or []) if isinstance(row, dict) and row]
-    if not clean_rows:
-        return 0
     path = "/" + urllib.parse.quote(table, safe="")
     if on_conflict:
         path += "?on_conflict=" + urllib.parse.quote(on_conflict, safe=",")
     prefer = "resolution=merge-duplicates,return=minimal"
     written = 0
-    for index in range(0, len(clean_rows), SUPABASE_BATCH_SIZE):
-        batch = clean_rows[index:index + SUPABASE_BATCH_SIZE]
+    batch = []
+    for row in rows or ():
+        if not isinstance(row, dict) or not row:
+            continue
+        batch.append(row)
+        if len(batch) < SUPABASE_BATCH_SIZE:
+            continue
+        _supabase_request("POST", path, batch, prefer=prefer)
+        written += len(batch)
+        batch = []
+    if batch:
         _supabase_request("POST", path, batch, prefer=prefer)
         written += len(batch)
     return written
@@ -4249,14 +4298,17 @@ def _cache_supabase_report_payload(payload, run_id=None, latest=False):
         return
     clean_run_id = _to_int(run_id or payload.get("supabase_run_id"))
     with SUPABASE_REPORT_CACHE_LOCK:
-        if clean_run_id:
+        if latest:
+            # Latest-report reads are the common path. Do not also retain the same
+            # multi-megabyte payload in the historical cache.
+            SUPABASE_REPORT_CACHE["by_id"].clear()
+            SUPABASE_REPORT_CACHE["latest"] = payload
+            SUPABASE_REPORT_CACHE["latest_expires_at"] = time.time() + SUPABASE_LATEST_CACHE_SECONDS
+        elif clean_run_id:
             cache = SUPABASE_REPORT_CACHE["by_id"]
             cache[str(clean_run_id)] = payload
             while len(cache) > SUPABASE_REPORT_CACHE_MAX_ITEMS:
                 cache.pop(next(iter(cache)))
-        if latest:
-            SUPABASE_REPORT_CACHE["latest"] = payload
-            SUPABASE_REPORT_CACHE["latest_expires_at"] = time.time() + SUPABASE_LATEST_CACHE_SECONDS
 
 
 def _cached_supabase_report_payload(run_id=None, latest=False):
@@ -4264,9 +4316,19 @@ def _cached_supabase_report_payload(run_id=None, latest=False):
         if latest:
             if time.time() < SUPABASE_REPORT_CACHE.get("latest_expires_at", 0):
                 return SUPABASE_REPORT_CACHE.get("latest")
+            SUPABASE_REPORT_CACHE["latest"] = None
+            SUPABASE_REPORT_CACHE["latest_expires_at"] = 0
             return None
         clean_run_id = _to_int(run_id)
         return SUPABASE_REPORT_CACHE["by_id"].get(str(clean_run_id)) if clean_run_id else None
+
+
+def _clear_supabase_report_cache():
+    """Drop large report objects before a scheduled scrape starts."""
+    with SUPABASE_REPORT_CACHE_LOCK:
+        SUPABASE_REPORT_CACHE["latest"] = None
+        SUPABASE_REPORT_CACHE["latest_expires_at"] = 0
+        SUPABASE_REPORT_CACHE["by_id"].clear()
 
 
 def _drop_supabase_report_cache(run_ids):
@@ -4282,7 +4344,7 @@ def _drop_supabase_report_cache(run_ids):
             SUPABASE_REPORT_CACHE["latest_expires_at"] = 0
 
 
-def _save_report_to_supabase(payload):
+def _save_report_to_supabase(payload, cache_payload=True):
     status = {
         "enabled": bool(SUPABASE_ENABLED),
         "configured": _supabase_configured(),
@@ -4307,13 +4369,19 @@ def _save_report_to_supabase(payload):
         if not run_id:
             raise RuntimeError("Supabase did not return report_runs.id")
         account_rows = _supabase_account_rows(summary_rows, generated_at)
-        account_snapshot_rows = _supabase_account_snapshot_rows(run_id, summary_rows)
-        drama_table_rows = _supabase_drama_rows(drama_rows, generated_at)
-        drama_snapshot_rows = _supabase_drama_snapshot_rows(run_id, drama_rows)
         accounts_written = _supabase_upsert("accounts", account_rows, "account")
+        del account_rows
+        account_snapshot_rows = _supabase_account_snapshot_rows(run_id, summary_rows)
         account_snapshots_written = _supabase_upsert("account_snapshots", account_snapshot_rows, "run_id,account")
+        del account_snapshot_rows
+        drama_table_rows = _supabase_drama_rows(drama_rows, generated_at)
         dramas_written = _supabase_upsert("dramas", drama_table_rows, "drama_key")
+        del drama_table_rows
+        gc.collect()
+        drama_snapshot_rows = _supabase_drama_snapshot_rows(run_id, drama_rows)
         drama_snapshots_written = _supabase_upsert("drama_snapshots", drama_snapshot_rows, "run_id,drama_key")
+        del drama_snapshot_rows
+        gc.collect()
         status.update({
             "ok": True,
             "run_id": run_id,
@@ -4322,10 +4390,11 @@ def _save_report_to_supabase(payload):
             "dramas": dramas_written,
             "drama_snapshots": drama_snapshots_written,
         })
-        cached_payload = dict(payload)
-        cached_payload["storage_source"] = "supabase"
-        cached_payload["supabase_run_id"] = run_id
-        _cache_supabase_report_payload(cached_payload, run_id=run_id, latest=True)
+        if cache_payload:
+            cached_payload = dict(payload)
+            cached_payload["storage_source"] = "supabase"
+            cached_payload["supabase_run_id"] = run_id
+            _cache_supabase_report_payload(cached_payload, run_id=run_id, latest=True)
     except Exception as exc:
         status["error"] = str(exc)
     return status
@@ -4519,8 +4588,6 @@ def _write_report_bundle(rows, drama_rows, errors):
     summary_name = "scheduled_report_%s.csv" % stamp
     drama_name = "scheduled_dramas_%s.csv" % stamp
     json_name = "scheduled_report_%s.json" % stamp
-    summary_csv = _csv_blob(SUMMARY_COLUMNS, rows)
-    drama_csv = _csv_blob(DRAMA_COLUMNS, drama_rows)
     payload = {
         "generated_at": now.isoformat(timespec="seconds"),
         "accounts": len(rows),
@@ -4529,12 +4596,12 @@ def _write_report_bundle(rows, drama_rows, errors):
         "summary": rows,
         "dramas_detail": drama_rows,
     }
-    _write_text_file(summary_name, summary_csv)
-    _write_text_file(drama_name, drama_csv)
-    _write_text_file(json_name, json.dumps(payload, ensure_ascii=False, indent=2))
-    _write_text_file("latest_report.csv", summary_csv)
-    _write_text_file("latest_dramas.csv", drama_csv)
-    _write_text_file("latest_report.json", json.dumps(payload, ensure_ascii=False, indent=2))
+    _write_csv_file(summary_name, SUMMARY_COLUMNS, rows)
+    _write_csv_file(drama_name, DRAMA_COLUMNS, drama_rows)
+    _write_json_file(json_name, payload)
+    _write_csv_file("latest_report.csv", SUMMARY_COLUMNS, rows)
+    _write_csv_file("latest_dramas.csv", DRAMA_COLUMNS, drama_rows)
+    _write_json_file("latest_report.json", payload)
     return {
         "summary": summary_name,
         "dramas": drama_name,
@@ -4590,32 +4657,54 @@ def _scrape_scheduled_accounts(accounts, scrape=None):
         max_workers=worker_count,
         thread_name_prefix="scheduled-account",
     ) as pool:
-        futures = [pool.submit(run_one, index, uid) for index, uid in enumerate(clean_accounts)]
-        for future in concurrent.futures.as_completed(futures):
-            index, summary, dramas, error = future.result()
-            if error:
-                ordered_errors[index] = error
-            else:
-                ordered_results[index] = (summary, dramas or [])
-            with progress_lock:
-                LAST_JOB["accounts_completed"] += 1
+        next_index = 0
+        pending = {}
+
+        def submit_next():
+            nonlocal next_index
+            if next_index >= len(clean_accounts):
+                return
+            index = next_index
+            next_index += 1
+            pending[pool.submit(run_one, index, clean_accounts[index])] = index
+
+        for _ in range(worker_count):
+            submit_next()
+        while pending:
+            completed, _waiting = concurrent.futures.wait(
+                tuple(pending),
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for future in completed:
+                pending.pop(future, None)
+                index, summary, dramas, error = future.result()
                 if error:
-                    LAST_JOB["accounts_failed"] += 1
+                    ordered_errors[index] = error
                 else:
-                    LAST_JOB["accounts_succeeded"] += 1
+                    ordered_results[index] = (summary, dramas or [])
+                with progress_lock:
+                    LAST_JOB["accounts_completed"] += 1
+                    if error:
+                        LAST_JOB["accounts_failed"] += 1
+                    else:
+                        LAST_JOB["accounts_succeeded"] += 1
+                submit_next()
 
     rows, drama_rows = [], []
-    for result in ordered_results:
+    for index, result in enumerate(ordered_results):
         if not result:
             continue
         summary, dramas = result
         rows.append(summary)
         drama_rows.extend(dramas)
+        ordered_results[index] = None
     errors = [error for error in ordered_errors if error]
     return rows, drama_rows, errors
 
 
 def _run_scheduled_job(accounts):
+    _clear_supabase_report_cache()
+    gc.collect()
     LAST_JOB.update({
         "phase": "accounts",
         "accounts_total": len(accounts),
@@ -4633,10 +4722,16 @@ def _run_scheduled_job(accounts):
         _save_drama_detail_cache()
     except Exception:
         pass
+    _release_drama_detail_cache()
+    gc.collect()
     files, report_payload = _write_report_bundle(rows, drama_rows, errors)
+    generated_at = report_payload.get("generated_at") or datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds")
+    drama_count = len(drama_rows)
     runtime_retention = _cleanup_runtime_report_files()
     LAST_JOB["phase"] = "supabase"
-    supabase = _save_report_to_supabase(report_payload)
+    supabase = _save_report_to_supabase(report_payload, cache_payload=False)
+    del report_payload
+    gc.collect()
     supabase_retention = _cleanup_supabase_report_history()
     LAST_JOB["phase"] = "episode_history"
     try:
@@ -4648,14 +4743,16 @@ def _run_scheduled_job(accounts):
             "error": str(exc),
             "directory": "reports/episode_history",
         }
+    del drama_rows
+    gc.collect()
     LAST_JOB["phase"] = "finishing"
     return {
         "ok": True,
-        "generated_at": report_payload.get("generated_at") or datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
+        "generated_at": generated_at,
         "accounts_requested": len(accounts),
         "accounts_ok": len(rows),
         "accounts_failed": len(errors),
-        "dramas": len(drama_rows),
+        "dramas": drama_count,
         "files": files,
         "supabase": supabase,
         "retention": {
@@ -5750,6 +5847,23 @@ def _scheduled_episode_history_targets(drama_rows):
     return targets
 
 
+def _flush_scheduled_episode_history(uid, fetched, now_ms, now_text):
+    """Persist a small episode-history batch and release it immediately."""
+    if not fetched:
+        return
+    with DRAMA_EPISODE_HISTORY_LOCK:
+        history = _read_drama_episode_history(uid)
+        changed = bool(_prune_episode_history(history, now_ms))
+        for drama_id, episodes in fetched:
+            _metrics, item_changed, _recorded = _record_episode_history_entries(
+                history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=False
+            )
+            changed = changed or item_changed
+        if changed:
+            _write_drama_episode_history(history, uid)
+    fetched.clear()
+
+
 def _save_scheduled_episode_history(drama_rows):
     result = {
         "enabled": bool(SCHEDULE_SAVE_EPISODE_HISTORY),
@@ -5794,6 +5908,8 @@ def _save_scheduled_episode_history(drama_rows):
                     fetched.append((drama_id, episodes))
                     result["dramas_ok"] += 1
                     result["episodes_saved"] += len(episodes)
+                    if len(fetched) >= SCHEDULE_EPISODE_HISTORY_FLUSH_DRAMAS:
+                        _flush_scheduled_episode_history(uid, fetched, now_ms, now_text)
                 else:
                     result["dramas_empty"] += 1
             except Exception as exc:
@@ -5801,18 +5917,7 @@ def _save_scheduled_episode_history(drama_rows):
                     result["errors"].append({"uid": uid, "drama_id": drama_id, "error": str(exc)})
             if SCHEDULE_EPISODE_HISTORY_DELAY_MS:
                 time.sleep(SCHEDULE_EPISODE_HISTORY_DELAY_MS / 1000.0)
-        if not fetched:
-            continue
-        with DRAMA_EPISODE_HISTORY_LOCK:
-            history = _read_drama_episode_history(uid)
-            changed = bool(_prune_episode_history(history, now_ms))
-            for drama_id, episodes in fetched:
-                _metrics, item_changed, _recorded = _record_episode_history_entries(
-                    history, uid, drama_id, episodes, now_ms, now_text, collect_metrics=False
-                )
-                changed = changed or item_changed
-            if changed:
-                _write_drama_episode_history(history, uid)
+        _flush_scheduled_episode_history(uid, fetched, now_ms, now_text)
     return result
 
 
@@ -7218,8 +7323,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(404, {"ok": False, "error": "report not found"})
                 return
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
-        with open(full, "rb") as handle:
-            data = handle.read()
+        content_length = os.path.getsize(full)
         self.send_response(200)
         self._cors()
         cache_control = "no-store" if relative == "latest_report.json" or runtime_safe else "public, max-age=120, stale-while-revalidate=600"
@@ -7229,9 +7333,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Expires", "0")
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Disposition", "attachment; filename=%s" % name)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(content_length))
         self.end_headers()
-        self.wfile.write(data)
+        with open(full, "rb") as handle:
+            while True:
+                chunk = handle.read(256 * 1024)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
 
     # ---- 定时监控:把报表写到 reports/ 目录 ----
     def _save_file(self):

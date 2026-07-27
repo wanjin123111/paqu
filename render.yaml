@@ -48,7 +48,11 @@ services:
       - key: SCHEDULE_DELAY_MS
         value: 300
       - key: SCHEDULE_ACCOUNT_WORKERS
-        value: 4
+        value: 2
+      - key: SCHEDULE_ACCOUNT_WORKER_CAP
+        value: 2
+      - key: SCHEDULE_EPISODE_HISTORY_FLUSH_DRAMAS
+        value: 10
       - key: INTERNAL_SCHEDULER_ENABLED
         value: "1"
       - key: INTERNAL_SCHEDULE_TIMES
@@ -71,5 +75,11 @@ services:
         value: 30
       - key: SUPABASE_REPORT_HISTORY_LIMIT
         value: 30
+      - key: SUPABASE_BATCH_SIZE
+        value: 50
+      - key: SUPABASE_REPORT_CACHE_MAX_ITEMS
+        value: 1
+      - key: SUPABASE_REPORT_CACHE_ITEM_CAP
+        value: 1
       - key: SUPABASE_LATEST_CACHE_SECONDS
         value: 120

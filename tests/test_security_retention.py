@@ -1153,5 +1153,70 @@ class ScheduledConcurrencyTests(unittest.TestCase):
         self.assertEqual(errors, [])
 
 
+class MemoryOptimizationTests(unittest.TestCase):
+    def setUp(self):
+        proxy._clear_supabase_report_cache()
+
+    def tearDown(self):
+        proxy._clear_supabase_report_cache()
+
+    def test_supabase_upsert_consumes_generator_in_small_batches(self):
+        calls = []
+
+        def request(method, path, payload, prefer=None):
+            calls.append((method, path, list(payload), prefer))
+            return None
+
+        rows = ({"id": index} for index in range(5))
+        with mock.patch.object(proxy, "SUPABASE_BATCH_SIZE", 2), \
+                mock.patch.object(proxy, "_supabase_request", side_effect=request):
+            written = proxy._supabase_upsert("items", rows, "id")
+
+        self.assertEqual(written, 5)
+        self.assertEqual([len(call[2]) for call in calls], [2, 2, 1])
+        self.assertTrue(all(call[0] == "POST" for call in calls))
+
+    def test_latest_report_cache_drops_historical_payloads_and_expired_data(self):
+        historical = {"supabase_run_id": 1, "dramas_detail": [{"id": 1}]}
+        latest = {"supabase_run_id": 2, "dramas_detail": [{"id": 2}]}
+        proxy._cache_supabase_report_payload(historical, run_id=1)
+        proxy._cache_supabase_report_payload(latest, run_id=2, latest=True)
+
+        self.assertEqual(proxy.SUPABASE_REPORT_CACHE["by_id"], {})
+        self.assertIs(proxy._cached_supabase_report_payload(latest=True), latest)
+        proxy.SUPABASE_REPORT_CACHE["latest_expires_at"] = 0
+        self.assertIsNone(proxy._cached_supabase_report_payload(latest=True))
+        self.assertIsNone(proxy.SUPABASE_REPORT_CACHE["latest"])
+
+    def test_report_bundle_streams_csv_and_json_to_files(self):
+        summary = [{column: "summary" for column in proxy.SUMMARY_COLUMNS}]
+        dramas = [{column: "drama" for column in proxy.DRAMA_COLUMNS}]
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                mock.patch.object(proxy, "REPORTS_DIR", temp_dir), \
+                mock.patch.object(proxy, "_csv_blob", side_effect=AssertionError("must stream CSV")), \
+                mock.patch.object(proxy, "_write_text_file", side_effect=AssertionError("must stream files")):
+            files, payload = proxy._write_report_bundle(summary, dramas, [])
+            latest = json.loads(
+                pathlib.Path(temp_dir, files["latest_json"]).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(latest["accounts"], 1)
+        self.assertEqual(latest["dramas"], 1)
+        self.assertEqual(payload["summary"], summary)
+        self.assertEqual(payload["dramas_detail"], dramas)
+
+    def test_episode_history_flush_releases_completed_batch(self):
+        fetched = [("drama-1", [{"video_id": "1"}])]
+        history = {"version": 2, "items": {}}
+        with mock.patch.object(proxy, "_read_drama_episode_history", return_value=history), \
+                mock.patch.object(proxy, "_prune_episode_history", return_value=0), \
+                mock.patch.object(proxy, "_record_episode_history_entries", return_value=({}, True, 1)), \
+                mock.patch.object(proxy, "_write_drama_episode_history") as write:
+            proxy._flush_scheduled_episode_history("account", fetched, 1000, "2026-07-27T12:00:00+08:00")
+
+        self.assertEqual(fetched, [])
+        write.assert_called_once_with(history, "account")
+
+
 if __name__ == "__main__":
     unittest.main()
