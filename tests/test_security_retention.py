@@ -834,14 +834,16 @@ class DiscoveryWorksTests(unittest.TestCase):
             page = (root / name).read_text(encoding="utf-8")
             self.assertIn("const PUBLIC_REPORT_REFRESH_MS=60*1000;", page)
             self.assertIn("const DASHBOARD_HISTORY_WORKERS=4;", page)
-            self.assertIn('const DASHBOARD_CACHE_STORAGE="tikhub-dashboard-cache-v3";', page)
-            self.assertIn('const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v1";', page)
+            self.assertIn('const DASHBOARD_CACHE_STORAGE="tikhub-dashboard-cache-v4";', page)
+            self.assertIn('const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v4";', page)
+            self.assertIn('const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v4";', page)
+            self.assertIn('const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v2";', page)
             self.assertIn("const cachedStatePromise=readCachedDashboardStateAsync();", page)
             self.assertIn("const latestMetaPromise=loadPublicLatestMeta().catch(()=>null);", page)
             self.assertIn("const cacheTrusted=!!(cachedState&&dashboardValidationIsFresh(cachedMs));", page)
             self.assertIn("if(cacheTrusted)applyCachedDashboardState(cachedState);", page)
             self.assertIn("if(!cacheTrusted)applyCachedDashboardState(cachedState);", page)
-            self.assertIn('const DASHBOARD_PREVIEW_CACHE_KEY="thr_dashboard_preview_v1";', page)
+            self.assertIn('const DASHBOARD_PREVIEW_CACHE_KEY="thr_dashboard_preview_v2";', page)
             self.assertIn("let previewReady=applyCachedDashboardPreview(cachedPreview);", page)
             self.assertIn("applyCachedDashboardPreview(cachedPreview,latestMetaMs)", page)
             self.assertIn("cacheDashboardPreview();", page)
@@ -1065,7 +1067,15 @@ class RetentionTests(unittest.TestCase):
     def test_dashboard_payload_is_compact_and_keeps_growth_fields(self):
         payload = {
             "generated_at": "2026-07-10T12:00:00+08:00",
-            "summary": [{"账号": "demo", "昵称": "Demo", "短剧数": 2, "总集数": 20, "累计观看": 123}],
+            "summary": [{
+                "账号": "demo",
+                "昵称": "Demo",
+                "粉丝": 456,
+                "点赞": 789,
+                "短剧数": 2,
+                "总集数": 20,
+                "累计观看": 123,
+            }],
             "dramas_detail": [{
                 "Account / 账号": "demo",
                 "Drama ID / 短剧ID": "42",
@@ -1077,6 +1087,8 @@ class RetentionTests(unittest.TestCase):
         }
         compact = proxy._compact_report_payload(payload)
         self.assertEqual(compact["summary"][0]["a"], "demo")
+        self.assertEqual(compact["summary"][0]["f"], 456)
+        self.assertEqual(compact["summary"][0]["h"], 789)
         self.assertEqual(compact["dramas_detail"][0]["id"], "42")
         self.assertNotIn("English Description Preview / 英文简介预览", compact["dramas_detail"][0])
         self.assertLess(len(json.dumps(compact, ensure_ascii=False)), len(json.dumps(payload, ensure_ascii=False)))
@@ -1186,6 +1198,23 @@ class MemoryOptimizationTests(unittest.TestCase):
         self.assertEqual(written, 5)
         self.assertEqual([len(call[2]) for call in calls], [2, 2, 1])
         self.assertTrue(all(call[0] == "POST" for call in calls))
+
+    def test_previous_profile_metrics_keep_last_valid_totals(self):
+        profile = {"followers": 0, "hearts": 0, "nickname": "Magical Vibe"}
+        merged = proxy._apply_previous_profile_metrics(
+            profile,
+            {"followers": 4_064_711, "hearts": 53_432_574},
+        )
+        self.assertEqual(merged["followers"], 4_064_711)
+        self.assertEqual(merged["hearts"], 53_432_574)
+        self.assertEqual(profile["followers"], 0)
+
+        current = proxy._apply_previous_profile_metrics(
+            {"followers": 5_000_000, "hearts": 60_000_000},
+            {"followers": 4_064_711, "hearts": 53_432_574},
+        )
+        self.assertEqual(current["followers"], 5_000_000)
+        self.assertEqual(current["hearts"], 60_000_000)
 
     def test_latest_report_cache_drops_historical_payloads_and_expired_data(self):
         historical = {"supabase_run_id": 1, "dramas_detail": [{"id": 1}]}

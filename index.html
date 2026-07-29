@@ -904,12 +904,12 @@ let scheduleAccountSource="";
 const DASHBOARD_CACHE_MAX_AGE=7*24*60*60*1000;
 const PUBLIC_REPORT_REFRESH_MS=60*1000;
 const DASHBOARD_HISTORY_WORKERS=4;
-const DASHBOARD_CACHE_STORAGE="tikhub-dashboard-cache-v3";
+const DASHBOARD_CACHE_STORAGE="tikhub-dashboard-cache-v4";
 const DASHBOARD_LOCAL_CACHE_LIMIT=700000;
-const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v3";
-  const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v3";
-  const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v1";
-  const DASHBOARD_PREVIEW_CACHE_KEY="thr_dashboard_preview_v1";
+const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v4";
+  const DASHBOARD_HISTORY_CACHE_KEY="thr_dashboard_history_payloads_v4";
+  const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v2";
+  const DASHBOARD_PREVIEW_CACHE_KEY="thr_dashboard_preview_v2";
 const DASHBOARD_VALIDATION_MAX_AGE=2*PUBLIC_REPORT_REFRESH_MS;
 function dashboardCacheGet(key,maxAgeMs){
   try{
@@ -1859,7 +1859,9 @@ function compactDashboardPayload(payload){
     storage_source:payload.storage_source||"",
     supabase_run_id:payload.supabase_run_id||null,
     summary:(Array.isArray(payload.summary)?payload.summary:[]).map(row=>({
-      a:accountOf(row),n:nickOf(row),d:summaryDramaCountOf(row),
+      a:accountOf(row),n:nickOf(row),
+      f:accountFollowerNumber(row),h:accountMetricNumber(row,["点赞","Likes / 点赞","h"]),
+      d:summaryDramaCountOf(row),
       e:toInt(valueOf(row,["总集数","Episodes / 总集数","e"],0)),v:summaryHotOf(row)
     })),
     dramas_detail:(Array.isArray(payload.dramas_detail)?payload.dramas_detail:[]).map(row=>({
@@ -2180,6 +2182,17 @@ function dashboardComparablePayloads(){
     map.set(key,payload);
   }
   return Array.from(map.values()).sort((a,b)=>(dashboardPayloadTime(a)||0)-(dashboardPayloadTime(b)||0));
+}
+function monitorHistoricalFollowerMap(){
+  const map=new Map();
+  for(const payload of dashboardComparablePayloads()){
+    for(const row of (payload&&Array.isArray(payload.summary)?payload.summary:[])){
+      const account=summaryAccountKey(row);
+      const followers=accountFollowerNumber(row);
+      if(account&&followers>0)map.set(account,followers);
+    }
+  }
+  return map;
 }
 function dashboardBaselinePayload(payloads,currentMs,days){
   const target=currentMs-Math.max(1,days)*86400000;
@@ -2547,16 +2560,21 @@ function dashboardDonutHtml(items,totalViews,coreLabel="播放<br>占比",fallba
   return `<div class="dash-donut-visual" style="background:conic-gradient(${stops})"><div class="dash-donut-core">${coreLabel}</div></div><div class="dash-donut-legend">${legend||"<span>暂无数据</span>"}</div>`;
 }
 function monitorAccountItems(){
-  return monitoredAccountRows().map(row=>({
-    row,
-    account:String(accountOf(row)||"").trim(),
-    nick:nickOf(row)||accountOf(row),
-    followers:accountFollowerNumber(row),
-    views:summaryHotOf(row),
-    topDrama:topDramaTitleOf(row),
-    href:linkOf(row),
-    avatar:avatarOf(row),
-  })).filter(item=>item.account).sort((a,b)=>b.followers-a.followers);
+  const historicalFollowers=monitorHistoricalFollowerMap();
+  return monitoredAccountRows().map(row=>{
+    const account=String(accountOf(row)||"").trim();
+    const currentFollowers=accountFollowerNumber(row);
+    return {
+      row,
+      account,
+      nick:nickOf(row)||accountOf(row),
+      followers:currentFollowers>0?currentFollowers:(historicalFollowers.get(account.toLowerCase())||0),
+      views:summaryHotOf(row),
+      topDrama:topDramaTitleOf(row),
+      href:linkOf(row),
+      avatar:avatarOf(row),
+    };
+  }).filter(item=>item.account).sort((a,b)=>b.followers-a.followers);
 }
 function applyMonitorSearchDom(){
   const input=$("monitorSearchInput");
@@ -2635,7 +2653,7 @@ function renderMonitorDashboard(current){
     return `<div class="monitor-account-row" data-search="${esc(searchIndex)}" title="${esc(item.nick+" · "+title)}">`+
       `<div class="monitor-account-avatar">${img}<span>${accountMonitorInitial(item.row)}</span></div>`+
       `<div class="monitor-account-main"><div class="monitor-account-name">${esc(item.nick)}</div><div class="monitor-account-id">@${esc(item.account)}</div><a class="monitor-account-home" href="${esc(item.href||("https://www.tiktok.com/@"+item.account))}" target="_blank" rel="noopener">主页</a></div>`+
-      `<div class="monitor-account-fans"><span>粉丝</span><b>${accountMonitorFollowers(item.row)}</b></div>`+
+      `<div class="monitor-account-fans"><span>粉丝</span><b>${item.followers>0?esc(fmtPlay(item.followers)):accountMonitorFollowers(item.row)}</b></div>`+
       `<div class="monitor-account-drama">${esc(title)}</div>`+
       `<div class="monitor-account-bar" aria-hidden="true"><i style="width:${pct.toFixed(2)}%"></i></div>`+
     `</div>`;
@@ -3328,10 +3346,10 @@ function accountMetricNumber(row,keys){
   return toInt(raw);
 }
 function accountFollowerNumber(row){
-  return accountMetricNumber(row,["粉丝","Followers / 粉丝"]);
+  return accountMetricNumber(row,["粉丝","Followers / 粉丝","f"]);
 }
 function accountMonitorFollowers(row){
-  const raw=valueOf(row,["粉丝","Followers / 粉丝"],0);
+  const raw=valueOf(row,["粉丝","Followers / 粉丝","f"],0);
   const text=String(raw==null?"":raw).trim();
   const value=accountFollowerNumber(row);
   return esc(value?fmtPlay(value):(text||"0"));

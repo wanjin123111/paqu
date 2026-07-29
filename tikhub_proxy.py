@@ -3060,6 +3060,18 @@ def _get_profile(uid, secuid, timeout=90, retries=None):
     return profile
 
 
+def _apply_previous_profile_metrics(profile, previous_metrics=None):
+    """Keep the last valid account totals when the profile API temporarily returns zero."""
+    clean = dict(profile or {})
+    previous = previous_metrics if isinstance(previous_metrics, dict) else {}
+    for key in ("followers", "hearts"):
+        current_value = _to_int(clean.get(key))
+        previous_value = _to_int(previous.get(key))
+        if current_value <= 0 and previous_value > 0:
+            clean[key] = previous_value
+    return clean
+
+
 def _fetch_posts_page(ep_list, params):
     last_error = None
     for endpoint in ep_list:
@@ -3560,9 +3572,12 @@ def _build_summary_row(uid, profile, videos, dramas):
     }
 
 
-def _scrape_account(uid):
+def _scrape_account(uid, previous_metrics=None):
     secuid = _resolve_secuid(uid)
-    profile = _get_profile(uid, secuid)
+    profile = _apply_previous_profile_metrics(
+        _get_profile(uid, secuid),
+        previous_metrics,
+    )
     videos, dramas = [], []
     if SCHEDULE_USE_DRAMA_LIBRARY:
         try:
@@ -4331,6 +4346,78 @@ def _clear_supabase_report_cache():
         SUPABASE_REPORT_CACHE["by_id"].clear()
 
 
+def _load_previous_account_metrics(accounts=None):
+    """Load recent non-zero account totals without retaining complete historical reports."""
+    wanted = {
+        str(account or "").strip().lstrip("@").lower()
+        for account in (accounts or [])
+        if str(account or "").strip().lstrip("@")
+    }
+    metrics = {}
+
+    def merge(account, followers=0, hearts=0):
+        key = str(account or "").strip().lstrip("@").lower()
+        if not key or (wanted and key not in wanted):
+            return
+        entry = metrics.setdefault(key, {})
+        follower_value = _to_int(followers)
+        heart_value = _to_int(hearts)
+        if follower_value > 0 and _to_int(entry.get("followers")) <= 0:
+            entry["followers"] = follower_value
+        if heart_value > 0 and _to_int(entry.get("hearts")) <= 0:
+            entry["hearts"] = heart_value
+
+    if SUPABASE_ENABLED and _supabase_configured():
+        try:
+            rows = _supabase_request(
+                "GET",
+                "/account_snapshots"
+                "?select=account,followers,hearts,run_id"
+                "&followers=gt.0"
+                "&order=run_id.desc"
+                "&limit=5000",
+                timeout=30,
+            )
+            for row in rows if isinstance(rows, list) else []:
+                if isinstance(row, dict):
+                    merge(
+                        row.get("account"),
+                        row.get("followers"),
+                        row.get("hearts"),
+                    )
+        except Exception:
+            pass
+
+    followers_complete = bool(wanted) and all(
+        _to_int(metrics.get(account, {}).get("followers")) > 0
+        for account in wanted
+    )
+    if followers_complete:
+        return metrics
+
+    checked = set()
+    for directory in (REPORTS_DIR, PUBLIC_REPORTS_DIR):
+        path = os.path.abspath(os.path.join(directory, "latest_report.json"))
+        if path in checked or not os.path.isfile(path):
+            continue
+        checked.add(path)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            for row in payload.get("summary") or []:
+                if not isinstance(row, dict):
+                    continue
+                merge(
+                    _summary_account(row),
+                    row.get("粉丝") or row.get("Followers / 粉丝"),
+                    row.get("点赞") or row.get("Likes / 点赞"),
+                )
+            del payload
+        except Exception:
+            continue
+    return metrics
+
+
 def _drop_supabase_report_cache(run_ids):
     clean_ids = {str(_to_int(run_id)) for run_id in (run_ids or []) if _to_int(run_id)}
     if not clean_ids:
@@ -4436,6 +4523,8 @@ def _compact_report_payload(payload):
         summaries.append({
             "a": first(row, ("账号", "Account / 账号")),
             "n": first(row, ("昵称", "Nickname / 昵称")),
+            "f": _to_int(first(row, ("粉丝", "Followers / 粉丝"), 0)),
+            "h": _to_int(first(row, ("点赞", "Likes / 点赞"), 0)),
             "d": _to_int(first(row, ("短剧数", "Dramas / 短剧数"), 0)),
             "e": _to_int(first(row, ("总集数", "Episodes / 总集数"), 0)),
             "v": _to_int(first(row, ("累计观看", "Total Views / 累计观看"), 0)),
@@ -4703,6 +4792,7 @@ def _scrape_scheduled_accounts(accounts, scrape=None):
 
 
 def _run_scheduled_job(accounts):
+    previous_metrics = _load_previous_account_metrics(accounts)
     _clear_supabase_report_cache()
     gc.collect()
     LAST_JOB.update({
@@ -4716,7 +4806,15 @@ def _run_scheduled_job(accounts):
         "account_workers": min(SCHEDULE_ACCOUNT_WORKERS, max(1, len(accounts))),
         "tikhub_rps_limit": TIKHUB_RPS_LIMIT,
     })
-    rows, drama_rows, errors = _scrape_scheduled_accounts(accounts)
+    def scrape_with_previous_metrics(uid):
+        key = str(uid or "").strip().lstrip("@").lower()
+        return _scrape_account(uid, previous_metrics.get(key))
+
+    rows, drama_rows, errors = _scrape_scheduled_accounts(
+        accounts,
+        scrape=scrape_with_previous_metrics,
+    )
+    previous_metrics.clear()
     LAST_JOB.update({"phase": "reports", "current_account": "", "current_accounts": []})
     try:
         _save_drama_detail_cache()
