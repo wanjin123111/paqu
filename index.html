@@ -1568,13 +1568,19 @@ function renderPublicDramaOnlineResults(payload){
   );
   const notes=[];
   notes.push(results.length?("找到 "+results.length+" 部"):"未找到");
+  const filteredVideos=toInt(payload&&payload.filtered_video_count);
+  const checkedAccounts=toInt(payload&&payload.checked_account_count);
+  if(filteredVideos)notes.push("已过滤 "+filteredVideos+" 条普通视频");
+  if(checkedAccounts)notes.push("已核查 "+checkedAccounts+" 个发布账号");
   if(payload&&payload.cached)notes.push("已使用缓存");
   if(payload&&payload.partial)notes.push("部分来源暂不可用");
   status.classList.remove("public-drama-inline-loading");
   status.textContent=notes.join(" · ");
   target.setAttribute("aria-busy","false");
   if(!results.length){
-    target.innerHTML='<div class="public-drama-result-empty">未找到可打开完整剧集的短剧；普通视频和搬运片段已自动过滤。可尝试输入完整英文剧名。</div>';
+    const checkedText=checkedAccounts?("已检查 "+checkedAccounts+" 个发布账号的短剧栏目；"):"";
+    const filteredText=filteredVideos?("已过滤 "+filteredVideos+" 条普通视频和搬运片段；"):"";
+    target.innerHTML='<div class="public-drama-result-empty">'+filteredText+checkedText+'未找到带短剧 ID 和完整剧集入口的结果。可尝试完整英文剧名，或先在后台加入官方发布账号。</div>';
     return;
   }
   target.innerHTML=results.map(item=>{

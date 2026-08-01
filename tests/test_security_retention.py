@@ -914,6 +914,80 @@ class DiscoveryWorksTests(unittest.TestCase):
 
         self.assertIsNone(proxy._public_drama_result_from_work("Outside Drama", work))
 
+    def test_public_drama_search_verifies_series_in_publisher_library(self):
+        work = {
+            "video_id": "101",
+            "drama_title": "",
+            "description": "Outside Drama - watch the full series",
+            "account": "official_drama",
+            "nickname": "Official Drama",
+            "secuid": "publisher-secuid",
+            "views": 100,
+        }
+        discovered = {"ok": True, "works": [work], "errors": []}
+        library = [{
+            "drama_id": "ID 777",
+            "name": "Outside Drama",
+            "english_title": "Outside Drama",
+            "episodes": 30,
+            "views": 1000,
+        }]
+        with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+            proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
+        with mock.patch.object(proxy, "SERVER_API_KEY", ""), \
+                mock.patch.object(proxy, "_public_drama_report_results", return_value=[]), \
+                mock.patch.object(proxy, "_discover_works", return_value=discovered), \
+                mock.patch.object(
+                    proxy,
+                    "_get_tiktok_drama_library",
+                    return_value=library,
+                ) as get_library, \
+                mock.patch.object(proxy, "_resolve_drama_reference_for_video") as resolve:
+            payload = proxy._public_drama_search_payload("Outside Drama", 20)
+
+        resolve.assert_not_called()
+        get_library.assert_called_once_with(
+            "publisher-secuid",
+            "official_drama",
+            max_pages=3,
+            timeout=proxy.DISCOVERY_SEARCH_TIMEOUT_SECONDS + 8,
+            retries=1,
+            include_episode_publish_time=False,
+            translate_details=False,
+        )
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["checked_account_count"], 1)
+        self.assertEqual(payload["filtered_video_count"], 1)
+        self.assertEqual(payload["results"][0]["drama_id"], "777")
+        self.assertEqual(payload["results"][0]["episode_count"], 30)
+        self.assertEqual(payload["results"][0]["account"], "official_drama")
+
+    def test_public_drama_search_filters_plain_videos_after_library_check(self):
+        discovered = {
+            "ok": True,
+            "works": [{
+                "video_id": "101",
+                "description": "Outside Drama review clip",
+                "account": "review_account",
+                "secuid": "review-secuid",
+                "views": 100,
+            }],
+            "errors": [],
+        }
+        with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+            proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
+        with mock.patch.object(proxy, "SERVER_API_KEY", ""), \
+                mock.patch.object(proxy, "_public_drama_report_results", return_value=[]), \
+                mock.patch.object(proxy, "_discover_works", return_value=discovered), \
+                mock.patch.object(proxy, "_get_tiktok_drama_library", return_value=[]), \
+                mock.patch.object(proxy, "_resolve_drama_reference_for_video") as resolve:
+            payload = proxy._public_drama_search_payload("Outside Drama", 20)
+
+        resolve.assert_not_called()
+        self.assertEqual(payload["count"], 0)
+        self.assertEqual(payload["checked_account_count"], 1)
+        self.assertEqual(payload["filtered_video_count"], 1)
+
     def test_public_drama_search_resolves_a_matching_video_to_a_real_series(self):
         work = {
             "video_id": "101",

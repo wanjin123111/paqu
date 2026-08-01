@@ -198,7 +198,7 @@ PUBLIC_DRAMA_SEARCH_CACHE_SECONDS = _env_int("PUBLIC_DRAMA_SEARCH_CACHE_SECONDS"
 PUBLIC_DRAMA_SEARCH_CACHE_MAX_ITEMS = _env_int("PUBLIC_DRAMA_SEARCH_CACHE_MAX_ITEMS", 64, 4, 500)
 PUBLIC_DRAMA_SEARCH_RATE_LIMIT = _env_int("PUBLIC_DRAMA_SEARCH_RATE_LIMIT", 20, 1, 200)
 PUBLIC_DRAMA_SEARCH_RATE_WINDOW_SECONDS = _env_int("PUBLIC_DRAMA_SEARCH_RATE_WINDOW_SECONDS", 60, 10, 3600)
-PUBLIC_DRAMA_RESOLVE_MAX_CANDIDATES = _env_int("PUBLIC_DRAMA_RESOLVE_MAX_CANDIDATES", 3, 0, 8)
+PUBLIC_DRAMA_RESOLVE_MAX_CANDIDATES = _env_int("PUBLIC_DRAMA_RESOLVE_MAX_CANDIDATES", 6, 0, 12)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 ALLOW_LOOPBACK_PRIVATE_ACCESS = _env_bool("ALLOW_LOOPBACK_PRIVATE_ACCESS", not bool(os.environ.get("RENDER")))
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
@@ -2699,6 +2699,7 @@ def _discovery_work_from_video(video, source_query, source_endpoint, fallback_ur
         "description": _to_text(_get_desc(video), 320),
         "account": account,
         "nickname": _to_text(author.get("nickname"), 120) or account,
+        "secuid": _to_text(author.get("secuid"), 180),
         "avatar": author.get("avatar") or "",
         "publish_time": _publish_time_of(video),
         "views": _get_play_count(video),
@@ -2731,7 +2732,7 @@ def _merge_discovered_work(works, item):
             existing["source_queries"].append(query)
     for field in ("views", "likes", "comments", "shares"):
         existing[field] = max(_to_int(existing.get(field)), _to_int(item.get(field)))
-    for field in ("description", "account", "nickname", "avatar", "publish_time", "video_url", "profile_url", "source_endpoint", "drama_id", "drama_title"):
+    for field in ("description", "account", "nickname", "secuid", "avatar", "publish_time", "video_url", "profile_url", "source_endpoint", "drama_id", "drama_title"):
         if not existing.get(field) and item.get(field):
             existing[field] = item[field]
     existing["episode_count"] = max(_to_int(existing.get("episode_count")), _to_int(item.get("episode_count")))
@@ -2973,6 +2974,107 @@ def _public_drama_result_from_work(query, work):
     }
 
 
+def _public_drama_result_from_library(query, drama, account_info):
+    """Build a public result only from a verified account short-drama entry."""
+    if not isinstance(drama, dict) or not isinstance(account_info, dict):
+        return None
+    account = _to_text(account_info.get("account"), 80).lstrip("@")
+    drama_id = _clean_drama_id(drama.get("drama_id"))
+    english_title = _to_text(
+        drama.get("english_title") or drama.get("name"),
+        180,
+    )
+    chinese_title = _to_text(drama.get("chinese_title"), 180)
+    score = _public_drama_title_match_score(
+        query,
+        drama.get("name"),
+        english_title,
+        chinese_title,
+    )
+    if score < 84 or not account or not drama_id or not english_title:
+        return None
+    params = {
+        "uid": account,
+        "drama_id": drama_id,
+        "target": "list",
+        "redirect": "1",
+    }
+    return {
+        "kind": "drama",
+        "drama_id": drama_id,
+        "title": english_title,
+        "chinese_title": chinese_title,
+        "description": _to_text(
+            drama.get("english_description")
+            or drama.get("chinese_description")
+            or account_info.get("description"),
+            240,
+        ),
+        "account": account,
+        "nickname": _to_text(account_info.get("nickname"), 120) or account,
+        "avatar": _to_text(account_info.get("avatar"), 800),
+        "episode_count": _to_int(drama.get("episodes")),
+        "views": _to_int(drama.get("views")),
+        "likes": 0,
+        "publish_time": _to_text(drama.get("publish_time"), 40),
+        "video_id": "",
+        "video_url": "",
+        "profile_url": "https://www.tiktok.com/@" + account,
+        "list_url": "/drama-link?" + urllib.parse.urlencode(params),
+        "_match_score": score,
+        "_result_source": "tikhub",
+    }
+
+
+def _public_drama_resolve_accounts(query, works, limit):
+    """Inspect candidate publishers' real short-drama tabs and return series only."""
+    if PUBLIC_DRAMA_RESOLVE_MAX_CANDIDATES <= 0:
+        return [], 0
+    ranked = sorted(
+        [work for work in (works or []) if _public_drama_resolution_candidate(query, work)],
+        key=lambda work: (
+            _public_drama_title_match_score(
+                query,
+                work.get("drama_title"),
+                work.get("description"),
+            ),
+            _to_int(work.get("views")),
+        ),
+        reverse=True,
+    )
+    results, seen_accounts = [], set()
+    checked_accounts = 0
+    for work in ranked:
+        account = _to_text(work.get("account"), 80).lstrip("@")
+        secuid = _to_text(work.get("secuid"), 180)
+        account_key = account.casefold()
+        if not account_key or not secuid or account_key in seen_accounts:
+            continue
+        seen_accounts.add(account_key)
+        if checked_accounts >= PUBLIC_DRAMA_RESOLVE_MAX_CANDIDATES:
+            break
+        checked_accounts += 1
+        try:
+            dramas = _get_tiktok_drama_library(
+                secuid,
+                account,
+                max_pages=3,
+                timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 8,
+                retries=1,
+                include_episode_publish_time=False,
+                translate_details=False,
+            )
+        except (TikHubError, ValueError, OSError):
+            continue
+        for drama in dramas:
+            result = _public_drama_result_from_library(query, drama, work)
+            if result:
+                results.append(result)
+                if len(results) >= max(1, int(limit or 20)):
+                    return results, checked_accounts
+    return results, checked_accounts
+
+
 def _public_drama_resolution_candidate(query, work):
     if not isinstance(work, dict) or _clean_drama_id(work.get("drama_id")):
         return False
@@ -3095,6 +3197,9 @@ def _public_drama_search_payload(query, limit=20):
     matched_query = ""
     collected_errors = []
     resolution_candidates = []
+    directory_results = []
+    filtered_video_keys = set()
+    checked_account_count = 0
     exact_report_match = any(_to_int(item.get("_match_score")) >= 116 for item in report_results)
     if not exact_report_match:
         for search_query in _public_drama_search_variants(query):
@@ -3110,6 +3215,10 @@ def _public_drama_search_payload(query, limit=20):
                     candidate = dict(work)
                     candidate["_public_search_query"] = search_query
                     resolution_candidates.append(candidate)
+                    filtered_video_keys.add(
+                        _clean_drama_id(candidate.get("video_id"))
+                        or _to_text(candidate.get("video_url"), 1000).casefold()
+                    )
             if relevant:
                 discovered = dict(attempt)
                 discovered["works"] = relevant
@@ -3135,12 +3244,36 @@ def _public_drama_search_payload(query, limit=20):
                         candidate = dict(work)
                         candidate["_public_search_query"] = general_query
                         resolution_candidates.append(candidate)
+                        filtered_video_keys.add(
+                            _clean_drama_id(candidate.get("video_id"))
+                            or _to_text(candidate.get("video_url"), 1000).casefold()
+                        )
                 if relevant:
                     discovered["works"] = relevant
                     matched_query = general_query
                     break
         if not discovered.get("works") and resolution_candidates:
-            resolved_works = _public_drama_resolve_works(query, resolution_candidates, limit)
+            directory_results, checked_account_count = _public_drama_resolve_accounts(
+                query,
+                resolution_candidates,
+                limit,
+            )
+            if directory_results:
+                matched_query = _to_text(
+                    resolution_candidates[0].get("_public_search_query"),
+                    120,
+                ) or query
+            unresolved_candidates = [
+                candidate for candidate in resolution_candidates
+                if not _to_text(candidate.get("secuid"), 180)
+            ]
+            resolved_works = []
+            if not directory_results and (not checked_account_count or unresolved_candidates):
+                resolved_works = _public_drama_resolve_works(
+                    query,
+                    unresolved_candidates or resolution_candidates,
+                    limit,
+                )
             if resolved_works:
                 discovered["works"] = resolved_works
                 matched_query = _to_text(
@@ -3150,6 +3283,8 @@ def _public_drama_search_payload(query, limit=20):
 
     grouped = {}
     for item in report_results:
+        _public_drama_merge_result(grouped, item)
+    for item in directory_results:
         _public_drama_merge_result(grouped, item)
     for work in discovered.get("works") or []:
         _public_drama_merge_result(grouped, _public_drama_result_from_work(query, work))
@@ -3179,6 +3314,8 @@ def _public_drama_search_payload(query, limit=20):
         "generated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
         "results": results,
         "source_counts": source_counts,
+        "filtered_video_count": len([key for key in filtered_video_keys if key]),
+        "checked_account_count": checked_account_count,
         "partial": bool(collected_errors),
         "cached": False,
     }
@@ -3929,7 +4066,16 @@ def _get_drama_episode_link(drama_id, uid, started=None, target="play"):
     return "" if prefer_play else fallback
 
 
-def _get_tiktok_drama_library(secuid, uid, started=None, max_pages=None, timeout=90, retries=None, include_episode_publish_time=True):
+def _get_tiktok_drama_library(
+    secuid,
+    uid,
+    started=None,
+    max_pages=None,
+    timeout=90,
+    retries=None,
+    include_episode_publish_time=True,
+    translate_details=True,
+):
     if not secuid:
         return []
     local_started = time.time()
@@ -3977,13 +4123,19 @@ def _get_tiktok_drama_library(secuid, uid, started=None, max_pages=None, timeout
             views = _to_int(_deep_find(item, DRAMA_VIEW_KEYS))
             duration_seconds = _to_int(_deep_find(item, DRAMA_DURATION_SECONDS_KEYS))
             english_title = _to_text(_deep_find(item, DRAMA_EN_TITLE_KEYS) or name, 160)
-            chinese_title = _chinese_title_or_translate(_deep_find(item, DRAMA_CN_TITLE_KEYS), english_title)
+            if translate_details:
+                chinese_title = _chinese_title_or_translate(
+                    _deep_find(item, DRAMA_CN_TITLE_KEYS),
+                    english_title,
+                )
+            else:
+                chinese_title = _to_text(_deep_find(item, DRAMA_CN_TITLE_KEYS), 160)
             english_desc = _to_text(_deep_find_any(item, DRAMA_EN_DESC_KEYS), 600)
             chinese_desc = _to_text(_deep_find_any(item, DRAMA_CN_DESC_KEYS), 600)
             publish_time = _publish_time_of(item)
             english_themes_source = _deep_find_any(item, DRAMA_EN_THEMES_KEYS)
             chinese_themes = _theme_text(_deep_find_any(item, DRAMA_CN_THEMES_KEYS))
-            if not chinese_themes:
+            if not chinese_themes and translate_details:
                 chinese_themes = _theme_text(english_themes_source, translate=True)
             drama_link = _first_http_url(item, DRAMA_LINK_KEYS)
             detail = _apply_cached_drama_detail(uid, drama_key, name, {
