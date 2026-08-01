@@ -287,7 +287,12 @@ DISCOVERY_SEARCH_ENDPOINTS = {
     "app_v3": "/api/v1/tiktok/app/v3/fetch_video_search_result",
     "web": "/api/v1/tiktok/web/fetch_search_video",
 }
-DISCOVERY_GENERAL_SEARCH_ENDPOINT = "/api/v1/tiktok/web/fetch_general_search"
+DISCOVERY_GENERAL_SEARCH_ENDPOINTS = {
+    "app_v3": "/api/v1/tiktok/app/v3/fetch_general_search_result",
+    "web": "/api/v1/tiktok/web/fetch_general_search",
+}
+# Keep the historical name as the Web endpoint alias for older integrations.
+DISCOVERY_GENERAL_SEARCH_ENDPOINT = DISCOVERY_GENERAL_SEARCH_ENDPOINTS["web"]
 DISCOVERY_USER_SEARCH_ENDPOINT = "/api/v1/tiktok/app/v3/fetch_user_search_result"
 DISCOVERY_TOPIC_SEARCH_PHRASES = {
     "short drama", "shortdrama", "mini drama", "minidrama", "micro drama", "microdrama",
@@ -1920,25 +1925,55 @@ def _fetch_discovery_search_page(keyword, count, cursor, started=None):
 
 
 def _fetch_discovery_general_search_page(keyword, count, cursor="0", started=None):
-    """Use TikHub's mixed TikTok Web search as a last-resort video source.
+    """Use TikHub's mixed TikTok search as a last-resort video source.
 
-    The endpoint can return users, hashtags and videos in the same response, so
-    reuse the defensive video extractor and expose only video-shaped entries.
+    App V3 and Web can return users, hashtags and videos in the same response.
+    Try both documented sources and expose only video-shaped entries.
     """
     if _discovery_runtime_exceeded(started):
         raise TikHubError("discovery runtime limit reached")
-    data = _send_tikhub_get(
-        DISCOVERY_GENERAL_SEARCH_ENDPOINT,
-        {
-            "keyword": keyword,
-            "offset": str(cursor or "0"),
-            "search_id": "",
-        },
-        "TikHub web general search endpoint",
-        timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS,
-        retries=1,
-    )
-    return data, _video_batch_from_search_payload(data, count), DISCOVERY_GENERAL_SEARCH_ENDPOINT
+    valid_empty = None
+    endpoint_errors = []
+    for mode in ("app_v3", "web"):
+        endpoint = DISCOVERY_GENERAL_SEARCH_ENDPOINTS[mode]
+        if mode == "app_v3":
+            params = {
+                "keyword": keyword,
+                "offset": str(cursor or "0"),
+                "count": str(count),
+                "sort_type": "0",
+                "publish_time": "0",
+            }
+        else:
+            params = {
+                "keyword": keyword,
+                "offset": str(cursor or "0"),
+                "search_id": "",
+            }
+        try:
+            data = _send_tikhub_get(
+                endpoint,
+                params,
+                "TikHub %s general search endpoint" % mode,
+                timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS,
+                retries=1,
+            )
+        except TikHubError as exc:
+            endpoint_errors.append((mode, exc))
+            continue
+        batch = _video_batch_from_search_payload(data, count)
+        if batch:
+            return data, batch, endpoint
+        if valid_empty is None:
+            valid_empty = (data, [], endpoint)
+    if valid_empty is not None:
+        return valid_empty
+    if endpoint_errors:
+        details = "; ".join("%s: %s" % (mode, exc) for mode, exc in endpoint_errors)
+        status = next((getattr(exc, "status", None) for _mode, exc in reversed(endpoint_errors)
+                       if getattr(exc, "status", None)), None)
+        raise TikHubError("TikHub general search endpoints failed: " + details, status)
+    raise TikHubError("TikHub general search endpoints returned no usable response")
 
 
 def _send_tiktok_public_page(url, referer=None):
@@ -2998,20 +3033,24 @@ def _public_drama_search_payload(query, limit=20):
                 matched_query = search_query
                 break
         if not discovered.get("works") and SERVER_API_KEY:
-            general_query = attempted_queries[-1] if attempted_queries else query
-            try:
-                general_works = _public_drama_general_works(general_query, limit)
-                discovered["works"] = [
+            general_queries = attempted_queries or _public_drama_search_variants(query)
+            for general_query in general_queries:
+                try:
+                    general_works = _public_drama_general_works(general_query, limit)
+                except TikHubError as exc:
+                    collected_errors.append(_discovery_error(
+                        "search", "tikhub-general-search", exc,
+                        hint="TikHub 综合搜索暂不可用，请稍后重试。",
+                    ))
+                    continue
+                relevant = [
                     work for work in general_works
                     if _public_drama_result_from_work(query, work)
                 ]
-                if discovered["works"]:
+                if relevant:
+                    discovered["works"] = relevant
                     matched_query = general_query
-            except TikHubError as exc:
-                collected_errors.append(_discovery_error(
-                    "search", DISCOVERY_GENERAL_SEARCH_ENDPOINT, exc,
-                    hint="TikHub 综合搜索暂不可用，请稍后重试。",
-                ))
+                    break
 
     grouped = {}
     for item in report_results:
