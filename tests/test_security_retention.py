@@ -814,6 +814,92 @@ class DiscoveryWorksTests(unittest.TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["works"][0]["source_endpoint"], "account-posts")
 
+    def test_discover_works_can_skip_runtime_file(self):
+        video_url = "https://www.tiktok.com/@demo.author/video/7653132293346692365"
+        with mock.patch.object(proxy, "_configured_schedule_accounts", return_value=([], "test")), \
+                mock.patch.object(proxy, "_fetch_discovery_video_by_id", return_value=(self.sample_video(), "single-video")), \
+                mock.patch.object(proxy, "_write_discovered_works") as write_results:
+            payload = proxy._discover_works(video_url, 10, 10, persist=False)
+
+        write_results.assert_not_called()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["works"][0]["drama_id"], "7661844447575266321")
+
+    def test_public_drama_search_sanitizes_groups_and_caches(self):
+        works = {
+            "ok": True,
+            "works": [
+                {
+                    "drama_id": "777",
+                    "video_id": "101",
+                    "drama_title": "Outside Drama",
+                    "description": "First matching episode",
+                    "account": "outside_account",
+                    "nickname": "Outside Account",
+                    "episode_count": 20,
+                    "views": 100,
+                    "likes": 5,
+                    "source_endpoint": "private-endpoint-a",
+                    "already_monitored": False,
+                },
+                {
+                    "drama_id": "777",
+                    "video_id": "102",
+                    "drama_title": "Outside Drama",
+                    "account": "outside_account",
+                    "episode_count": 21,
+                    "views": 250,
+                    "likes": 7,
+                    "source_endpoint": "private-endpoint-b",
+                },
+            ],
+            "errors": [{"endpoint": "private-endpoint-c", "error": "private detail"}],
+        }
+        with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+            proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
+        with mock.patch.object(proxy, "_discover_works", return_value=works) as discover:
+            first = proxy._public_drama_search_payload("Outside Drama", 20)
+            second = proxy._public_drama_search_payload("Outside Drama", 20)
+
+        discover.assert_called_once_with("Outside Drama", 20, 20, persist=False)
+        self.assertFalse(first["cached"])
+        self.assertTrue(second["cached"])
+        self.assertEqual(first["count"], 1)
+        self.assertTrue(first["partial"])
+        item = first["results"][0]
+        self.assertEqual(item["views"], 250)
+        self.assertEqual(item["episode_count"], 21)
+        self.assertIn("/drama-link?", item["list_url"])
+        self.assertNotIn("source_endpoint", item)
+        self.assertNotIn("already_monitored", item)
+        self.assertNotIn("works", first)
+        self.assertNotIn("errors", first)
+
+    def test_public_drama_search_only_accepts_drama_names(self):
+        for query in ("@demo.author", "https://www.tiktok.com/@demo.author"):
+            with self.assertRaises(ValueError):
+                proxy._public_drama_search_payload(query, 20)
+
+    def test_public_drama_search_endpoint_is_read_only_and_rate_limited(self):
+        handler = object.__new__(proxy.Handler)
+        handler.command = "GET"
+        handler.headers = {}
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.responses = []
+        handler._send_json = lambda code, payload: handler.responses.append((code, payload))
+        expected = {"ok": True, "query": "Outside Drama", "count": 0, "results": []}
+        with mock.patch.object(proxy, "_public_drama_search_rate_allowed", return_value=True), \
+                mock.patch.object(proxy, "_public_drama_search_payload", return_value=expected) as search:
+            handler._public_drama_search_endpoint({"q": ["Outside Drama"], "limit": ["5"]})
+
+        search.assert_called_once_with("Outside Drama", 5)
+        self.assertEqual(handler.responses, [(200, expected)])
+
+        handler.responses.clear()
+        with mock.patch.object(proxy, "_public_drama_search_rate_allowed", return_value=False):
+            handler._public_drama_search_endpoint({"q": ["Outside Drama"]})
+        self.assertEqual(handler.responses[0][0], 429)
+
     def test_account_discovery_is_admin_only(self):
         root = pathlib.Path(proxy.ROOT)
         for name in ("index.html", "tikhub-report-frontend.html"):
@@ -865,8 +951,15 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn('id="publicPageNextBtn"', page)
             self.assertIn('body.public-mode #dashboardCard .dashboard-head{padding-right:500px}', page)
             self.assertIn('body.public-mode #dashboardCard .dashboard-head{padding-top:96px}', page)
-            self.assertIn("function openPublicDramaSearch()", page)
-            self.assertIn('detailSearchText=query;', page)
+            self.assertIn('id="publicDramaSearchModal"', page)
+            self.assertIn('id="publicDramaLocalResults"', page)
+            self.assertIn('id="publicDramaOnlineResults"', page)
+            self.assertIn("async function openPublicDramaSearch()", page)
+            self.assertIn('fetch("/public/drama-search?q="+encodeURIComponent(query)+"&limit=20"', page)
+            self.assertIn("function renderPublicDramaOnlineResults(payload)", page)
+            self.assertIn("function openLocalDramaInReport(query)", page)
+            self.assertIn("publicDramaSearchController", page)
+            self.assertIn("搜索当前报表和 TikTok 全网短剧", page)
             self.assertIn('publicDramaSearchForm.addEventListener("submit"', page)
             self.assertIn('setPublicPageView("report");', page)
             self.assertIn('resultView="detail";', page)

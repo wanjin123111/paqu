@@ -194,6 +194,10 @@ DISCOVERY_MAX_RUNTIME_SECONDS = _env_int("DISCOVERY_MAX_RUNTIME_SECONDS", 75, 15
 DISCOVERY_ENRICH_RESERVE_SECONDS = _env_int("DISCOVERY_ENRICH_RESERVE_SECONDS", 35, 5, 300)
 DISCOVERY_SEARCH_MODE = os.environ.get("DISCOVERY_SEARCH_MODE", "app_v3").strip().lower() or "app_v3"
 DISCOVERY_ENABLE_PUBLIC_TIKTOK = _env_bool("DISCOVERY_ENABLE_PUBLIC_TIKTOK", False)
+PUBLIC_DRAMA_SEARCH_CACHE_SECONDS = _env_int("PUBLIC_DRAMA_SEARCH_CACHE_SECONDS", 300, 0, 3600)
+PUBLIC_DRAMA_SEARCH_CACHE_MAX_ITEMS = _env_int("PUBLIC_DRAMA_SEARCH_CACHE_MAX_ITEMS", 64, 4, 500)
+PUBLIC_DRAMA_SEARCH_RATE_LIMIT = _env_int("PUBLIC_DRAMA_SEARCH_RATE_LIMIT", 20, 1, 200)
+PUBLIC_DRAMA_SEARCH_RATE_WINDOW_SECONDS = _env_int("PUBLIC_DRAMA_SEARCH_RATE_WINDOW_SECONDS", 60, 10, 3600)
 PUBLIC_REPORTS = os.environ.get("PUBLIC_REPORTS", "1").strip().lower() not in ("0", "false", "no", "off")
 ALLOW_LOOPBACK_PRIVATE_ACCESS = _env_bool("ALLOW_LOOPBACK_PRIVATE_ACCESS", not bool(os.environ.get("RENDER")))
 TRANSLATE_HOST = os.environ.get("TRANSLATE_HOST", "https://translate.googleapis.com").rstrip("/")
@@ -392,6 +396,10 @@ TITLE_TRANSLATION_CACHE = {}
 TITLE_TRANSLATION_CACHE_LOCK = threading.Lock()
 VIDEO_PLAY_URL_CACHE = {}
 VIDEO_PLAY_URL_CACHE_LOCK = threading.Lock()
+PUBLIC_DRAMA_SEARCH_CACHE = {}
+PUBLIC_DRAMA_SEARCH_CACHE_LOCK = threading.Lock()
+PUBLIC_DRAMA_SEARCH_RATE = {}
+PUBLIC_DRAMA_SEARCH_RATE_LOCK = threading.Lock()
 LOCAL_DOWNLOAD_JOBS = {}
 LOCAL_DOWNLOAD_JOBS_LOCK = threading.Lock()
 THEME_TRANSLATION_MAP = {
@@ -2647,7 +2655,7 @@ def _merge_discovered_work(works, item):
     existing["already_monitored"] = bool(existing.get("already_monitored") or item.get("already_monitored"))
 
 
-def _discover_works(queries, limit, max_videos_per_query):
+def _discover_works(queries, limit, max_videos_per_query, persist=True):
     started = time.time()
     queries = _parse_discovery_keywords(queries)
     limit = max(1, min(int(limit or DISCOVERY_MAX_CANDIDATES), 200))
@@ -2710,7 +2718,125 @@ def _discover_works(queries, limit, max_videos_per_query):
         "runtime_limit_seconds": DISCOVERY_MAX_RUNTIME_SECONDS,
         "runtime_file": "reports/discovered_works.json",
     }
-    return _write_discovered_works(payload)
+    return _write_discovered_works(payload) if persist else payload
+
+
+def _public_drama_search_query(value):
+    query = _to_text(value, 120).strip()
+    if len(query) < 2:
+        raise ValueError("请输入至少 2 个字的短剧名称")
+    lowered = query.lower()
+    if query.startswith("@") or "tiktok.com/" in lowered or "tiktokv.com/" in lowered:
+        raise ValueError("这里只搜索短剧名称，不支持账号或 TikTok 链接")
+    return query
+
+
+def _public_drama_search_cache_key(query, limit):
+    return "%s:%s" % (str(query).casefold(), int(limit))
+
+
+def _public_drama_search_payload(query, limit=20):
+    query = _public_drama_search_query(query)
+    limit = max(1, min(_to_int(limit) or 20, 20))
+    cache_key = _public_drama_search_cache_key(query, limit)
+    now = time.time()
+    with PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+        cached = PUBLIC_DRAMA_SEARCH_CACHE.get(cache_key)
+        if cached and now < cached.get("expires_at", 0):
+            payload = dict(cached.get("payload") or {})
+            payload["cached"] = True
+            return payload
+        if cached:
+            PUBLIC_DRAMA_SEARCH_CACHE.pop(cache_key, None)
+
+    discovered = _discover_works(query, limit, limit, persist=False)
+    grouped = {}
+    for work in discovered.get("works") or []:
+        if not isinstance(work, dict):
+            continue
+        drama_id = _clean_drama_id(work.get("drama_id"))
+        video_id = _clean_drama_id(work.get("video_id"))
+        account = _to_text(work.get("account"), 80).lstrip("@")
+        title = _to_text(work.get("drama_title"), 180) or _to_text(work.get("description"), 180)
+        if not title:
+            title = "TikTok 短剧作品"
+        key = ("drama:" + drama_id) if drama_id else ("video:" + video_id)
+        if not key or key.endswith(":"):
+            continue
+        item = grouped.get(key)
+        if not item:
+            params = {"uid": account, "drama_id": drama_id, "target": "list", "redirect": "1"}
+            item = {
+                "kind": "drama" if drama_id else "video",
+                "drama_id": drama_id,
+                "title": title,
+                "description": _to_text(work.get("description"), 240),
+                "account": account,
+                "nickname": _to_text(work.get("nickname"), 120) or account,
+                "avatar": _to_text(work.get("avatar"), 800),
+                "episode_count": _to_int(work.get("episode_count")),
+                "views": _to_int(work.get("views")),
+                "likes": _to_int(work.get("likes")),
+                "publish_time": _to_text(work.get("publish_time"), 40),
+                "video_id": video_id,
+                "video_url": _to_text(work.get("video_url"), 1000),
+                "profile_url": ("https://www.tiktok.com/@" + account) if account else "",
+                "list_url": ("/drama-link?" + urllib.parse.urlencode(params)) if drama_id and account else "",
+            }
+            grouped[key] = item
+            continue
+        for field in ("views", "likes", "episode_count"):
+            item[field] = max(_to_int(item.get(field)), _to_int(work.get(field)))
+        for field, maximum in (("title", 180), ("description", 240), ("account", 80), ("nickname", 120),
+                               ("avatar", 800), ("publish_time", 40), ("video_id", 40), ("video_url", 1000)):
+            if not item.get(field) and work.get(field):
+                item[field] = _to_text(work.get(field), maximum)
+
+    results = sorted(
+        grouped.values(),
+        key=lambda item: (_to_int(item.get("views")), _to_int(item.get("likes"))),
+        reverse=True,
+    )[:limit]
+    payload = {
+        "ok": True,
+        "query": query,
+        "count": len(results),
+        "generated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
+        "results": results,
+        "partial": bool(discovered.get("errors")),
+        "cached": False,
+    }
+    with PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+        if len(PUBLIC_DRAMA_SEARCH_CACHE) >= PUBLIC_DRAMA_SEARCH_CACHE_MAX_ITEMS:
+            oldest = min(
+                PUBLIC_DRAMA_SEARCH_CACHE,
+                key=lambda item_key: PUBLIC_DRAMA_SEARCH_CACHE[item_key].get("created_at", 0),
+            )
+            PUBLIC_DRAMA_SEARCH_CACHE.pop(oldest, None)
+        PUBLIC_DRAMA_SEARCH_CACHE[cache_key] = {
+            "created_at": now,
+            "expires_at": now + PUBLIC_DRAMA_SEARCH_CACHE_SECONDS,
+            "payload": payload,
+        }
+    return payload
+
+
+def _public_drama_search_rate_allowed(client_key):
+    now = time.time()
+    window_start = now - PUBLIC_DRAMA_SEARCH_RATE_WINDOW_SECONDS
+    key = str(client_key or "unknown")[:160]
+    with PUBLIC_DRAMA_SEARCH_RATE_LOCK:
+        timestamps = [stamp for stamp in PUBLIC_DRAMA_SEARCH_RATE.get(key, []) if stamp >= window_start]
+        if len(timestamps) >= PUBLIC_DRAMA_SEARCH_RATE_LIMIT:
+            PUBLIC_DRAMA_SEARCH_RATE[key] = timestamps
+            return False
+        timestamps.append(now)
+        PUBLIC_DRAMA_SEARCH_RATE[key] = timestamps
+        if len(PUBLIC_DRAMA_SEARCH_RATE) > 1000:
+            for stale_key in list(PUBLIC_DRAMA_SEARCH_RATE):
+                if not PUBLIC_DRAMA_SEARCH_RATE.get(stale_key) or PUBLIC_DRAMA_SEARCH_RATE[stale_key][-1] < window_start:
+                    PUBLIC_DRAMA_SEARCH_RATE.pop(stale_key, None)
+        return True
 
 
 def _resolve_drama_reference_for_video(uid, video_id):
@@ -6610,6 +6736,8 @@ class Handler(BaseHTTPRequestHandler):
             self._schedule_accounts_endpoint(qs)
         elif parsed.path == "/discover-accounts":
             self._discover_accounts_endpoint(qs)
+        elif parsed.path == "/public/drama-search":
+            self._public_drama_search_endpoint(qs)
         elif parsed.path == "/admin/catalog":
             self._admin_catalog_endpoint(qs)
         elif parsed.path == "/admin/access":
@@ -7098,6 +7226,24 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         self._send_json(200, {"ok": True, "url": link, "target": target})
+
+    def _public_drama_search_endpoint(self, qs):
+        if self.command != "GET":
+            self._send_json(405, {"ok": False, "error": "只支持 GET 请求"})
+            return
+        forwarded = str(self.headers.get("X-Forwarded-For", "") or "").split(",", 1)[0].strip()
+        client_key = forwarded or (self.client_address[0] if self.client_address else "unknown")
+        if not _public_drama_search_rate_allowed(client_key):
+            self._send_json(429, {"ok": False, "error": "搜索太频繁，请稍后再试"})
+            return
+        try:
+            query = qs.get("q", qs.get("query", [""]))[0]
+            limit = _to_int(qs.get("limit", [20])[0]) or 20
+            self._send_json(200, _public_drama_search_payload(query, limit))
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+        except Exception:
+            self._send_json(502, {"ok": False, "error": "TikTok 短剧搜索暂时不可用，请稍后再试"})
 
     def _discover_accounts_endpoint(self, qs):
         if not self._require_schedule_secret(qs):

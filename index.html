@@ -93,6 +93,30 @@
   body.public-mode .public-page-nav .public-drama-search input::placeholder{color:var(--ink-faint)}
   body.public-mode .public-page-nav .public-drama-search .mini-btn{height:100%;border:0;border-left:1px solid var(--accent);border-radius:0;background:var(--accent);color:#fff;font-weight:700;box-shadow:none}
   body.public-mode .public-page-nav .public-drama-search .mini-btn:hover{background:var(--accent-press);color:#fff}
+  .public-drama-search-modal[hidden]{display:none!important}
+  .public-drama-search-modal{position:fixed;inset:0;z-index:180;display:flex;align-items:flex-start;justify-content:center;padding:76px 18px 24px;background:rgba(15,23,42,.48);backdrop-filter:blur(4px);overflow:auto}
+  .public-drama-search-dialog{width:min(980px,100%);max-height:calc(100vh - 100px);display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;background:var(--paper);box-shadow:0 26px 70px rgba(15,23,42,.28);overflow:hidden}
+  .public-drama-search-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:20px 22px 16px;border-bottom:1px solid var(--line);background:#fff}
+  .public-drama-search-head h2{margin:0 0 5px;font-family:var(--display);font-size:21px;color:var(--ink)}
+  .public-drama-search-head p{margin:0;color:var(--ink-faint);font-size:12.5px;line-height:1.55}
+  .public-drama-search-close{flex:0 0 auto;width:34px;height:34px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink-soft);font-size:20px;cursor:pointer}
+  .public-drama-search-body{padding:18px 22px 24px;overflow:auto}
+  .public-drama-search-note{margin:0 0 16px;padding:10px 12px;border:1px solid #dcd8ff;border-radius:10px;background:#f6f4ff;color:#5b4bd8;font-size:12.5px}
+  .public-drama-result-section+.public-drama-result-section{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
+  .public-drama-result-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+  .public-drama-result-title h3{margin:0;font-family:var(--display);font-size:15px;color:var(--ink)}
+  .public-drama-result-title span{font-size:12px;color:var(--ink-faint)}
+  .public-drama-result-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .public-drama-result-card{min-width:0;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fff}
+  .public-drama-result-card h4{margin:0 0 5px;font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .public-drama-result-meta{display:flex;flex-wrap:wrap;gap:6px 12px;min-height:20px;color:var(--ink-faint);font-size:11.5px}
+  .public-drama-result-desc{margin:7px 0 0;color:var(--ink-soft);font-size:11.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .public-drama-result-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+  .public-drama-result-actions a,.public-drama-result-actions button{display:inline-flex;align-items:center;justify-content:center;min-height:31px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--accent);font-size:11.5px;font-weight:700;text-decoration:none;cursor:pointer}
+  .public-drama-result-actions .primary{border-color:var(--accent);background:var(--accent);color:#fff}
+  .public-drama-result-empty{grid-column:1/-1;padding:24px;border:1px dashed var(--line);border-radius:12px;background:#fff;color:var(--ink-faint);text-align:center;font-size:12.5px}
+  .public-drama-inline-loading{display:inline-flex;align-items:center;gap:7px;color:var(--accent)!important}
+  .public-drama-inline-loading::before{content:"";width:12px;height:12px;border:2px solid #ddd8ff;border-top-color:var(--accent);border-radius:50%;animation:page-loading-spin .8s linear infinite}
   body.public-mode .public-page-nav .public-page-next{background:var(--accent);color:#fff;border-color:var(--accent)}
   body.public-mode .public-page-nav .public-page-next:hover{background:var(--accent-press);color:#fff;border-color:var(--accent-press);text-decoration:none}
   .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -529,7 +553,7 @@
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
   @media (max-width:900px){ .report-cloud-admin{grid-template-columns:1fr;align-items:stretch}.report-cloud-status{align-self:auto} }
-  @media (max-width:680px){ .wrap{padding:14px}.topbar{padding:12px 14px}.tagline{display:none}.history-popover{right:-2px;width:calc(100vw - 24px)}.history-item{align-items:flex-start;flex-direction:column}.history-links{justify-content:flex-start}.dashboard-skeleton{padding:76px 14px 20px}.dashboard-skeleton-head{align-items:flex-start;flex-direction:column}.dashboard-skeleton-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-skeleton-panels{grid-template-columns:1fr}.dashboard-skeleton-panels i{height:220px}body.public-mode .public-page-nav{top:16px;right:14px;max-width:calc(100vw - 28px)}body.public-mode .public-page-nav .public-drama-search{width:min(240px,calc(100vw - 28px))}body.public-mode #dashboardCard .dashboard-head{padding-top:96px}body.public-mode.catalog-view .public-page-nav,body.public-mode.report-view .public-page-nav{top:70px}.public-page-nav .mini-btn{padding:8px 10px;font-size:11.5px}.page-loading-status{top:auto;bottom:18px}.page-loading-copy small{display:none!important}body.public-mode.catalog-view .page-loading-status,body.public-mode.report-view .page-loading-status{top:auto} }
+  @media (max-width:680px){ .wrap{padding:14px}.topbar{padding:12px 14px}.tagline{display:none}.history-popover{right:-2px;width:calc(100vw - 24px)}.history-item{align-items:flex-start;flex-direction:column}.history-links{justify-content:flex-start}.dashboard-skeleton{padding:76px 14px 20px}.dashboard-skeleton-head{align-items:flex-start;flex-direction:column}.dashboard-skeleton-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-skeleton-panels{grid-template-columns:1fr}.dashboard-skeleton-panels i{height:220px}body.public-mode .public-page-nav{top:16px;right:14px;max-width:calc(100vw - 28px)}body.public-mode .public-page-nav .public-drama-search{width:min(240px,calc(100vw - 28px))}body.public-mode #dashboardCard .dashboard-head{padding-top:96px}body.public-mode.catalog-view .public-page-nav,body.public-mode.report-view .public-page-nav{top:70px}.public-page-nav .mini-btn{padding:8px 10px;font-size:11.5px}.page-loading-status{top:auto;bottom:18px}.page-loading-copy small{display:none!important}body.public-mode.catalog-view .page-loading-status,body.public-mode.report-view .page-loading-status{top:auto}.public-drama-search-modal{padding:58px 10px 14px}.public-drama-search-dialog{max-height:calc(100vh - 72px);border-radius:14px}.public-drama-search-head{padding:16px}.public-drama-search-body{padding:14px 16px 18px}.public-drama-result-grid{grid-template-columns:1fr} }
   @media (prefers-reduced-motion:reduce){ *{animation-duration:.001ms!important;transition-duration:.001ms!important} }
 </style>
 </head>
@@ -582,13 +606,36 @@
 
 <nav class="public-page-nav" id="publicPageNav" aria-label="公开页面导航">
   <form class="public-drama-search" id="publicDramaSearchForm" role="search">
-    <input id="publicDramaSearchInput" type="search" placeholder="输入中文或英文短剧名" autocomplete="off" aria-label="在首页搜索短剧">
+    <input id="publicDramaSearchInput" type="search" placeholder="搜索当前报表和 TikTok 全网短剧" autocomplete="off" aria-label="在首页搜索短剧">
     <button class="mini-btn" id="publicDramaSearchBtn" type="submit">搜索</button>
   </form>
   <button class="mini-btn public-page-home" id="publicPageHomeBtn" type="button" hidden>返回首页</button>
   <button class="mini-btn public-page-prev" id="publicPagePrevBtn" type="button" hidden></button>
   <button class="mini-btn public-page-next" id="publicPageNextBtn" type="button"></button>
 </nav>
+
+<div class="public-drama-search-modal" id="publicDramaSearchModal" hidden>
+  <div class="public-drama-search-dialog" role="dialog" aria-modal="true" aria-labelledby="publicDramaSearchTitle">
+    <div class="public-drama-search-head">
+      <div>
+        <h2 id="publicDramaSearchTitle">短剧搜索</h2>
+        <p id="publicDramaSearchSubtitle">同时搜索当前报表和 TikTok 全网公开短剧</p>
+      </div>
+      <button class="public-drama-search-close" id="publicDramaSearchClose" type="button" aria-label="关闭搜索结果">×</button>
+    </div>
+    <div class="public-drama-search-body">
+      <p class="public-drama-search-note">当前报表结果会立即显示；TikTok 全网结果由外部接口补充，通常需要几秒钟。</p>
+      <section class="public-drama-result-section">
+        <div class="public-drama-result-title"><h3>当前报表</h3><span id="publicDramaLocalStatus"></span></div>
+        <div class="public-drama-result-grid" id="publicDramaLocalResults"></div>
+      </section>
+      <section class="public-drama-result-section">
+        <div class="public-drama-result-title"><h3>TikTok 全网短剧</h3><span id="publicDramaOnlineStatus"></span></div>
+        <div class="public-drama-result-grid" id="publicDramaOnlineResults"></div>
+      </section>
+    </div>
+  </div>
+</div>
 
 <div class="wrap">
 
@@ -1033,6 +1080,7 @@ let growthFilterState={enabled:false,days:Number(store.get("thr_growth_days")||7
 let monitorSearchText=store.get("thr_monitor_search")||"";
 let summarySearchText=store.get("thr_summary_search")||"";
 let detailSearchText=store.get("thr_detail_search")||"";
+let publicDramaSearchController=null;
 const DETAIL_ALL_ACCOUNTS_VALUE="__all__";
 let detailAccountIndex=-1;
 let detailAccountKey="";
@@ -1463,13 +1511,103 @@ function updatePublicPageNav(){
     if(index>=0&&index<PUBLIC_PAGE_ORDER.length-1)next.textContent="下一页："+PUBLIC_PAGE_LABELS[PUBLIC_PAGE_ORDER[index+1]];
   }
 }
-function openPublicDramaSearch(){
-  if(!isPublicMode())return;
-  const source=$("publicDramaSearchInput");
-  const query=String(source&&source.value||"").trim();
-  if(!query){if(source)source.focus();return;}
-  detailSearchText=query;
+function publicDramaSafeUrl(value){
+  const url=String(value||"").trim();
+  return /^(?:https?:\/\/|\/[^/])/i.test(url)?url:"";
+}
+function publicLocalDramaMatches(query){
+  const matches=[];
+  const seen=new Set();
+  for(const row of dramaRows||[]){
+    if(!searchMatches(query,detailSearchParts(row)))continue;
+    const account=accountOf(row);
+    const dramaId=cleanDramaId(valueOf(row,["Drama ID / 短剧ID","短剧ID","Drama ID","id"],""));
+    const title=dramaTitleOf(row)||chineseTitleOf(row);
+    const key=dramaId?("id:"+dramaId):("title:"+String(account||"").toLowerCase()+"|"+String(title||"").toLowerCase());
+    if(!title||seen.has(key))continue;
+    seen.add(key);
+    matches.push(row);
+    if(matches.length>=12)break;
+  }
+  return matches;
+}
+function renderPublicDramaLocalResults(query){
+  const target=$("publicDramaLocalResults"), status=$("publicDramaLocalStatus");
+  if(!target||!status)return;
+  const matches=publicLocalDramaMatches(query);
+  status.textContent=matches.length?("找到 "+matches.length+" 部"):("未找到");
+  if(!matches.length){
+    target.innerHTML='<div class="public-drama-result-empty">当前监控报表里没有匹配结果，正在继续搜索 TikTok 全网。</div>';
+    return;
+  }
+  target.innerHTML=matches.map(row=>{
+    const chinese=chineseTitleOf(row), english=dramaTitleOf(row), title=chinese||english||"未命名短剧";
+    const account=accountOf(row), episodes=dramaEpisodesOf(row), views=dramaViewsOf(row);
+    const detailUrl=publicDramaSafeUrl(dramaResolveLinkOf(row));
+    const profileUrl=publicDramaSafeUrl(linkOf(row));
+    const secondary=chinese&&english&&chinese!==english?('<p class="public-drama-result-desc">'+esc(english)+'</p>'):"";
+    return '<article class="public-drama-result-card">'+
+      '<h4 title="'+esc(title)+'">'+esc(title)+'</h4>'+
+      '<div class="public-drama-result-meta">'+
+        (account?('<span>@'+esc(account)+'</span>'):"")+
+        (episodes?('<span>'+fmt(episodes)+' 集</span>'):"")+
+        (views?('<span>'+esc(fmtPlay(views))+' 播放</span>'):"")+
+      '</div>'+secondary+
+      '<div class="public-drama-result-actions">'+
+        (detailUrl?('<a class="primary" href="'+esc(detailUrl)+'" target="_blank" rel="noopener">查看剧集</a>'):"")+
+        (profileUrl?('<a href="'+esc(profileUrl)+'" target="_blank" rel="noopener">账号主页</a>'):"")+
+        '<button type="button" data-public-report-query="'+esc(title)+'">在报表查看</button>'+
+      '</div></article>';
+  }).join("");
+}
+function renderPublicDramaOnlineResults(payload){
+  const target=$("publicDramaOnlineResults"), status=$("publicDramaOnlineStatus");
+  if(!target||!status)return;
+  const results=Array.isArray(payload&&payload.results)?payload.results:[];
+  const notes=[];
+  notes.push(results.length?("找到 "+results.length+" 部"):"未找到");
+  if(payload&&payload.cached)notes.push("已使用缓存");
+  if(payload&&payload.partial)notes.push("部分来源暂不可用");
+  status.classList.remove("public-drama-inline-loading");
+  status.textContent=notes.join(" · ");
+  target.setAttribute("aria-busy","false");
+  if(!results.length){
+    target.innerHTML='<div class="public-drama-result-empty">TikTok 全网暂未找到匹配短剧，可尝试英文剧名或更完整的标题。</div>';
+    return;
+  }
+  target.innerHTML=results.map(item=>{
+    const title=String(item&&item.title||"").trim()||"未命名短剧";
+    const account=String(item&&item.account||"").trim();
+    const nickname=String(item&&item.nickname||"").trim();
+    const episodes=toInt(item&&item.episode_count), views=toInt(item&&item.views);
+    const listUrl=publicDramaSafeUrl(item&&item.list_url), videoUrl=publicDramaSafeUrl(item&&item.video_url), profileUrl=publicDramaSafeUrl(item&&item.profile_url);
+    const primaryUrl=listUrl||videoUrl;
+    const desc=String(item&&item.description||"").trim();
+    return '<article class="public-drama-result-card">'+
+      '<h4 title="'+esc(title)+'">'+esc(title)+'</h4>'+
+      '<div class="public-drama-result-meta">'+
+        (nickname&&nickname!==account?('<span>'+esc(nickname)+'</span>'):"")+
+        (account?('<span>@'+esc(account)+'</span>'):"")+
+        (episodes?('<span>'+fmt(episodes)+' 集</span>'):"")+
+        (views?('<span>'+esc(fmtPlay(views))+' 播放</span>'):"")+
+      '</div>'+
+      (desc?('<p class="public-drama-result-desc">'+esc(desc)+'</p>'):"")+
+      '<div class="public-drama-result-actions">'+
+        (primaryUrl?('<a class="primary" href="'+esc(primaryUrl)+'" target="_blank" rel="noopener">'+(listUrl?'查看剧集':'查看作品')+'</a>'):"")+
+        (profileUrl?('<a href="'+esc(profileUrl)+'" target="_blank" rel="noopener">账号主页</a>'):"")+
+      '</div></article>';
+  }).join("");
+}
+function closePublicDramaSearch(){
+  if(publicDramaSearchController)publicDramaSearchController.abort();
+  publicDramaSearchController=null;
+  const modal=$("publicDramaSearchModal");
+  if(modal)modal.hidden=true;
+}
+function openLocalDramaInReport(query){
+  detailSearchText=String(query||"").trim();
   store.set("thr_detail_search",detailSearchText);
+  closePublicDramaSearch();
   setPublicPageView("report");
   resultView="detail";
   resetDetailPage();
@@ -1478,6 +1616,42 @@ function openPublicDramaSearch(){
     const input=$("detailSearchInput");
     if(input){input.focus();input.select();}
   });
+}
+async function openPublicDramaSearch(){
+  if(!isPublicMode())return;
+  const source=$("publicDramaSearchInput");
+  const query=String(source&&source.value||"").trim();
+  if(query.length<2){toast("请输入至少 2 个字的短剧名");if(source)source.focus();return;}
+  if(publicDramaSearchController)publicDramaSearchController.abort();
+  const controller=new AbortController();
+  publicDramaSearchController=controller;
+  const modal=$("publicDramaSearchModal"), subtitle=$("publicDramaSearchSubtitle"), onlineStatus=$("publicDramaOnlineStatus"), onlineResults=$("publicDramaOnlineResults");
+  if(!modal||!onlineStatus||!onlineResults)return;
+  modal.dataset.query=query;
+  modal.hidden=false;
+  if(subtitle)subtitle.textContent='“'+query+'”的搜索结果';
+  renderPublicDramaLocalResults(query);
+  onlineStatus.classList.add("public-drama-inline-loading");
+  onlineStatus.textContent="正在搜索";
+  onlineResults.setAttribute("aria-busy","true");
+  onlineResults.innerHTML='<div class="public-drama-result-empty">正在连接 TikTok 全网短剧数据，请稍候…</div>';
+  try{
+    const response=await fetch("/public/drama-search?q="+encodeURIComponent(query)+"&limit=20",{cache:"no-store",signal:controller.signal});
+    let payload={};
+    try{payload=await response.json();}catch(_){payload={};}
+    if(!response.ok||payload.ok===false)throw new Error(payload.error||"TikTok 全网搜索暂不可用");
+    if(publicDramaSearchController!==controller||modal.dataset.query!==query)return;
+    renderPublicDramaOnlineResults(payload);
+  }catch(error){
+    if(error&&error.name==="AbortError")return;
+    if(publicDramaSearchController!==controller)return;
+    onlineStatus.classList.remove("public-drama-inline-loading");
+    onlineStatus.textContent="搜索失败";
+    onlineResults.setAttribute("aria-busy","false");
+    onlineResults.innerHTML='<div class="public-drama-result-empty">'+esc(error&&error.message||"TikTok 全网搜索暂不可用")+'，当前报表结果仍可正常查看。</div>';
+  }finally{
+    if(publicDramaSearchController===controller)publicDramaSearchController=null;
+  }
 }
 function setPublicPageView(view){
   if(!isPublicMode())return;
@@ -4018,9 +4192,18 @@ function init(){
     document.addEventListener("click",closeHistoryMenu);
     document.addEventListener("keydown",e=>{if(e.key==="Escape")closeHistoryMenu();});
   }
-  const catalogPageBtn=$("catalogPageBtn"), publicDramaSearchForm=$("publicDramaSearchForm"), publicPageHome=$("publicPageHomeBtn"), publicPagePrev=$("publicPagePrevBtn"), publicPageNext=$("publicPageNextBtn");
+  const catalogPageBtn=$("catalogPageBtn"), publicDramaSearchForm=$("publicDramaSearchForm"), publicDramaSearchModal=$("publicDramaSearchModal"), publicDramaSearchClose=$("publicDramaSearchClose"), publicDramaLocalResults=$("publicDramaLocalResults"), publicPageHome=$("publicPageHomeBtn"), publicPagePrev=$("publicPagePrevBtn"), publicPageNext=$("publicPageNextBtn");
   if(catalogPageBtn)catalogPageBtn.addEventListener("click",()=>setPublicPageView("catalog"));
   if(publicDramaSearchForm)publicDramaSearchForm.addEventListener("submit",event=>{event.preventDefault();openPublicDramaSearch();});
+  if(publicDramaSearchClose)publicDramaSearchClose.addEventListener("click",closePublicDramaSearch);
+  if(publicDramaSearchModal)publicDramaSearchModal.addEventListener("click",event=>{if(event.target===publicDramaSearchModal)closePublicDramaSearch();});
+  if(publicDramaLocalResults)publicDramaLocalResults.addEventListener("click",event=>{
+    const button=event.target.closest("[data-public-report-query]");
+    if(button)openLocalDramaInReport(button.dataset.publicReportQuery||"");
+  });
+  document.addEventListener("keydown",event=>{
+    if(event.key==="Escape"&&publicDramaSearchModal&&!publicDramaSearchModal.hidden)closePublicDramaSearch();
+  });
   if(publicPageHome)publicPageHome.addEventListener("click",()=>setPublicPageView("dashboard"));
   if(publicPagePrev)publicPagePrev.addEventListener("click",()=>{
     const index=PUBLIC_PAGE_ORDER.indexOf(publicPageView);
