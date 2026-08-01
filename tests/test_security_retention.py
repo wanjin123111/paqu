@@ -903,6 +903,84 @@ class DiscoveryWorksTests(unittest.TestCase):
         self.assertNotIn("works", first)
         self.assertNotIn("errors", first)
 
+    def test_public_drama_result_rejects_a_plain_matching_video(self):
+        work = {
+            "video_id": "101",
+            "drama_title": "",
+            "description": "Outside Drama Episode 1",
+            "account": "clip_account",
+            "views": 100,
+        }
+
+        self.assertIsNone(proxy._public_drama_result_from_work("Outside Drama", work))
+
+    def test_public_drama_search_resolves_a_matching_video_to_a_real_series(self):
+        work = {
+            "video_id": "101",
+            "drama_title": "",
+            "description": "Outside Drama",
+            "account": "clip_account",
+            "views": 100,
+        }
+        discovered = {"ok": True, "works": [work], "errors": []}
+        reference = {
+            "account": "clip_account",
+            "drama_id": "777",
+            "drama_title": "Outside Drama",
+            "episode_count": 30,
+        }
+        with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+            proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
+        with mock.patch.object(proxy, "SERVER_API_KEY", "test-key"), \
+                mock.patch.object(proxy, "_public_drama_report_results", return_value=[]), \
+                mock.patch.object(proxy, "_discover_works", return_value=discovered), \
+                mock.patch.object(proxy, "_public_drama_general_works", return_value=[]), \
+                mock.patch.object(
+                    proxy,
+                    "_resolve_drama_reference_for_video",
+                    return_value=reference,
+                ) as resolve:
+            payload = proxy._public_drama_search_payload("Outside Drama", 20)
+
+        resolve.assert_called_once_with("clip_account", "101", "Outside Drama")
+        self.assertEqual(payload["count"], 1)
+        item = payload["results"][0]
+        self.assertEqual(item["kind"], "drama")
+        self.assertEqual(item["drama_id"], "777")
+        self.assertEqual(item["episode_count"], 30)
+        self.assertIn("/drama-link?", item["list_url"])
+
+    def test_public_drama_resolver_accepts_a_matching_series_for_a_promo_clip(self):
+        video = {
+            "aweme_id": "101",
+            "desc": "Outside Drama - link in bio to watch every episode",
+            "author": {"unique_id": "clip_account"},
+        }
+        library = [{
+            "drama_id": "ID 777",
+            "name": "Outside Drama",
+            "english_title": "Outside Drama",
+            "episodes": 30,
+            "views": 1000,
+        }]
+        with mock.patch.object(
+                    proxy,
+                    "_fetch_discovery_video_by_id",
+                    return_value=(video, "test"),
+                ), \
+                mock.patch.object(proxy, "_resolve_secuid", return_value="secuid"), \
+                mock.patch.object(proxy, "_get_tiktok_drama_library", return_value=library), \
+                mock.patch.object(proxy, "_get_drama_episode_items", return_value=[]):
+            reference = proxy._resolve_drama_reference_for_video(
+                "clip_account",
+                "101",
+                "Outside Drama",
+            )
+
+        self.assertEqual(reference["drama_id"], "777")
+        self.assertEqual(reference["drama_title"], "Outside Drama")
+        self.assertEqual(reference["source"], "account-drama-query-title")
+
     def test_public_drama_search_retries_a_title_without_punctuation(self):
         empty = {"ok": True, "works": [], "errors": []}
         found = {
@@ -1155,7 +1233,10 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn("function renderPublicDramaOnlineResults(payload)", page)
             self.assertIn("function openLocalDramaInReport(query)", page)
             self.assertIn("publicDramaSearchController", page)
-            self.assertIn("搜索当前报表和 TikTok 全网短剧", page)
+            self.assertIn("搜索当前报表和 TikTok 短剧目录", page)
+            self.assertIn('String(item.kind||"")==="drama"', page)
+            self.assertIn("const primaryUrl=listUrl;", page)
+            self.assertNotIn("(listUrl?'查看剧集':'查看作品')", page)
             self.assertIn('publicDramaSearchForm.addEventListener("submit"', page)
             self.assertIn('setPublicPageView("report");', page)
             self.assertIn('resultView="detail";', page)

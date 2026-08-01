@@ -606,7 +606,7 @@
 
 <nav class="public-page-nav" id="publicPageNav" aria-label="公开页面导航">
   <form class="public-drama-search" id="publicDramaSearchForm" role="search">
-    <input id="publicDramaSearchInput" type="search" placeholder="搜索当前报表和 TikTok 全网短剧" autocomplete="off" aria-label="在首页搜索短剧">
+    <input id="publicDramaSearchInput" type="search" placeholder="搜索当前报表和 TikTok 短剧目录" autocomplete="off" aria-label="在首页搜索短剧">
     <button class="mini-btn" id="publicDramaSearchBtn" type="submit">搜索</button>
   </form>
   <button class="mini-btn public-page-home" id="publicPageHomeBtn" type="button" hidden>返回首页</button>
@@ -630,7 +630,7 @@
         <div class="public-drama-result-grid" id="publicDramaLocalResults"></div>
       </section>
       <section class="public-drama-result-section">
-        <div class="public-drama-result-title"><h3>TikTok 全网短剧</h3><span id="publicDramaOnlineStatus"></span></div>
+        <div class="public-drama-result-title"><h3>TikTok 短剧目录</h3><span id="publicDramaOnlineStatus"></span></div>
         <div class="public-drama-result-grid" id="publicDramaOnlineResults"></div>
       </section>
     </div>
@@ -1563,7 +1563,9 @@ function renderPublicDramaLocalResults(query){
 function renderPublicDramaOnlineResults(payload){
   const target=$("publicDramaOnlineResults"), status=$("publicDramaOnlineStatus");
   if(!target||!status)return;
-  const results=Array.isArray(payload&&payload.results)?payload.results:[];
+  const results=(Array.isArray(payload&&payload.results)?payload.results:[]).filter(item=>
+    item&&String(item.kind||"")==="drama"&&String(item.drama_id||"").trim()&&publicDramaSafeUrl(item.list_url)
+  );
   const notes=[];
   notes.push(results.length?("找到 "+results.length+" 部"):"未找到");
   if(payload&&payload.cached)notes.push("已使用缓存");
@@ -1572,7 +1574,7 @@ function renderPublicDramaOnlineResults(payload){
   status.textContent=notes.join(" · ");
   target.setAttribute("aria-busy","false");
   if(!results.length){
-    target.innerHTML='<div class="public-drama-result-empty">TikTok 全网暂未找到匹配短剧，可尝试英文剧名或更完整的标题。</div>';
+    target.innerHTML='<div class="public-drama-result-empty">未找到可打开完整剧集的短剧；普通视频和搬运片段已自动过滤。可尝试输入完整英文剧名。</div>';
     return;
   }
   target.innerHTML=results.map(item=>{
@@ -1580,8 +1582,8 @@ function renderPublicDramaOnlineResults(payload){
     const account=String(item&&item.account||"").trim();
     const nickname=String(item&&item.nickname||"").trim();
     const episodes=toInt(item&&item.episode_count), views=toInt(item&&item.views);
-    const listUrl=publicDramaSafeUrl(item&&item.list_url), videoUrl=publicDramaSafeUrl(item&&item.video_url), profileUrl=publicDramaSafeUrl(item&&item.profile_url);
-    const primaryUrl=listUrl||videoUrl;
+    const listUrl=publicDramaSafeUrl(item&&item.list_url), profileUrl=publicDramaSafeUrl(item&&item.profile_url);
+    const primaryUrl=listUrl;
     const desc=String(item&&item.description||"").trim();
     return '<article class="public-drama-result-card">'+
       '<h4 title="'+esc(title)+'">'+esc(title)+'</h4>'+
@@ -1593,7 +1595,7 @@ function renderPublicDramaOnlineResults(payload){
       '</div>'+
       (desc?('<p class="public-drama-result-desc">'+esc(desc)+'</p>'):"")+
       '<div class="public-drama-result-actions">'+
-        (primaryUrl?('<a class="primary" href="'+esc(primaryUrl)+'" target="_blank" rel="noopener">'+(listUrl?'查看剧集':'查看作品')+'</a>'):"")+
+        (primaryUrl?('<a class="primary" href="'+esc(primaryUrl)+'" target="_blank" rel="noopener">查看剧集</a>'):"")+
         (profileUrl?('<a href="'+esc(profileUrl)+'" target="_blank" rel="noopener">账号主页</a>'):"")+
       '</div></article>';
   }).join("");
@@ -1634,12 +1636,12 @@ async function openPublicDramaSearch(){
   onlineStatus.classList.add("public-drama-inline-loading");
   onlineStatus.textContent="正在搜索";
   onlineResults.setAttribute("aria-busy","true");
-  onlineResults.innerHTML='<div class="public-drama-result-empty">正在连接 TikTok 全网短剧数据，请稍候…</div>';
+  onlineResults.innerHTML='<div class="public-drama-result-empty">正在连接 TikTok 短剧目录，请稍候…</div>';
   try{
     const response=await fetch("/public/drama-search?q="+encodeURIComponent(query)+"&limit=20",{cache:"no-store",signal:controller.signal});
     let payload={};
     try{payload=await response.json();}catch(_){payload={};}
-    if(!response.ok||payload.ok===false)throw new Error(payload.error||"TikTok 全网搜索暂不可用");
+    if(!response.ok||payload.ok===false)throw new Error(payload.error||"TikTok 短剧目录搜索暂不可用");
     if(publicDramaSearchController!==controller||modal.dataset.query!==query)return;
     renderPublicDramaOnlineResults(payload);
   }catch(error){
@@ -1648,7 +1650,7 @@ async function openPublicDramaSearch(){
     onlineStatus.classList.remove("public-drama-inline-loading");
     onlineStatus.textContent="搜索失败";
     onlineResults.setAttribute("aria-busy","false");
-    onlineResults.innerHTML='<div class="public-drama-result-empty">'+esc(error&&error.message||"TikTok 全网搜索暂不可用")+'，当前报表结果仍可正常查看。</div>';
+    onlineResults.innerHTML='<div class="public-drama-result-empty">'+esc(error&&error.message||"TikTok 短剧目录搜索暂不可用")+'，当前报表结果仍可正常查看。</div>';
   }finally{
     if(publicDramaSearchController===controller)publicDramaSearchController=null;
   }
