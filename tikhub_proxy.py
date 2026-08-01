@@ -1850,12 +1850,20 @@ def _discovery_error(layer, source, message, status=None, hint=""):
     return item
 
 
-def _search_params(keyword, count, cursor):
-    if DISCOVERY_SEARCH_MODE == "web":
+def _discovery_search_modes():
+    preferred = DISCOVERY_SEARCH_MODE if DISCOVERY_SEARCH_MODE in DISCOVERY_SEARCH_ENDPOINTS else "app_v3"
+    return [preferred] + [mode for mode in ("app_v3", "web") if mode != preferred]
+
+
+def _search_params(keyword, count, cursor, mode=None):
+    selected_mode = mode or DISCOVERY_SEARCH_MODE
+    if selected_mode == "web":
         return {
             "keyword": keyword,
             "count": str(count),
             "offset": str(cursor or "0"),
+            # TikHub documents an empty search_id for the first Web search page.
+            "search_id": "",
         }
     return {
         "keyword": keyword,
@@ -1880,18 +1888,34 @@ def _discovery_remaining_seconds(started):
 def _fetch_discovery_search_page(keyword, count, cursor, started=None):
     if _discovery_runtime_exceeded(started):
         raise TikHubError("discovery runtime limit reached")
-    endpoint = DISCOVERY_SEARCH_ENDPOINTS.get(DISCOVERY_SEARCH_MODE) or DISCOVERY_SEARCH_ENDPOINTS["app_v3"]
-    data = _send_tikhub_get(
-        endpoint,
-        _search_params(keyword, count, cursor),
-        "TikHub documented video search endpoint",
-        timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS,
-        retries=1,
-    )
-    batch = _video_batch_from_search_payload(data, count)
-    if batch:
-        return data, batch, endpoint
-    raise TikHubError("TikHub documented video search endpoint returned no parseable video items")
+    valid_empty = None
+    endpoint_errors = []
+    for mode in _discovery_search_modes():
+        endpoint = DISCOVERY_SEARCH_ENDPOINTS[mode]
+        try:
+            data = _send_tikhub_get(
+                endpoint,
+                _search_params(keyword, count, cursor, mode=mode),
+                "TikHub %s video search endpoint" % mode,
+                timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS,
+                retries=1,
+            )
+        except TikHubError as exc:
+            endpoint_errors.append((mode, exc))
+            continue
+        batch = _video_batch_from_search_payload(data, count)
+        if batch:
+            return data, batch, endpoint
+        if valid_empty is None:
+            valid_empty = (data, [], endpoint)
+    if valid_empty is not None:
+        return valid_empty
+    if endpoint_errors:
+        details = "; ".join("%s: %s" % (mode, exc) for mode, exc in endpoint_errors)
+        status = next((getattr(exc, "status", None) for _mode, exc in reversed(endpoint_errors)
+                       if getattr(exc, "status", None)), None)
+        raise TikHubError("TikHub video search endpoints failed: " + details, status)
+    raise TikHubError("TikHub video search endpoints returned no usable response")
 
 
 def _send_tiktok_public_page(url, referer=None):
@@ -2735,6 +2759,24 @@ def _public_drama_search_cache_key(query, limit):
     return "%s:%s" % (str(query).casefold(), int(limit))
 
 
+def _public_drama_search_variants(query):
+    raw = _public_drama_search_query(query)
+    variants, seen = [], set()
+
+    def add(value):
+        value = re.sub(r"\s+", " ", str(value or "")).strip(" \t\r\n-:：|｜/／")
+        key = value.casefold()
+        if len(value) >= 2 and key not in seen:
+            seen.add(key)
+            variants.append(value)
+
+    add(raw)
+    add(re.sub(r"\s*(?:[:：|｜/／]|[-–—]{1,})\s*", " ", raw))
+    for part in re.split(r"\s*(?:[:：|｜/／]|[-–—]{1,})\s*", raw):
+        add(part)
+    return variants[:4]
+
+
 def _public_drama_search_payload(query, limit=20):
     query = _public_drama_search_query(query)
     limit = max(1, min(_to_int(limit) or 20, 20))
@@ -2749,7 +2791,19 @@ def _public_drama_search_payload(query, limit=20):
         if cached:
             PUBLIC_DRAMA_SEARCH_CACHE.pop(cache_key, None)
 
-    discovered = _discover_works(query, limit, limit, persist=False)
+    discovered = {"works": [], "errors": []}
+    attempted_queries = []
+    matched_query = ""
+    collected_errors = []
+    for search_query in _public_drama_search_variants(query):
+        attempted_queries.append(search_query)
+        attempt = _discover_works(search_query, limit, limit, persist=False)
+        collected_errors.extend(attempt.get("errors") or [])
+        if attempt.get("works"):
+            discovered = attempt
+            matched_query = search_query
+            break
+    discovered["errors"] = collected_errors
     grouped = {}
     for work in discovered.get("works") or []:
         if not isinstance(work, dict):
@@ -2800,12 +2854,19 @@ def _public_drama_search_payload(query, limit=20):
     payload = {
         "ok": True,
         "query": query,
+        "matched_query": matched_query,
+        "attempted_queries": attempted_queries,
         "count": len(results),
         "generated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
         "results": results,
-        "partial": bool(discovered.get("errors")),
+        "partial": bool(collected_errors),
         "cached": False,
     }
+    cache_seconds = PUBLIC_DRAMA_SEARCH_CACHE_SECONDS
+    if not results:
+        cache_seconds = min(cache_seconds, 30)
+    if payload["partial"]:
+        cache_seconds = min(cache_seconds, 15)
     with PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
         if len(PUBLIC_DRAMA_SEARCH_CACHE) >= PUBLIC_DRAMA_SEARCH_CACHE_MAX_ITEMS:
             oldest = min(
@@ -2815,7 +2876,7 @@ def _public_drama_search_payload(query, limit=20):
             PUBLIC_DRAMA_SEARCH_CACHE.pop(oldest, None)
         PUBLIC_DRAMA_SEARCH_CACHE[cache_key] = {
             "created_at": now,
-            "expires_at": now + PUBLIC_DRAMA_SEARCH_CACHE_SECONDS,
+            "expires_at": now + cache_seconds,
             "payload": payload,
         }
     return payload

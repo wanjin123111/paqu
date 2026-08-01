@@ -825,6 +825,33 @@ class DiscoveryWorksTests(unittest.TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["works"][0]["drama_id"], "7661844447575266321")
 
+    def test_tikhub_video_search_falls_back_from_app_to_web(self):
+        empty = {"data": {"item_list": []}}
+        found = {"data": {"item_list": [self.sample_video()]}}
+        with mock.patch.object(proxy, "SERVER_API_KEY", "test-key"), \
+                mock.patch.object(proxy, "DISCOVERY_SEARCH_MODE", "app_v3"), \
+                mock.patch.object(proxy, "_send_tikhub_get", side_effect=[empty, found]) as send:
+            data, batch, endpoint = proxy._fetch_discovery_search_page("Demo full series", 20, "0")
+
+        self.assertIs(data, found)
+        self.assertEqual(len(batch), 1)
+        self.assertEqual(endpoint, proxy.DISCOVERY_SEARCH_ENDPOINTS["web"])
+        self.assertEqual(send.call_args_list[0].args[0], proxy.DISCOVERY_SEARCH_ENDPOINTS["app_v3"])
+        self.assertEqual(send.call_args_list[1].args[0], proxy.DISCOVERY_SEARCH_ENDPOINTS["web"])
+        self.assertEqual(send.call_args_list[1].args[1]["keyword"], "Demo full series")
+
+    def test_tikhub_video_search_allows_a_real_empty_result(self):
+        empty = {"data": {"item_list": []}}
+        with mock.patch.object(proxy, "SERVER_API_KEY", "test-key"), \
+                mock.patch.object(proxy, "DISCOVERY_SEARCH_MODE", "app_v3"), \
+                mock.patch.object(proxy, "_send_tikhub_get", side_effect=[empty, empty]) as send:
+            data, batch, endpoint = proxy._fetch_discovery_search_page("Missing title", 20, "0")
+
+        self.assertIs(data, empty)
+        self.assertEqual(batch, [])
+        self.assertEqual(endpoint, proxy.DISCOVERY_SEARCH_ENDPOINTS["app_v3"])
+        self.assertEqual(send.call_count, 2)
+
     def test_public_drama_search_sanitizes_groups_and_caches(self):
         works = {
             "ok": True,
@@ -874,6 +901,33 @@ class DiscoveryWorksTests(unittest.TestCase):
         self.assertNotIn("already_monitored", item)
         self.assertNotIn("works", first)
         self.assertNotIn("errors", first)
+
+    def test_public_drama_search_retries_a_title_without_punctuation(self):
+        empty = {"ok": True, "works": [], "errors": []}
+        found = {
+            "ok": True,
+            "works": [{
+                "drama_id": "777",
+                "video_id": "101",
+                "drama_title": "Heartbreak High: Revenge on My First",
+                "account": "outside_account",
+                "episode_count": 20,
+                "views": 100,
+            }],
+            "errors": [],
+        }
+        with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+            proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
+        with mock.patch.object(proxy, "_discover_works", side_effect=[empty, found]) as discover:
+            payload = proxy._public_drama_search_payload("Heartbreak High: Revenge on My First", 20)
+
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["matched_query"], "Heartbreak High Revenge on My First")
+        self.assertEqual(payload["attempted_queries"], [
+            "Heartbreak High: Revenge on My First",
+            "Heartbreak High Revenge on My First",
+        ])
+        self.assertEqual(discover.call_args_list[1].args[0], "Heartbreak High Revenge on My First")
 
     def test_public_drama_search_only_accepts_drama_names(self):
         for query in ("@demo.author", "https://www.tiktok.com/@demo.author"):
