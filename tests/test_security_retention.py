@@ -884,7 +884,8 @@ class DiscoveryWorksTests(unittest.TestCase):
         }
         with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
             proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
-        with mock.patch.object(proxy, "_discover_works", return_value=works) as discover:
+        with mock.patch.object(proxy, "_public_drama_report_results", return_value=[]), \
+                mock.patch.object(proxy, "_discover_works", return_value=works) as discover:
             first = proxy._public_drama_search_payload("Outside Drama", 20)
             second = proxy._public_drama_search_payload("Outside Drama", 20)
 
@@ -918,7 +919,8 @@ class DiscoveryWorksTests(unittest.TestCase):
         }
         with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
             proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
-        with mock.patch.object(proxy, "_discover_works", side_effect=[empty, found]) as discover:
+        with mock.patch.object(proxy, "_public_drama_report_results", return_value=[]), \
+                mock.patch.object(proxy, "_discover_works", side_effect=[empty, found]) as discover:
             payload = proxy._public_drama_search_payload("Heartbreak High: Revenge on My First", 20)
 
         self.assertEqual(payload["count"], 1)
@@ -928,6 +930,94 @@ class DiscoveryWorksTests(unittest.TestCase):
             "Heartbreak High Revenge on My First",
         ])
         self.assertEqual(discover.call_args_list[1].args[0], "Heartbreak High Revenge on My First")
+
+    def test_tikhub_general_search_extracts_video_results(self):
+        found = {"data": {"item_list": [self.sample_video()]}}
+        with mock.patch.object(proxy, "SERVER_API_KEY", "test-key"), \
+                mock.patch.object(proxy, "_send_tikhub_get", return_value=found) as send:
+            data, batch, endpoint = proxy._fetch_discovery_general_search_page(
+                "Outside Drama", 20, "0"
+            )
+
+        self.assertIs(data, found)
+        self.assertEqual(len(batch), 1)
+        self.assertEqual(endpoint, proxy.DISCOVERY_GENERAL_SEARCH_ENDPOINT)
+        self.assertEqual(send.call_args.args[0], proxy.DISCOVERY_GENERAL_SEARCH_ENDPOINT)
+        self.assertEqual(send.call_args.args[1], {
+            "keyword": "Outside Drama",
+            "offset": "0",
+            "search_id": "",
+        })
+
+    def test_public_drama_search_prefers_exact_latest_report_match(self):
+        report_result = {
+            "kind": "drama",
+            "drama_id": "777",
+            "title": "Bus Ride to Safety",
+            "chinese_title": "",
+            "description": "",
+            "account": "melon_minidrama",
+            "nickname": "Melon Minidrama",
+            "avatar": "",
+            "episode_count": 50,
+            "views": 74808425,
+            "likes": 0,
+            "publish_time": "",
+            "video_id": "",
+            "video_url": "",
+            "profile_url": "https://www.tiktok.com/@melon_minidrama",
+            "list_url": "/drama-link?uid=melon_minidrama&drama_id=777",
+            "_match_score": 120,
+            "_result_source": "latest_report",
+        }
+        with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+            proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
+        with mock.patch.object(proxy, "_public_drama_report_results", return_value=[report_result]), \
+                mock.patch.object(proxy, "_discover_works") as discover:
+            payload = proxy._public_drama_search_payload("Bus Ride to Safety", 20)
+
+        discover.assert_not_called()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["account"], "melon_minidrama")
+        self.assertEqual(payload["source_counts"], {"latest_report": 1, "tikhub": 0})
+        self.assertNotIn("_match_score", payload["results"][0])
+        self.assertNotIn("_result_source", payload["results"][0])
+
+    def test_public_drama_search_uses_general_search_after_video_search(self):
+        empty = {"ok": True, "works": [], "errors": []}
+        work = {
+            "drama_id": "777",
+            "video_id": "101",
+            "drama_title": "Keeping Secrets with the Rowing Captain",
+            "description": "Episode 1",
+            "account": "bingebits_drama",
+            "episode_count": 60,
+            "views": 100,
+        }
+        with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+            proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
+        with mock.patch.object(proxy, "SERVER_API_KEY", "test-key"), \
+                mock.patch.object(proxy, "_public_drama_report_results", return_value=[]), \
+                mock.patch.object(proxy, "_discover_works", return_value=empty), \
+                mock.patch.object(proxy, "_public_drama_general_works", return_value=[work]) as general:
+            payload = proxy._public_drama_search_payload(
+                "Keeping Secrets with the Rowing Captain", 20
+            )
+
+        general.assert_called_once()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["account"], "bingebits_drama")
+        self.assertEqual(payload["source_counts"], {"latest_report": 0, "tikhub": 1})
+
+    def test_public_drama_title_match_preserves_chinese(self):
+        self.assertEqual(
+            proxy._public_drama_title_match_score("转生赌神的复仇", "转生赌神的复仇"),
+            120,
+        )
+        self.assertEqual(
+            proxy._public_drama_title_match_score("Heartbreak High", "Unrelated title"),
+            0,
+        )
 
     def test_public_drama_search_only_accepts_drama_names(self):
         for query in ("@demo.author", "https://www.tiktok.com/@demo.author"):

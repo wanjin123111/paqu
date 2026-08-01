@@ -287,6 +287,7 @@ DISCOVERY_SEARCH_ENDPOINTS = {
     "app_v3": "/api/v1/tiktok/app/v3/fetch_video_search_result",
     "web": "/api/v1/tiktok/web/fetch_search_video",
 }
+DISCOVERY_GENERAL_SEARCH_ENDPOINT = "/api/v1/tiktok/web/fetch_general_search"
 DISCOVERY_USER_SEARCH_ENDPOINT = "/api/v1/tiktok/app/v3/fetch_user_search_result"
 DISCOVERY_TOPIC_SEARCH_PHRASES = {
     "short drama", "shortdrama", "mini drama", "minidrama", "micro drama", "microdrama",
@@ -1918,6 +1919,28 @@ def _fetch_discovery_search_page(keyword, count, cursor, started=None):
     raise TikHubError("TikHub video search endpoints returned no usable response")
 
 
+def _fetch_discovery_general_search_page(keyword, count, cursor="0", started=None):
+    """Use TikHub's mixed TikTok Web search as a last-resort video source.
+
+    The endpoint can return users, hashtags and videos in the same response, so
+    reuse the defensive video extractor and expose only video-shaped entries.
+    """
+    if _discovery_runtime_exceeded(started):
+        raise TikHubError("discovery runtime limit reached")
+    data = _send_tikhub_get(
+        DISCOVERY_GENERAL_SEARCH_ENDPOINT,
+        {
+            "keyword": keyword,
+            "offset": str(cursor or "0"),
+            "search_id": "",
+        },
+        "TikHub web general search endpoint",
+        timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS,
+        retries=1,
+    )
+    return data, _video_batch_from_search_payload(data, count), DISCOVERY_GENERAL_SEARCH_ENDPOINT
+
+
 def _send_tiktok_public_page(url, referer=None):
     headers = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -2777,6 +2800,169 @@ def _public_drama_search_variants(query):
     return variants[:4]
 
 
+def _public_drama_normalized_text(value):
+    """Normalize titles without dropping Chinese, Japanese or accented text."""
+    return re.sub(r"[\W_]+", " ", str(value or "").casefold(), flags=re.UNICODE).strip()
+
+
+def _public_drama_compact_text(value):
+    return _public_drama_normalized_text(value).replace(" ", "")
+
+
+def _public_drama_title_match_score(query, *candidates):
+    query_text = _public_drama_normalized_text(query)
+    query_compact = query_text.replace(" ", "")
+    query_tokens = [token for token in query_text.split() if len(token) > 1]
+    if not query_compact:
+        return 0
+    best = 0
+    for candidate in candidates:
+        candidate_text = _public_drama_normalized_text(candidate)
+        candidate_compact = candidate_text.replace(" ", "")
+        if not candidate_compact:
+            continue
+        if candidate_text == query_text:
+            best = max(best, 120)
+        elif candidate_compact == query_compact:
+            best = max(best, 116)
+        elif query_compact in candidate_compact:
+            best = max(best, 100)
+        elif len(candidate_compact) >= 6 and candidate_compact in query_compact:
+            best = max(best, 90)
+        elif query_tokens and all(token in candidate_text for token in query_tokens):
+            best = max(best, 84)
+    return best
+
+
+def _public_drama_report_results(query, limit):
+    report = _latest_catalog_report()
+    results = []
+    for raw in report.get("dramas_detail") or []:
+        row = _admin_source_row(raw)
+        if not row:
+            continue
+        score = _public_drama_title_match_score(
+            query,
+            row.get("english_title"),
+            row.get("chinese_title"),
+        )
+        if score < 84:
+            continue
+        account = _to_text(row.get("account"), 80).lstrip("@")
+        drama_id = _clean_drama_id(row.get("drama_id"))
+        params = {"uid": account, "drama_id": drama_id, "target": "list", "redirect": "1"}
+        results.append({
+            "kind": "drama",
+            "drama_id": drama_id,
+            "title": _to_text(row.get("english_title") or row.get("chinese_title"), 180),
+            "chinese_title": _to_text(row.get("chinese_title"), 180),
+            "description": _to_text(row.get("description"), 240),
+            "account": account,
+            "nickname": _to_text(row.get("nickname"), 120) or account,
+            "avatar": "",
+            "episode_count": _to_int(row.get("episodes")),
+            "views": _to_int(row.get("views")),
+            "likes": 0,
+            "publish_time": _to_text(row.get("publish_time"), 40),
+            "video_id": "",
+            "video_url": "",
+            "profile_url": _to_text(row.get("profile_url"), 800)
+                           or (("https://www.tiktok.com/@" + account) if account else ""),
+            "list_url": _to_text(row.get("link"), 800)
+                        or (("/drama-link?" + urllib.parse.urlencode(params)) if drama_id and account else ""),
+            "_match_score": score,
+            "_result_source": "latest_report",
+        })
+    return sorted(
+        results,
+        key=lambda item: (_to_int(item.get("_match_score")), _to_int(item.get("views"))),
+        reverse=True,
+    )[:max(1, int(limit or 20))]
+
+
+def _public_drama_general_works(query, limit):
+    started = time.time()
+    _data, videos, endpoint = _fetch_discovery_general_search_page(query, limit, "0", started)
+    configured_accounts, _source = _configured_schedule_accounts()
+    monitored = {item.lower() for item in configured_accounts}
+    works = []
+    for video in videos:
+        work = _discovery_work_from_video(video, query, endpoint, monitored=monitored)
+        if work:
+            works.append(work)
+    return works
+
+
+def _public_drama_result_from_work(query, work):
+    if not isinstance(work, dict):
+        return None
+    score = _public_drama_title_match_score(
+        query,
+        work.get("drama_title"),
+        work.get("description"),
+    )
+    if score < 84:
+        return None
+    drama_id = _clean_drama_id(work.get("drama_id"))
+    video_id = _clean_drama_id(work.get("video_id"))
+    account = _to_text(work.get("account"), 80).lstrip("@")
+    title = _to_text(work.get("drama_title"), 180) or _to_text(work.get("description"), 180)
+    if not (drama_id or video_id) or not title:
+        return None
+    params = {"uid": account, "drama_id": drama_id, "target": "list", "redirect": "1"}
+    return {
+        "kind": "drama" if drama_id else "video",
+        "drama_id": drama_id,
+        "title": title,
+        "chinese_title": "",
+        "description": _to_text(work.get("description"), 240),
+        "account": account,
+        "nickname": _to_text(work.get("nickname"), 120) or account,
+        "avatar": _to_text(work.get("avatar"), 800),
+        "episode_count": _to_int(work.get("episode_count")),
+        "views": _to_int(work.get("views")),
+        "likes": _to_int(work.get("likes")),
+        "publish_time": _to_text(work.get("publish_time"), 40),
+        "video_id": video_id,
+        "video_url": _to_text(work.get("video_url"), 1000),
+        "profile_url": ("https://www.tiktok.com/@" + account) if account else "",
+        "list_url": ("/drama-link?" + urllib.parse.urlencode(params)) if drama_id and account else "",
+        "_match_score": score,
+        "_result_source": "tikhub",
+    }
+
+
+def _public_drama_result_key(item):
+    drama_id = _clean_drama_id(item.get("drama_id"))
+    if drama_id:
+        return "drama:" + drama_id
+    video_id = _clean_drama_id(item.get("video_id"))
+    if video_id:
+        return "video:" + video_id
+    return "title:%s:%s" % (
+        _public_drama_compact_text(item.get("title")),
+        str(item.get("account") or "").casefold(),
+    )
+
+
+def _public_drama_merge_result(grouped, item):
+    if not item:
+        return
+    key = _public_drama_result_key(item)
+    existing = grouped.get(key)
+    if not existing:
+        grouped[key] = dict(item)
+        return
+    for field in ("views", "likes", "episode_count", "_match_score"):
+        existing[field] = max(_to_int(existing.get(field)), _to_int(item.get(field)))
+    for field in ("title", "chinese_title", "description", "account", "nickname", "avatar",
+                  "publish_time", "video_id", "video_url", "profile_url", "list_url"):
+        if not existing.get(field) and item.get(field):
+            existing[field] = item[field]
+    if existing.get("_result_source") != "latest_report" and item.get("_result_source") == "latest_report":
+        existing["_result_source"] = "latest_report"
+
+
 def _public_drama_search_payload(query, limit=20):
     query = _public_drama_search_query(query)
     limit = max(1, min(_to_int(limit) or 20, 20))
@@ -2791,66 +2977,64 @@ def _public_drama_search_payload(query, limit=20):
         if cached:
             PUBLIC_DRAMA_SEARCH_CACHE.pop(cache_key, None)
 
+    report_results = _public_drama_report_results(query, limit)
     discovered = {"works": [], "errors": []}
     attempted_queries = []
     matched_query = ""
     collected_errors = []
-    for search_query in _public_drama_search_variants(query):
-        attempted_queries.append(search_query)
-        attempt = _discover_works(search_query, limit, limit, persist=False)
-        collected_errors.extend(attempt.get("errors") or [])
-        if attempt.get("works"):
-            discovered = attempt
-            matched_query = search_query
-            break
-    discovered["errors"] = collected_errors
+    exact_report_match = any(_to_int(item.get("_match_score")) >= 116 for item in report_results)
+    if not exact_report_match:
+        for search_query in _public_drama_search_variants(query):
+            attempted_queries.append(search_query)
+            attempt = _discover_works(search_query, limit, limit, persist=False)
+            collected_errors.extend(attempt.get("errors") or [])
+            relevant = [
+                work for work in (attempt.get("works") or [])
+                if _public_drama_result_from_work(query, work)
+            ]
+            if relevant:
+                discovered = dict(attempt)
+                discovered["works"] = relevant
+                matched_query = search_query
+                break
+        if not discovered.get("works") and SERVER_API_KEY:
+            general_query = attempted_queries[-1] if attempted_queries else query
+            try:
+                general_works = _public_drama_general_works(general_query, limit)
+                discovered["works"] = [
+                    work for work in general_works
+                    if _public_drama_result_from_work(query, work)
+                ]
+                if discovered["works"]:
+                    matched_query = general_query
+            except TikHubError as exc:
+                collected_errors.append(_discovery_error(
+                    "search", DISCOVERY_GENERAL_SEARCH_ENDPOINT, exc,
+                    hint="TikHub 综合搜索暂不可用，请稍后重试。",
+                ))
+
     grouped = {}
+    for item in report_results:
+        _public_drama_merge_result(grouped, item)
     for work in discovered.get("works") or []:
-        if not isinstance(work, dict):
-            continue
-        drama_id = _clean_drama_id(work.get("drama_id"))
-        video_id = _clean_drama_id(work.get("video_id"))
-        account = _to_text(work.get("account"), 80).lstrip("@")
-        title = _to_text(work.get("drama_title"), 180) or _to_text(work.get("description"), 180)
-        if not title:
-            title = "TikTok 短剧作品"
-        key = ("drama:" + drama_id) if drama_id else ("video:" + video_id)
-        if not key or key.endswith(":"):
-            continue
-        item = grouped.get(key)
-        if not item:
-            params = {"uid": account, "drama_id": drama_id, "target": "list", "redirect": "1"}
-            item = {
-                "kind": "drama" if drama_id else "video",
-                "drama_id": drama_id,
-                "title": title,
-                "description": _to_text(work.get("description"), 240),
-                "account": account,
-                "nickname": _to_text(work.get("nickname"), 120) or account,
-                "avatar": _to_text(work.get("avatar"), 800),
-                "episode_count": _to_int(work.get("episode_count")),
-                "views": _to_int(work.get("views")),
-                "likes": _to_int(work.get("likes")),
-                "publish_time": _to_text(work.get("publish_time"), 40),
-                "video_id": video_id,
-                "video_url": _to_text(work.get("video_url"), 1000),
-                "profile_url": ("https://www.tiktok.com/@" + account) if account else "",
-                "list_url": ("/drama-link?" + urllib.parse.urlencode(params)) if drama_id and account else "",
-            }
-            grouped[key] = item
-            continue
-        for field in ("views", "likes", "episode_count"):
-            item[field] = max(_to_int(item.get(field)), _to_int(work.get(field)))
-        for field, maximum in (("title", 180), ("description", 240), ("account", 80), ("nickname", 120),
-                               ("avatar", 800), ("publish_time", 40), ("video_id", 40), ("video_url", 1000)):
-            if not item.get(field) and work.get(field):
-                item[field] = _to_text(work.get(field), maximum)
+        _public_drama_merge_result(grouped, _public_drama_result_from_work(query, work))
 
     results = sorted(
         grouped.values(),
-        key=lambda item: (_to_int(item.get("views")), _to_int(item.get("likes"))),
+        key=lambda item: (
+            _to_int(item.get("_match_score")),
+            _to_int(item.get("views")),
+            _to_int(item.get("likes")),
+        ),
         reverse=True,
     )[:limit]
+    source_counts = {
+        "latest_report": sum(1 for item in results if item.get("_result_source") == "latest_report"),
+        "tikhub": sum(1 for item in results if item.get("_result_source") == "tikhub"),
+    }
+    for item in results:
+        item.pop("_match_score", None)
+        item.pop("_result_source", None)
     payload = {
         "ok": True,
         "query": query,
@@ -2859,6 +3043,7 @@ def _public_drama_search_payload(query, limit=20):
         "count": len(results),
         "generated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
         "results": results,
+        "source_counts": source_counts,
         "partial": bool(collected_errors),
         "cached": False,
     }
