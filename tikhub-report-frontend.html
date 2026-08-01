@@ -606,7 +606,7 @@
 
 <nav class="public-page-nav" id="publicPageNav" aria-label="公开页面导航">
   <form class="public-drama-search" id="publicDramaSearchForm" role="search">
-    <input id="publicDramaSearchInput" type="search" placeholder="搜索当前报表和 TikTok 短剧目录" autocomplete="off" aria-label="在首页搜索短剧">
+    <input id="publicDramaSearchInput" type="search" placeholder="输入“剧名 | 剧场号”，榜单搜索更准确" autocomplete="off" aria-label="在首页搜索短剧">
     <button class="mini-btn" id="publicDramaSearchBtn" type="submit">搜索</button>
   </form>
   <button class="mini-btn public-page-home" id="publicPageHomeBtn" type="button" hidden>返回首页</button>
@@ -619,12 +619,12 @@
     <div class="public-drama-search-head">
       <div>
         <h2 id="publicDramaSearchTitle">短剧搜索</h2>
-        <p id="publicDramaSearchSubtitle">同时搜索当前报表和 TikTok 全网公开短剧</p>
+        <p id="publicDramaSearchSubtitle">按剧名和发布账号查询 TikTok 短剧目录</p>
       </div>
       <button class="public-drama-search-close" id="publicDramaSearchClose" type="button" aria-label="关闭搜索结果">×</button>
     </div>
     <div class="public-drama-search-body">
-      <p class="public-drama-search-note">当前报表结果会立即显示；TikTok 全网结果由外部接口补充，通常需要几秒钟。</p>
+      <p class="public-drama-search-note">榜单短剧请按“剧名 | 剧场号”搜索，例如 Heartbreak High: Revenge on My First Love | BingeBits Drama。系统会先核对发布账号，再查询其短剧目录。</p>
       <section class="public-drama-result-section">
         <div class="public-drama-result-title"><h3>当前报表</h3><span id="publicDramaLocalStatus"></span></div>
         <div class="public-drama-result-grid" id="publicDramaLocalResults"></div>
@@ -1580,7 +1580,7 @@ function renderPublicDramaOnlineResults(payload){
   if(!results.length){
     const checkedText=checkedAccounts?("已检查 "+checkedAccounts+" 个发布账号的短剧栏目；"):"";
     const filteredText=filteredVideos?("已过滤 "+filteredVideos+" 条普通视频和搬运片段；"):"";
-    target.innerHTML='<div class="public-drama-result-empty">'+filteredText+checkedText+'未找到带短剧 ID 和完整剧集入口的结果。可尝试完整英文剧名，或先在后台加入官方发布账号。</div>';
+    target.innerHTML='<div class="public-drama-result-empty">'+filteredText+checkedText+'未找到带短剧 ID 和完整剧集入口的结果。可尝试“完整英文剧名 | 榜单剧场号”，或先在后台加入官方发布账号。</div>';
     return;
   }
   target.innerHTML=results.map(item=>{
@@ -1625,30 +1625,43 @@ function openLocalDramaInReport(query){
     if(input){input.focus();input.select();}
   });
 }
+function parsePublicDramaSearchValue(value){
+  const raw=String(value||"").trim();
+  const parts=raw.split(/\s*[|｜]\s*/,2);
+  if(parts.length===2&&parts[0].trim()&&parts[1].trim()){
+    return {raw:raw,query:parts[0].trim(),publisher:parts[1].trim()};
+  }
+  return {raw:raw,query:raw,publisher:""};
+}
 async function openPublicDramaSearch(){
   if(!isPublicMode())return;
   const source=$("publicDramaSearchInput");
-  const query=String(source&&source.value||"").trim();
+  const parsed=parsePublicDramaSearchValue(source&&source.value);
+  const query=parsed.query, requestKey=parsed.raw;
   if(query.length<2){toast("请输入至少 2 个字的短剧名");if(source)source.focus();return;}
   if(publicDramaSearchController)publicDramaSearchController.abort();
   const controller=new AbortController();
   publicDramaSearchController=controller;
   const modal=$("publicDramaSearchModal"), subtitle=$("publicDramaSearchSubtitle"), onlineStatus=$("publicDramaOnlineStatus"), onlineResults=$("publicDramaOnlineResults");
   if(!modal||!onlineStatus||!onlineResults)return;
-  modal.dataset.query=query;
+  modal.dataset.query=requestKey;
   modal.hidden=false;
-  if(subtitle)subtitle.textContent='“'+query+'”的搜索结果';
+  if(subtitle)subtitle.textContent=parsed.publisher
+    ?('“'+query+'” · 剧场号“'+parsed.publisher+'”的搜索结果')
+    :('“'+query+'”的搜索结果');
   renderPublicDramaLocalResults(query);
   onlineStatus.classList.add("public-drama-inline-loading");
   onlineStatus.textContent="正在搜索";
   onlineResults.setAttribute("aria-busy","true");
   onlineResults.innerHTML='<div class="public-drama-result-empty">正在连接 TikTok 短剧目录，请稍候…</div>';
   try{
-    const response=await fetch("/public/drama-search?q="+encodeURIComponent(query)+"&limit=20",{cache:"no-store",signal:controller.signal});
+    const params=new URLSearchParams({q:query,limit:"20"});
+    if(parsed.publisher)params.set("publisher",parsed.publisher);
+    const response=await fetch("/public/drama-search?"+params.toString(),{cache:"no-store",signal:controller.signal});
     let payload={};
     try{payload=await response.json();}catch(_){payload={};}
     if(!response.ok||payload.ok===false)throw new Error(payload.error||"TikTok 短剧目录搜索暂不可用");
-    if(publicDramaSearchController!==controller||modal.dataset.query!==query)return;
+    if(publicDramaSearchController!==controller||modal.dataset.query!==requestKey)return;
     renderPublicDramaOnlineResults(payload);
   }catch(error){
     if(error&&error.name==="AbortError")return;

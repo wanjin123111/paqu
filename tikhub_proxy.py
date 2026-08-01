@@ -2815,8 +2815,36 @@ def _public_drama_search_query(value):
     return query
 
 
-def _public_drama_search_cache_key(query, limit):
-    return "%s:%s" % (str(query).casefold(), int(limit))
+def _public_drama_publisher_query(value):
+    """Normalize either a TikTok account, profile URL or publisher display name."""
+    raw = _to_text(value, 120).strip()
+    if not raw:
+        return ""
+    account = _discovery_account(raw)
+    if account:
+        return account
+    raw = raw.lstrip("@").strip()
+    return raw if len(raw) >= 2 else ""
+
+
+def _public_drama_split_search_value(query, publisher=""):
+    """Accept the chart-friendly ``drama title | publisher`` search syntax."""
+    raw = _to_text(query, 240).strip()
+    resolved_publisher = _public_drama_publisher_query(publisher)
+    if not resolved_publisher:
+        parts = re.split(r"\s*[|｜]\s*", raw, maxsplit=1)
+        if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+            raw = parts[0].strip()
+            resolved_publisher = _public_drama_publisher_query(parts[1])
+    return _public_drama_search_query(raw), resolved_publisher
+
+
+def _public_drama_search_cache_key(query, limit, publisher=""):
+    return "%s:%s:%s" % (
+        str(query).casefold(),
+        str(publisher or "").casefold(),
+        int(limit),
+    )
 
 
 def _public_drama_search_variants(query):
@@ -2871,7 +2899,7 @@ def _public_drama_title_match_score(query, *candidates):
     return best
 
 
-def _public_drama_report_results(query, limit):
+def _public_drama_report_results(query, limit, publisher=""):
     report = _latest_catalog_report()
     results = []
     for raw in report.get("dramas_detail") or []:
@@ -2886,6 +2914,15 @@ def _public_drama_report_results(query, limit):
         if score < 84:
             continue
         account = _to_text(row.get("account"), 80).lstrip("@")
+        publisher_score = 0
+        if publisher:
+            publisher_score = _public_drama_title_match_score(
+                publisher,
+                account,
+                row.get("nickname"),
+            )
+            if publisher_score < 84:
+                continue
         drama_id = _clean_drama_id(row.get("drama_id"))
         if not drama_id or not account:
             continue
@@ -2910,11 +2947,16 @@ def _public_drama_report_results(query, limit):
             "list_url": _to_text(row.get("link"), 800)
                         or (("/drama-link?" + urllib.parse.urlencode(params)) if drama_id and account else ""),
             "_match_score": score,
+            "_publisher_score": publisher_score,
             "_result_source": "latest_report",
         })
     return sorted(
         results,
-        key=lambda item: (_to_int(item.get("_match_score")), _to_int(item.get("views"))),
+        key=lambda item: (
+            _to_int(item.get("_publisher_score")),
+            _to_int(item.get("_match_score")),
+            _to_int(item.get("views")),
+        ),
         reverse=True,
     )[:max(1, int(limit or 20))]
 
@@ -3075,6 +3117,106 @@ def _public_drama_resolve_accounts(query, works, limit):
     return results, checked_accounts
 
 
+def _public_drama_resolve_publisher(query, publisher, limit):
+    """Search a chart publisher first, then inspect its real short-drama library."""
+    publisher = _public_drama_publisher_query(publisher)
+    if not publisher or PUBLIC_DRAMA_RESOLVE_MAX_CANDIDATES <= 0:
+        return [], 0, []
+
+    started = time.time()
+    search_limit = min(20, max(10, int(limit or 20)))
+    candidates, _endpoint, errors = _discover_search_users(
+        publisher,
+        search_limit,
+        started,
+    )
+    candidates = list(candidates or [])
+
+    # A pasted @uniqueId or profile URL is more reliable than nickname search.
+    direct_account = _discovery_account(publisher)
+    if not direct_account and re.fullmatch(r"[A-Za-z0-9._-]{2,80}", publisher):
+        direct_account = publisher
+    if direct_account:
+        try:
+            direct = _discovery_candidate_from_direct_account(publisher, direct_account)
+            if direct:
+                candidates.insert(0, direct)
+        except (TikHubError, ValueError, OSError) as exc:
+            errors.append(_discovery_error(
+                "profile",
+                "tikhub:profile",
+                exc,
+                getattr(exc, "status", None),
+                "无法读取该剧场号主页，请检查账号拼写。",
+            ))
+
+    ranked, seen = [], set()
+    for raw in candidates:
+        if not isinstance(raw, dict):
+            continue
+        account = _to_text(raw.get("account"), 80).lstrip("@")
+        nickname = _to_text(raw.get("nickname"), 120)
+        account_key = account.casefold()
+        publisher_score = _public_drama_title_match_score(
+            publisher,
+            account,
+            nickname,
+        )
+        if not account_key or account_key in seen or publisher_score < 84:
+            continue
+        seen.add(account_key)
+        item = dict(raw)
+        item["account"] = account
+        item["_publisher_score"] = publisher_score
+        ranked.append(item)
+    ranked.sort(
+        key=lambda item: (
+            _to_int(item.get("_publisher_score")),
+            _discovery_raw_account_score(item),
+        ),
+        reverse=True,
+    )
+
+    results = []
+    checked_accounts = 0
+    for account_info in ranked[:PUBLIC_DRAMA_RESOLVE_MAX_CANDIDATES]:
+        account = _to_text(account_info.get("account"), 80).lstrip("@")
+        secuid = _to_text(account_info.get("secuid"), 180)
+        if not secuid:
+            try:
+                secuid = _resolve_secuid(
+                    account,
+                    timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 6,
+                    retries=1,
+                )
+            except (TikHubError, ValueError, OSError):
+                continue
+        if not secuid:
+            continue
+        checked_accounts += 1
+        try:
+            dramas = _get_tiktok_drama_library(
+                secuid,
+                account,
+                max_pages=4,
+                timeout=DISCOVERY_SEARCH_TIMEOUT_SECONDS + 8,
+                retries=1,
+                include_episode_publish_time=False,
+                translate_details=False,
+            )
+        except (TikHubError, ValueError, OSError):
+            continue
+        for drama in dramas:
+            result = _public_drama_result_from_library(query, drama, account_info)
+            if not result:
+                continue
+            result["_publisher_score"] = _to_int(account_info.get("_publisher_score"))
+            results.append(result)
+            if len(results) >= max(1, int(limit or 20)):
+                return results, checked_accounts, errors
+    return results, checked_accounts, errors
+
+
 def _public_drama_resolution_candidate(query, work):
     if not isinstance(work, dict) or _clean_drama_id(work.get("drama_id")):
         return False
@@ -3167,7 +3309,7 @@ def _public_drama_merge_result(grouped, item):
     if not existing:
         grouped[key] = dict(item)
         return
-    for field in ("views", "likes", "episode_count", "_match_score"):
+    for field in ("views", "likes", "episode_count", "_match_score", "_publisher_score"):
         existing[field] = max(_to_int(existing.get(field)), _to_int(item.get(field)))
     for field in ("title", "chinese_title", "description", "account", "nickname", "avatar",
                   "publish_time", "video_id", "video_url", "profile_url", "list_url"):
@@ -3177,10 +3319,10 @@ def _public_drama_merge_result(grouped, item):
         existing["_result_source"] = "latest_report"
 
 
-def _public_drama_search_payload(query, limit=20):
-    query = _public_drama_search_query(query)
+def _public_drama_search_payload(query, limit=20, publisher=""):
+    query, publisher = _public_drama_split_search_value(query, publisher)
     limit = max(1, min(_to_int(limit) or 20, 20))
-    cache_key = _public_drama_search_cache_key(query, limit)
+    cache_key = _public_drama_search_cache_key(query, limit, publisher)
     now = time.time()
     with PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
         cached = PUBLIC_DRAMA_SEARCH_CACHE.get(cache_key)
@@ -3191,7 +3333,7 @@ def _public_drama_search_payload(query, limit=20):
         if cached:
             PUBLIC_DRAMA_SEARCH_CACHE.pop(cache_key, None)
 
-    report_results = _public_drama_report_results(query, limit)
+    report_results = _public_drama_report_results(query, limit, publisher)
     discovered = {"works": [], "errors": []}
     attempted_queries = []
     matched_query = ""
@@ -3201,7 +3343,17 @@ def _public_drama_search_payload(query, limit=20):
     filtered_video_keys = set()
     checked_account_count = 0
     exact_report_match = any(_to_int(item.get("_match_score")) >= 116 for item in report_results)
-    if not exact_report_match:
+    if not exact_report_match and publisher:
+        attempted_queries.append(query)
+        directory_results, checked_account_count, publisher_errors = _public_drama_resolve_publisher(
+            query,
+            publisher,
+            limit,
+        )
+        collected_errors.extend(publisher_errors)
+        if directory_results:
+            matched_query = query
+    if not exact_report_match and not publisher:
         for search_query in _public_drama_search_variants(query):
             attempted_queries.append(search_query)
             attempt = _discover_works(search_query, limit, limit, persist=False)
@@ -3292,6 +3444,7 @@ def _public_drama_search_payload(query, limit=20):
     results = sorted(
         grouped.values(),
         key=lambda item: (
+            _to_int(item.get("_publisher_score")),
             _to_int(item.get("_match_score")),
             _to_int(item.get("views")),
             _to_int(item.get("likes")),
@@ -3303,11 +3456,13 @@ def _public_drama_search_payload(query, limit=20):
         "tikhub": sum(1 for item in results if item.get("_result_source") == "tikhub"),
     }
     for item in results:
+        item.pop("_publisher_score", None)
         item.pop("_match_score", None)
         item.pop("_result_source", None)
     payload = {
         "ok": True,
         "query": query,
+        "publisher": publisher,
         "matched_query": matched_query,
         "attempted_queries": attempted_queries,
         "count": len(results),
@@ -7798,7 +7953,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             query = qs.get("q", qs.get("query", [""]))[0]
             limit = _to_int(qs.get("limit", [20])[0]) or 20
-            self._send_json(200, _public_drama_search_payload(query, limit))
+            publisher = qs.get("publisher", [""])[0]
+            self._send_json(200, _public_drama_search_payload(query, limit, publisher))
         except ValueError as exc:
             self._send_json(400, {"ok": False, "error": str(exc)})
         except Exception:

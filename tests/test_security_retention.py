@@ -903,6 +903,65 @@ class DiscoveryWorksTests(unittest.TestCase):
         self.assertNotIn("works", first)
         self.assertNotIn("errors", first)
 
+    def test_public_drama_search_splits_chart_title_and_publisher(self):
+        self.assertEqual(
+            proxy._public_drama_split_search_value(
+                "Heartbreak High: Revenge on My First Love | BingeBits Drama"
+            ),
+            ("Heartbreak High: Revenge on My First Love", "BingeBits Drama"),
+        )
+
+    def test_public_drama_search_resolves_chart_publisher_library(self):
+        candidate = {
+            "account": "bingebits_drama",
+            "nickname": "BingeBits Drama",
+            "secuid": "publisher-secuid",
+            "followers": 1000,
+        }
+        library = [{
+            "drama_id": "ID 888",
+            "name": "Heartbreak High: Revenge on My First Love",
+            "english_title": "Heartbreak High: Revenge on My First Love",
+            "episodes": 60,
+            "views": 190000000,
+        }]
+        with proxy.PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+            proxy.PUBLIC_DRAMA_SEARCH_CACHE.clear()
+        with mock.patch.object(proxy, "_public_drama_report_results", return_value=[]), \
+                mock.patch.object(
+                    proxy,
+                    "_discover_search_users",
+                    return_value=([candidate], "tikhub:user-search", []),
+                ) as search_users, \
+                mock.patch.object(
+                    proxy,
+                    "_get_tiktok_drama_library",
+                    return_value=library,
+                ) as get_library, \
+                mock.patch.object(proxy, "_discover_works") as discover_works:
+            payload = proxy._public_drama_search_payload(
+                "Heartbreak High: Revenge on My First Love | BingeBits Drama",
+                20,
+            )
+
+        search_users.assert_called_once()
+        self.assertEqual(search_users.call_args.args[0], "BingeBits Drama")
+        get_library.assert_called_once_with(
+            "publisher-secuid",
+            "bingebits_drama",
+            max_pages=4,
+            timeout=proxy.DISCOVERY_SEARCH_TIMEOUT_SECONDS + 8,
+            retries=1,
+            include_episode_publish_time=False,
+            translate_details=False,
+        )
+        discover_works.assert_not_called()
+        self.assertEqual(payload["publisher"], "BingeBits Drama")
+        self.assertEqual(payload["checked_account_count"], 1)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["account"], "bingebits_drama")
+        self.assertEqual(payload["results"][0]["drama_id"], "888")
+
     def test_public_drama_result_rejects_a_plain_matching_video(self):
         work = {
             "video_id": "101",
@@ -1240,7 +1299,7 @@ class DiscoveryWorksTests(unittest.TestCase):
                 mock.patch.object(proxy, "_public_drama_search_payload", return_value=expected) as search:
             handler._public_drama_search_endpoint({"q": ["Outside Drama"], "limit": ["5"]})
 
-        search.assert_called_once_with("Outside Drama", 5)
+        search.assert_called_once_with("Outside Drama", 5, "")
         self.assertEqual(handler.responses, [(200, expected)])
 
         handler.responses.clear()
@@ -1302,12 +1361,15 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn('id="publicDramaSearchModal"', page)
             self.assertIn('id="publicDramaLocalResults"', page)
             self.assertIn('id="publicDramaOnlineResults"', page)
+            self.assertIn("function parsePublicDramaSearchValue(value)", page)
             self.assertIn("async function openPublicDramaSearch()", page)
-            self.assertIn('fetch("/public/drama-search?q="+encodeURIComponent(query)+"&limit=20"', page)
+            self.assertIn('const params=new URLSearchParams({q:query,limit:"20"})', page)
+            self.assertIn('params.set("publisher",parsed.publisher)', page)
+            self.assertIn('fetch("/public/drama-search?"+params.toString()', page)
             self.assertIn("function renderPublicDramaOnlineResults(payload)", page)
             self.assertIn("function openLocalDramaInReport(query)", page)
             self.assertIn("publicDramaSearchController", page)
-            self.assertIn("搜索当前报表和 TikTok 短剧目录", page)
+            self.assertIn("输入“剧名 | 剧场号”，榜单搜索更准确", page)
             self.assertIn('String(item.kind||"")==="drama"', page)
             self.assertIn("const primaryUrl=listUrl;", page)
             self.assertNotIn("(listUrl?'查看剧集':'查看作品')", page)
