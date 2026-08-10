@@ -20,7 +20,7 @@
  端口被占用?把下面的 PORT 改个数字,网页代理框也跟着改。
 ==============================================================================
 """
-import os, posixpath, mimetypes, base64, json, datetime, csv, gzip, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures, uuid, gc
+import os, posixpath, mimetypes, base64, json, datetime, csv, gzip, hmac, html, io, re, threading, time, tempfile, zipfile, concurrent.futures, uuid, gc, unicodedata
 import urllib.request, urllib.parse, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
@@ -4919,20 +4919,77 @@ def _admin_catalog_context():
     return report, source_rows, source_map, accounts
 
 
+def _catalog_title_match_key(value):
+    """Return a strict, language-agnostic key used only for exact drama-title matching."""
+    normalized = unicodedata.normalize("NFKC", _to_text(value, 300)).casefold()
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def _catalog_effective_source_keys(drama_id, drama, catalog_sources, source_rows):
+    """Merge explicit claims with safe automatic title/account matches for statistics."""
+    explicit_keys = []
+    for source_key, relation in catalog_sources.items():
+        if relation.get("status") == "owned" and relation.get("drama_id") == drama_id:
+            explicit_keys.append(source_key)
+
+    effective_keys = list(explicit_keys)
+    seen = set(explicit_keys)
+    title_keys = {
+        _catalog_title_match_key(value)
+        for value in [
+            drama.get("chinese_title"),
+            drama.get("english_title"),
+            *(drama.get("aliases") or []),
+        ]
+        if _catalog_title_match_key(value)
+    }
+    allowed_accounts = {
+        _to_text(value, 100).strip().lstrip("@").casefold()
+        for value in (drama.get("bound_accounts") or [])
+        if _to_text(value, 100).strip().lstrip("@")
+    }
+    automatic_keys = []
+    if title_keys:
+        for source in source_rows:
+            source_key = source.get("key") or ""
+            if not source_key or source_key in seen:
+                continue
+            relation = catalog_sources.get(source_key) or {}
+            if relation.get("status") == "ignored":
+                continue
+            if relation.get("status") == "owned" and relation.get("drama_id") not in ("", drama_id):
+                continue
+            account = _to_text(source.get("account"), 100).strip().lstrip("@").casefold()
+            if allowed_accounts and account not in allowed_accounts:
+                continue
+            source_title_keys = {
+                _catalog_title_match_key(source.get("chinese_title")),
+                _catalog_title_match_key(source.get("english_title")),
+            }
+            source_title_keys.discard("")
+            if title_keys.isdisjoint(source_title_keys):
+                continue
+            seen.add(source_key)
+            automatic_keys.append(source_key)
+            effective_keys.append(source_key)
+    return explicit_keys, automatic_keys, effective_keys
+
+
 def _curated_catalog_payload(include_offline=False):
     catalog, storage = _load_admin_catalog()
-    report, _source_rows, source_map, _accounts = _admin_catalog_context()
-    grouped_keys = {}
-    for source_key, relation in catalog.get("sources", {}).items():
-        if relation.get("status") != "owned" or not relation.get("drama_id"):
-            continue
-        grouped_keys.setdefault(relation["drama_id"], []).append(source_key)
+    report, source_rows, source_map, _accounts = _admin_catalog_context()
+    catalog_sources = catalog.get("sources", {})
 
     dramas = []
     for drama_id, drama in catalog.get("dramas", {}).items():
         if not include_offline and not drama.get("online"):
             continue
-        keys = grouped_keys.get(drama_id, [])
+        explicit_keys, automatic_keys, keys = _catalog_effective_source_keys(
+            drama_id,
+            drama,
+            catalog_sources,
+            source_rows,
+        )
         sources = [source_map[key] for key in keys if key in source_map]
         source_accounts = [item.get("account") for item in sources if item.get("account")]
         accounts = sorted(
@@ -4964,6 +5021,8 @@ def _curated_catalog_payload(include_offline=False):
             "accounts": accounts,
             "source_count": len(keys),
             "active_source_count": len(sources),
+            "explicit_source_count": len(explicit_keys),
+            "automatic_source_count": len(automatic_keys),
             "total_views": total_views,
             "episodes": episodes,
             "latest_publish_time": latest_publish_time,

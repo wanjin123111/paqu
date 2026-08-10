@@ -531,6 +531,70 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertEqual(drama["source_count"], 2)
         self.assertEqual(drama["notes"], "")
 
+    def test_catalog_automatically_matches_exact_title_inside_bound_accounts(self):
+        catalog = proxy._sanitize_admin_catalog(self.sample_catalog())
+        catalog["sources"] = {}
+        sources = [
+            {
+                "key": "account-manual|100",
+                "account": "account-manual",
+                "nickname": "A",
+                "chinese_title": "其他中文名",
+                "english_title": "Company-Drama",
+                "episodes": 60,
+                "views": 1200,
+                "publish_time": "2026-07-10 10:00:00",
+            },
+            {
+                "key": "account-other|200",
+                "account": "account-other",
+                "nickname": "B",
+                "chinese_title": "公司短剧",
+                "english_title": "Company Drama",
+                "episodes": 58,
+                "views": 800,
+                "publish_time": "2026-07-11 10:00:00",
+            },
+        ]
+        context = ({"generated_at": "2026-07-14 10:00:00"}, sources, {row["key"]: row for row in sources}, [])
+
+        with mock.patch.object(proxy, "_load_admin_catalog", return_value=(catalog, "runtime_file")), \
+                mock.patch.object(proxy, "_admin_catalog_context", return_value=context):
+            payload = proxy._curated_catalog_payload(include_offline=True)
+
+        drama = next(row for row in payload["dramas"] if row["id"] == "drama-company-1")
+        self.assertEqual(drama["total_views"], 1200)
+        self.assertEqual(drama["episodes"], 60)
+        self.assertEqual(drama["source_count"], 1)
+        self.assertEqual(drama["explicit_source_count"], 0)
+        self.assertEqual(drama["automatic_source_count"], 1)
+        self.assertEqual(drama["accounts"], ["account-manual"])
+
+    def test_catalog_auto_match_respects_ignored_and_other_drama_claims(self):
+        catalog = proxy._sanitize_admin_catalog(self.sample_catalog())
+        catalog["dramas"]["drama-company-1"]["bound_accounts"] = []
+        catalog["sources"] = {
+            "account-a|100": {"status": "ignored", "drama_id": ""},
+            "account-b|200": {"status": "owned", "drama_id": "drama-offline"},
+        }
+        sources = [
+            {"key": "account-a|100", "account": "account-a", "chinese_title": "公司短剧", "english_title": "Company Drama", "episodes": 60, "views": 1200},
+            {"key": "account-b|200", "account": "account-b", "chinese_title": "公司短剧", "english_title": "Company Drama", "episodes": 58, "views": 800},
+            {"key": "account-c|300", "account": "account-c", "chinese_title": "公司短剧", "english_title": "Company Drama", "episodes": 50, "views": 500},
+            {"key": "account-d|400", "account": "account-d", "chinese_title": "公司短剧续集", "english_title": "Company Drama Sequel", "episodes": 40, "views": 300},
+        ]
+        context = ({"generated_at": "2026-07-14 10:00:00"}, sources, {row["key"]: row for row in sources}, [])
+
+        with mock.patch.object(proxy, "_load_admin_catalog", return_value=(catalog, "runtime_file")), \
+                mock.patch.object(proxy, "_admin_catalog_context", return_value=context):
+            payload = proxy._curated_catalog_payload(include_offline=True)
+
+        drama = next(row for row in payload["dramas"] if row["id"] == "drama-company-1")
+        self.assertEqual(drama["total_views"], 500)
+        self.assertEqual(drama["source_count"], 1)
+        self.assertEqual(drama["automatic_source_count"], 1)
+        self.assertEqual(drama["sources"][0]["key"], "account-c|300")
+
     def test_admin_catalog_endpoint_stops_before_read_without_secret(self):
         handler = object.__new__(proxy.Handler)
         handler.command = "GET"
@@ -693,6 +757,8 @@ class AdminCatalogTests(unittest.TestCase):
         self.assertIn('id="accountBindingMatchStatus"', admin_html)
         self.assertLess(admin_html.index('id="editCn"'), admin_html.index('id="accountBindingGroup"'))
         self.assertIn("function normalizeDramaTitle(value)", admin_js)
+        self.assertIn("setCuratedDramas(payload.curated?.dramas || [])", admin_js)
+        self.assertIn("自动汇总播放", admin_html)
         self.assertIn("function titleMatchedAccounts()", admin_js)
         self.assertIn("function syncEditorTitleAccounts()", admin_js)
         self.assertIn('["editCn", "editEn", "editAliases"].forEach', admin_js)

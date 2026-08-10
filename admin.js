@@ -25,6 +25,7 @@
     catalog: emptyCatalog(),
     sources: [],
     sourceMap: new Map(),
+    curatedById: new Map(),
     titleAccountIndex: new Map(),
     accounts: [],
     backendAccounts: [],
@@ -273,28 +274,42 @@
     }
   }
 
+  function setCuratedDramas(rows) {
+    state.curatedById = new Map((Array.isArray(rows) ? rows : [])
+      .filter((row) => row && row.id)
+      .map((row) => [row.id, row]));
+  }
+
   function sourceStatus(key) {
     return state.catalog.sources[key]?.status || "pending";
   }
 
-  function dramaSources(dramaId) {
+  function explicitDramaSources(dramaId) {
     return Object.entries(state.catalog.sources)
       .filter(([, relation]) => relation?.status === "owned" && relation.drama_id === dramaId)
       .map(([key]) => state.sourceMap.get(key))
       .filter(Boolean);
   }
 
+  function dramaSources(dramaId) {
+    const curated = state.curatedById.get(dramaId);
+    return curated && Array.isArray(curated.sources) ? curated.sources : explicitDramaSources(dramaId);
+  }
+
   function aggregateDramas() {
     return Object.entries(state.catalog.dramas).map(([id, drama]) => {
+      const curated = state.curatedById.get(id);
       const sources = dramaSources(id);
       const sourceAccounts = sources.map((row) => row.account).filter(Boolean);
       const boundAccounts = cleanBoundAccounts(drama.bound_accounts || []);
       return {
         id, ...drama, sources,
         bound_accounts: boundAccounts,
-        accounts: cleanBoundAccounts([...sourceAccounts, ...boundAccounts]),
-        total_views: sources.reduce((sum, row) => sum + number(row.views), 0),
-        episodes: Math.max(0, ...sources.map((row) => number(row.episodes))),
+        accounts: cleanBoundAccounts(curated?.accounts || [...sourceAccounts, ...boundAccounts]),
+        source_count: curated ? number(curated.source_count) : sources.length,
+        automatic_source_count: curated ? number(curated.automatic_source_count) : 0,
+        total_views: curated ? number(curated.total_views) : sources.reduce((sum, row) => sum + number(row.views), 0),
+        episodes: curated ? number(curated.episodes) : Math.max(0, ...sources.map((row) => number(row.episodes))),
       };
     }).sort((a, b) => number(a.order || 999999) - number(b.order || 999999) || text(a.chinese_title).localeCompare(text(b.chinese_title), "zh-CN"));
   }
@@ -339,6 +354,7 @@
       state.storage = payload.storage || "";
       state.generatedAt = payload.generated_at || "";
       setSourceRows(payload.sources || []);
+      setCuratedDramas(payload.curated?.dramas || []);
       state.accounts = payload.accounts || [];
       $("accountSource").textContent = `来源：线上最新报表 ${state.accounts.length} 个账号`;
       $("permissionDetail").textContent = `${state.roleLabel} · ${state.permissions.length} 项权限 · 配置版本 ${state.catalog.revision}`;
@@ -383,6 +399,7 @@
         loadingDetail: "保存完成前请不要关闭页面",
       });
       state.catalog = normalizeCatalog(payload.catalog);
+      setCuratedDramas(payload.curated?.dramas || []);
       state.storage = payload.storage || state.storage;
       updateStorageState();
       setSync(`保存完成 · 版本 ${state.catalog.revision}`);
@@ -392,6 +409,7 @@
     } catch (error) {
       if (error.status === 409 && error.payload?.catalog) {
         state.catalog = normalizeCatalog(error.payload.catalog);
+        setCuratedDramas([]);
         state.storage = error.payload.storage || state.storage;
         renderAll();
         toast("后台数据已被其他页面修改，已加载最新版本，请重新操作", true);
