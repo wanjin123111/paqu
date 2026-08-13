@@ -1353,6 +1353,29 @@ class DiscoveryWorksTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 proxy._public_drama_search_payload(query, 20)
 
+    def test_public_drama_search_resolves_episode_url_to_full_series(self):
+        url = "https://www.tiktok.com/@drama_peak/video/7673351609157455117"
+        reference = {
+            "account": "drama_peak",
+            "drama_id": "7673351609157000000",
+            "drama_title": "Reborn to Ruin Them",
+            "episode_count": 59,
+            "source": "account-drama-library",
+        }
+        with mock.patch.object(
+            proxy,
+            "_resolve_drama_reference_for_video",
+            return_value=reference,
+        ) as resolve:
+            payload = proxy._public_drama_search_payload(url, 20)
+
+        resolve.assert_called_once_with("drama_peak", "7673351609157455117")
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["title"], "Reborn to Ruin Them")
+        self.assertEqual(payload["results"][0]["episode_count"], 59)
+        self.assertIn("target=list", payload["results"][0]["list_url"])
+        self.assertIn("uid=drama_peak", payload["results"][0]["list_url"])
+
     def test_public_drama_search_endpoint_is_read_only_and_rate_limited(self):
         handler = object.__new__(proxy.Handler)
         handler.command = "GET"
@@ -1435,7 +1458,7 @@ class DiscoveryWorksTests(unittest.TestCase):
             self.assertIn("function renderPublicDramaOnlineResults(payload)", page)
             self.assertIn("function openLocalDramaInReport(query)", page)
             self.assertIn("publicDramaSearchController", page)
-            self.assertIn("输入“剧名 | 剧场号”，榜单搜索更准确", page)
+            self.assertIn("输入剧名，或粘贴 TikTok 单集链接", page)
             self.assertIn('String(item.kind||"")==="drama"', page)
             self.assertIn("const primaryUrl=listUrl;", page)
             self.assertNotIn("(listUrl?'查看剧集':'查看作品')", page)

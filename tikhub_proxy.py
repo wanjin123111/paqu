@@ -3068,6 +3068,123 @@ def _public_drama_result_from_library(query, drama, account_info):
     }
 
 
+def _public_drama_result_from_video_reference(reference, video_id, video_url="", account_hint=""):
+    """Build a verified full-series result from one TikTok episode URL."""
+    if not isinstance(reference, dict):
+        return None
+    account = _to_text(reference.get("account") or account_hint, 80).strip().lstrip("@")
+    drama_id = _clean_drama_id(reference.get("drama_id"))
+    title = _to_text(reference.get("drama_title"), 180)
+    if not account or not drama_id or not title:
+        return None
+    params = {
+        "uid": account,
+        "drama_id": drama_id,
+        "target": "list",
+        "redirect": "1",
+    }
+    return {
+        "kind": "drama",
+        "drama_id": drama_id,
+        "title": title,
+        "chinese_title": "",
+        "description": "已从该 TikTok 单集反查到完整短剧目录",
+        "account": account,
+        "nickname": account,
+        "avatar": "",
+        "episode_count": _to_int(reference.get("episode_count")),
+        "views": 0,
+        "likes": 0,
+        "publish_time": "",
+        "video_id": _clean_drama_id(video_id),
+        "video_url": _to_text(video_url, 1000),
+        "profile_url": "https://www.tiktok.com/@" + account,
+        "list_url": "/drama-link?" + urllib.parse.urlencode(params),
+        "resolution_source": _to_text(reference.get("source"), 80),
+    }
+
+
+def _public_drama_search_by_video_url(value, limit):
+    """Resolve a pasted TikTok episode URL to its parent short-drama series."""
+    raw = _to_text(value, 1000).strip()
+    lowered = raw.casefold()
+    if "tiktok.com/" not in lowered and "tiktokv.com/" not in lowered:
+        return None
+    video_id = _discovery_video_id(raw)
+    if not video_id:
+        return None
+    account_match = re.search(
+        r"(?:https?://)?(?:www\.|m\.)?tiktok\.com/@([A-Za-z0-9._-]+)/video/",
+        raw,
+        flags=re.I,
+    )
+    account_hint = account_match.group(1) if account_match else ""
+    cache_key = "video:%s:%s" % (video_id, int(limit))
+    now = time.time()
+    with PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+        cached = PUBLIC_DRAMA_SEARCH_CACHE.get(cache_key)
+        if cached and now < cached.get("expires_at", 0):
+            payload = dict(cached.get("payload") or {})
+            payload["cached"] = True
+            return payload
+        if cached:
+            PUBLIC_DRAMA_SEARCH_CACHE.pop(cache_key, None)
+
+    errors = []
+    result = None
+    try:
+        reference = _resolve_drama_reference_for_video(account_hint, video_id)
+        result = _public_drama_result_from_video_reference(
+            reference,
+            video_id,
+            video_url=raw,
+            account_hint=account_hint,
+        )
+    except TikHubError as exc:
+        errors.append(_discovery_error(
+            "video",
+            "tikhub-video-drama-reference",
+            exc,
+            hint="暂时无法从该单集反查短剧目录，请稍后重试。",
+        ))
+    results = [result] if result else []
+    payload = {
+        "ok": True,
+        "query": raw,
+        "publisher": account_hint,
+        "matched_query": raw if result else "",
+        "attempted_queries": [raw],
+        "count": len(results),
+        "generated_at": datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds"),
+        "results": results[:limit],
+        "source_counts": {"latest_report": 0, "tikhub": len(results)},
+        "filtered_video_count": 0,
+        "checked_account_count": 1 if account_hint else 0,
+        "partial": bool(errors),
+        "errors": errors,
+        "cached": False,
+    }
+    cache_seconds = PUBLIC_DRAMA_SEARCH_CACHE_SECONDS if results else min(
+        PUBLIC_DRAMA_SEARCH_CACHE_SECONDS,
+        30,
+    )
+    if errors:
+        cache_seconds = min(cache_seconds, 15)
+    with PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
+        if len(PUBLIC_DRAMA_SEARCH_CACHE) >= PUBLIC_DRAMA_SEARCH_CACHE_MAX_ITEMS:
+            oldest = min(
+                PUBLIC_DRAMA_SEARCH_CACHE,
+                key=lambda item_key: PUBLIC_DRAMA_SEARCH_CACHE[item_key].get("created_at", 0),
+            )
+            PUBLIC_DRAMA_SEARCH_CACHE.pop(oldest, None)
+        PUBLIC_DRAMA_SEARCH_CACHE[cache_key] = {
+            "created_at": now,
+            "expires_at": now + cache_seconds,
+            "payload": payload,
+        }
+    return payload
+
+
 def _public_drama_resolve_accounts(query, works, limit):
     """Inspect candidate publishers' real short-drama tabs and return series only."""
     if PUBLIC_DRAMA_RESOLVE_MAX_CANDIDATES <= 0:
@@ -3320,8 +3437,11 @@ def _public_drama_merge_result(grouped, item):
 
 
 def _public_drama_search_payload(query, limit=20, publisher=""):
-    query, publisher = _public_drama_split_search_value(query, publisher)
     limit = max(1, min(_to_int(limit) or 20, 20))
+    direct_payload = _public_drama_search_by_video_url(query, limit)
+    if direct_payload is not None:
+        return direct_payload
+    query, publisher = _public_drama_split_search_value(query, publisher)
     cache_key = _public_drama_search_cache_key(query, limit, publisher)
     now = time.time()
     with PUBLIC_DRAMA_SEARCH_CACHE_LOCK:
