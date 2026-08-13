@@ -1180,6 +1180,50 @@ class DiscoveryWorksTests(unittest.TestCase):
         self.assertEqual(reference["drama_title"], "Outside Drama")
         self.assertEqual(reference["source"], "account-drama-query-title")
 
+    def test_public_drama_resolver_checks_recent_library_order_before_old_popular_dramas(self):
+        video = {
+            "aweme_id": "7673351609157455117",
+            "desc": "Episode 1 - watch the full series",
+            "author": {"unique_id": "drama_peak"},
+        }
+        recent = {
+            "drama_id": "ID 7673351609157000000",
+            "name": "Reborn to Ruin Them",
+            "english_title": "Reborn to Ruin Them",
+            "episodes": 59,
+            "views": 100,
+        }
+        old_popular = {
+            "drama_id": "ID 7000000000000000000",
+            "name": "Old Popular Drama",
+            "english_title": "Old Popular Drama",
+            "episodes": 80,
+            "views": 999999999,
+        }
+
+        def episodes_for(drama_id, _account, started=None, limit=None):
+            self.assertEqual(drama_id, "7673351609157000000")
+            return [{"aweme_id": "7673351609157455117"}]
+
+        with mock.patch.object(
+                    proxy,
+                    "_fetch_discovery_video_by_id",
+                    return_value=(video, "test"),
+                ), \
+                mock.patch.object(proxy, "_resolve_secuid", return_value="secuid"), \
+                mock.patch.object(proxy, "_get_tiktok_drama_library", return_value=[recent, old_popular]), \
+                mock.patch.object(proxy, "_get_drama_episode_items", side_effect=episodes_for) as get_episodes:
+            reference = proxy._resolve_drama_reference_for_video(
+                "drama_peak",
+                "7673351609157455117",
+            )
+
+        get_episodes.assert_called_once()
+        self.assertEqual(reference["drama_id"], "7673351609157000000")
+        self.assertEqual(reference["drama_title"], "Reborn to Ruin Them")
+        self.assertEqual(reference["episode_count"], 1)
+        self.assertEqual(reference["source"], "account-drama-library")
+
     def test_public_drama_search_retries_a_title_without_punctuation(self):
         empty = {"ok": True, "works": [], "errors": []}
         found = {

@@ -3671,7 +3671,30 @@ def _resolve_drama_reference_for_video(uid, video_id, expected_title=""):
 
     ranked = sorted(dramas, key=lambda drama: (score(drama), _to_int(drama.get("views"))), reverse=True)
     likely = [drama for drama in ranked if score(drama) > 0]
-    candidates = (likely or ranked)[:8]
+
+    def id_distance(drama):
+        drama_id = _clean_drama_id(drama.get("drama_id"))
+        if not drama_id or not drama_id.isdigit() or not clean_video_id.isdigit():
+            return 10 ** 30
+        return abs(int(drama_id) - int(clean_video_id))
+
+    nearby = sorted(dramas, key=id_distance)
+
+    # A newly published drama often has a generic episode caption that does not
+    # contain its official drama title.  In that case ranking the whole library
+    # by historical views makes the resolver inspect only old popular dramas.
+    # Check nearby TikTok IDs and the library order (normally newest first)
+    # ahead of the high-view fallback, then confirm using the exact episode ID.
+    candidates, seen_candidates = [], set()
+    for drama in likely + nearby[:12] + dramas[:16] + ranked[:8]:
+        drama_id = _clean_drama_id(drama.get("drama_id"))
+        candidate_key = drama_id or _title_key(drama.get("english_title") or drama.get("name"))
+        if not candidate_key or candidate_key in seen_candidates:
+            continue
+        seen_candidates.add(candidate_key)
+        candidates.append(drama)
+        if len(candidates) >= 24:
+            break
     for drama in candidates:
         drama_id = _clean_drama_id(drama.get("drama_id"))
         if not drama_id:
