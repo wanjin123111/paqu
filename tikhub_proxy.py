@@ -312,9 +312,21 @@ PLAYLIST_ID_KEYS = ("mixId", "mix_id", "playlist_id", "playlistId")
 PLAYLIST_NAME_KEYS = ("mixName", "mix_name", "name", "playlist_name", "title")
 PLAYLIST_COUNT_KEYS = ("videoCount", "video_count", "aweme_count", "item_count", "itemCount", "episode_count", "episodeCount")
 PLAYLIST_VIEW_KEYS = ("play_count", "playCount", "view_count", "viewCount", "total_play_count", "totalPlayCount")
-DRAMA_ID_KEYS = ("dramaID", "dramaId", "drama_id", "id")
-DRAMA_NAME_KEYS = ("dramaName", "drama_name", "name", "title")
-DRAMA_COUNT_KEYS = ("numVideos", "num_videos", "videoCount", "video_count", "episodeCount", "episode_count")
+DRAMA_ID_KEYS = (
+    "dramaID", "dramaId", "drama_id",
+    "seriesID", "seriesId", "series_id",
+    "id",
+)
+DRAMA_NAME_KEYS = (
+    "dramaName", "drama_name",
+    "seriesName", "series_name",
+    "name", "title",
+)
+DRAMA_COUNT_KEYS = (
+    "numVideos", "num_videos", "videoCount", "video_count",
+    "episodeCount", "episode_count", "totalEpisode", "total_episode",
+    "seriesNum", "series_num",
+)
 DRAMA_VIEW_KEYS = ("numWatched", "num_watched", "play_count", "playCount", "view_count", "viewCount")
 DRAMA_LINK_KEYS = ("shareUrl", "share_url", "shareLink", "share_link", "dramaUrl", "drama_url", "webUrl", "web_url")
 VIDEO_LINK_KEYS = ("shareUrl", "share_url", "shareLink", "share_link", "videoUrl", "video_url", "webUrl", "web_url")
@@ -2642,7 +2654,7 @@ def _get_video_metric(video, keys):
 def _drama_reference_from_video(video):
     info_keys = {
         "dramaInfo", "drama_info", "shortDramaInfo", "short_drama_info",
-        "seriesInfo", "series_info",
+        "seriesInfo", "series_info", "seriesMeta", "series_meta",
     }
     candidates = []
 
@@ -2661,7 +2673,11 @@ def _drama_reference_from_video(video):
 
     collect(video)
     for info in candidates:
-        drama_id = _deep_find(info, ("dramaID", "dramaId", "drama_id"))
+        # TikTok's newer short-drama payloads call the same relationship a
+        # `series` instead of a `drama`.  TikHub may therefore return
+        # series_id / series_name / series_num here.  Treat both schemas as the
+        # same logical reference so an episode URL resolves to the full drama.
+        drama_id = _deep_find(info, DRAMA_ID_KEYS[:-1])
         if drama_id is None:
             direct_id = info.get("id")
             if not isinstance(direct_id, (dict, list)):

@@ -1180,6 +1180,49 @@ class DiscoveryWorksTests(unittest.TestCase):
         self.assertEqual(reference["drama_title"], "Outside Drama")
         self.assertEqual(reference["source"], "account-drama-query-title")
 
+    def test_video_drama_reference_accepts_new_tiktok_series_fields(self):
+        video = {
+            "aweme_id": "7673351609157455117",
+            "series_info": {
+                "series_id": "7673351609157000000",
+                "series_name": "Reborn to Ruin Them",
+                "series_num": 59,
+            },
+        }
+
+        reference = proxy._drama_reference_from_video(video)
+
+        self.assertEqual(reference["drama_id"], "7673351609157000000")
+        self.assertEqual(reference["drama_title"], "Reborn to Ruin Them")
+        self.assertEqual(reference["episode_count"], 59)
+        self.assertEqual(reference["source"], "video-drama-info")
+
+    def test_public_drama_resolver_returns_direct_tiktok_series_reference(self):
+        video = {
+            "aweme_id": "7673351609157455117",
+            "author": {"unique_id": "drama_peak"},
+            "seriesInfo": {
+                "seriesId": "7673351609157000000",
+                "seriesName": "Reborn to Ruin Them",
+                "episodeCount": 59,
+            },
+        }
+        with mock.patch.object(
+                    proxy,
+                    "_fetch_discovery_video_by_id",
+                    return_value=(video, "test"),
+                ), \
+                mock.patch.object(proxy, "_resolve_secuid") as resolve_secuid:
+            reference = proxy._resolve_drama_reference_for_video(
+                "drama_peak",
+                "7673351609157455117",
+            )
+
+        resolve_secuid.assert_not_called()
+        self.assertEqual(reference["drama_id"], "7673351609157000000")
+        self.assertEqual(reference["drama_title"], "Reborn to Ruin Them")
+        self.assertEqual(reference["episode_count"], 59)
+
     def test_public_drama_resolver_checks_recent_library_order_before_old_popular_dramas(self):
         video = {
             "aweme_id": "7673351609157455117",
