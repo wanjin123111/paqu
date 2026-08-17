@@ -958,6 +958,14 @@ const DASHBOARD_LATEST_CACHE_KEY="thr_dashboard_latest_payload_v4";
   const DASHBOARD_VALIDATION_CACHE_KEY="thr_dashboard_validation_v2";
   const DASHBOARD_PREVIEW_CACHE_KEY="thr_dashboard_preview_v2";
 const DASHBOARD_VALIDATION_MAX_AGE=2*PUBLIC_REPORT_REFRESH_MS;
+function reportPayloadHasData(payload){
+  if(!payload||typeof payload!=="object")return false;
+  return !!(
+    (Array.isArray(payload.summary)&&payload.summary.length)||
+    (Array.isArray(payload.dramas_detail)&&payload.dramas_detail.length)||
+    Number(payload.accounts||0)>0||Number(payload.dramas||0)>0
+  );
+}
 function dashboardCacheGet(key,maxAgeMs){
   try{
     const raw=store.get(key);
@@ -1000,7 +1008,7 @@ async function dashboardCacheGetAsync(key,maxAgeMs){
 function readCachedDashboardState(){
   if(!isPublicMode())return null;
   const payload=dashboardCacheGet(DASHBOARD_LATEST_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE);
-  if(!payload)return null;
+  if(!reportPayloadHasData(payload))return null;
   const history=dashboardCacheGet(DASHBOARD_HISTORY_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE);
   return {payload,history:Array.isArray(history)?history:[]};
 }
@@ -1011,7 +1019,7 @@ async function readCachedDashboardStateAsync(){
     dashboardCacheGetAsync(DASHBOARD_HISTORY_CACHE_KEY,DASHBOARD_CACHE_MAX_AGE)
   ]);
   const payload=values[0];
-  if(!payload)return null;
+  if(!reportPayloadHasData(payload))return null;
   return {payload,history:Array.isArray(values[1])?values[1]:[]};
 }
 function dashboardValidationIsFresh(cachedMs){
@@ -1067,7 +1075,7 @@ function applyCachedDashboardPreview(item,verifiedMs=0){
   return true;
 }
 function applyCachedDashboardState(state){
-  if(!state||!state.payload)return false;
+  if(!state||!reportPayloadHasData(state.payload))return false;
   dashboardHistoryPayloads=state.history||[];
   dashboardHistoryLoading=!dashboardHistoryPayloads.length;
   dashboardHistoryReady=!!dashboardHistoryPayloads.length;
@@ -2877,9 +2885,7 @@ function renderDashboard(){
       renderDashboardLoading(dashboardHistoryLoading?"正在加载历史对比数据...":"正在准备运营看板...");
       return;
     }
-    if(page)page.hidden=true;
-    box.style.display="none";
-    renderMonitorDashboard();
+    renderDashboardLoading("暂无有效报表数据，请稍后重试",true);
     return;
   }
   const currentPayload=dashboardCurrentPayload();
@@ -2930,17 +2936,23 @@ function publicLoadingSkeleton(message){
     '<div class="dashboard-skeleton-panels"><i></i><i></i></div>'+
     '<div class="dashboard-skeleton-footer">刷新页面只读取数据库，不会启动重新抓取。</div></div>';
 }
-function renderDashboardLoading(message){
+function publicUnavailableState(message){
+  return '<div class="dashboard-skeleton" role="status">'+
+    '<div class="dashboard-skeleton-head"><div class="dashboard-skeleton-title"><span>'+esc(message||"最新数据暂时不可用")+'</span></div><div class="dashboard-skeleton-note">系统已保留上一份有效报告</div></div>'+
+    '<div class="monitor-empty">请稍后刷新页面；如果采集持续失败，请检查 TikHub API 余额与定时任务状态。</div>'+
+    '<div class="dashboard-skeleton-footer">空报告不会覆盖上一份有效数据。</div></div>';
+}
+function renderDashboardLoading(message,unavailable){
   const box=$("dashboardCard");
   const page=$("dashboardPage");
   const monitorBox=$("monitorDashboardCard");
   const monitorPage=$("monitorPage");
   if(!box)return;
   box.style.display="block";
-  box.innerHTML=publicLoadingSkeleton(message||"正在加载运营看板...");
+  box.innerHTML=unavailable?publicUnavailableState(message):publicLoadingSkeleton(message||"正在加载运营看板...");
   if(monitorBox){
     monitorBox.style.display="block";
-    monitorBox.innerHTML=publicLoadingSkeleton(message||"正在加载监控账号看板...");
+    monitorBox.innerHTML=unavailable?publicUnavailableState(message):publicLoadingSkeleton(message||"正在加载监控账号看板...");
   }
   if(isPublicMode()){
     const reportPage=$("reportPage");
@@ -3658,13 +3670,16 @@ async function loadBackendLatest(opts){
   try{
     try{
       payload=await getBackend("/supabase/latest",{}, {sendSecret:false});
+      if(!reportPayloadHasData(payload))throw new Error("Supabase 最新报告为空");
     }catch(_){
       payload=await getBackend("/reports/latest_report.json",{}, {sendSecret:false});
+      if(!reportPayloadHasData(payload))throw new Error("运行时最新报告为空");
     }
     if(shouldCheckJob)await refreshBackendJobState();
   }catch(firstErr){
     try{
       payload=await getFile("public_reports/latest_report.json");
+      if(!reportPayloadHasData(payload))throw new Error("静态备用报告为空");
     }catch(_){
       throw firstErr;
     }
@@ -3893,7 +3908,7 @@ async function loadPublicDashboardTask(){
       dashboardHistoryLoading=false;
       dashboardHistoryReady=true;
       backendSetStatus("最新数据加载失败:"+(e.message||e));
-      renderDashboardLoading("最新数据暂时加载失败，请稍后重试");
+      renderDashboardLoading("最新数据暂时加载失败，请稍后重试",true);
       renderHistoryList([], "");
       return;
     }

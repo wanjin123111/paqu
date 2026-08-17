@@ -714,6 +714,32 @@ class AdminCatalogTests(unittest.TestCase):
             proxy._supabase_latest_report_payload()
 
         self.assertIn("source=neq.admin_catalog", paths[0])
+        self.assertIn("accounts_count=gt.0", paths[0])
+
+    def test_latest_report_ignores_empty_cached_payload(self):
+        paths = []
+
+        def request(method, path, **_kwargs):
+            paths.append(path)
+            return [{
+                "id": 10,
+                "generated_at": "2026-07-15T10:00:00+08:00",
+                "accounts_count": 1,
+                "dramas_count": 0,
+                "raw": {"accounts": 1, "summary": [{"account": "demo"}], "dramas_detail": []},
+            }]
+
+        proxy.SUPABASE_REPORT_CACHE.update({
+            "latest": {"accounts": 0, "dramas": 0, "summary": [], "dramas_detail": []},
+            "latest_expires_at": time.time() + 60,
+            "by_id": {},
+        })
+        with mock.patch.object(proxy, "_supabase_report_read_enabled", return_value=True), \
+                mock.patch.object(proxy, "_supabase_request", side_effect=request):
+            payload = proxy._supabase_latest_report_payload()
+
+        self.assertEqual(payload["supabase_run_id"], 10)
+        self.assertEqual(len(paths), 1)
 
     def test_admin_and_public_catalog_frontends_use_the_expected_security_boundary(self):
         root = pathlib.Path(proxy.ROOT)
@@ -1926,6 +1952,19 @@ class MemoryOptimizationTests(unittest.TestCase):
         self.assertEqual(latest["dramas"], 1)
         self.assertEqual(payload["summary"], summary)
         self.assertEqual(payload["dramas_detail"], dramas)
+
+    def test_empty_scheduled_scrape_preserves_latest_report(self):
+        error = {"account": "demo", "error": "HTTP 402 Insufficient balance"}
+        with mock.patch.object(proxy, "_load_previous_account_metrics", return_value={}), \
+                mock.patch.object(proxy, "_clear_supabase_report_cache"), \
+                mock.patch.object(proxy, "_scrape_scheduled_accounts", return_value=([], [], [error])), \
+                mock.patch.object(proxy, "_save_drama_detail_cache"), \
+                mock.patch.object(proxy, "_release_drama_detail_cache"), \
+                mock.patch.object(proxy, "_write_report_bundle") as write_bundle:
+            with self.assertRaisesRegex(RuntimeError, "latest report was preserved"):
+                proxy._run_scheduled_job(["demo"])
+
+        write_bundle.assert_not_called()
 
     def test_episode_history_flush_releases_completed_batch(self):
         fetched = [("drama-1", [{"video_id": "1"}])]

@@ -5005,7 +5005,7 @@ def _latest_catalog_report():
         try:
             with open(path, "r", encoding="utf-8-sig") as handle:
                 payload = json.load(handle)
-            if isinstance(payload, dict):
+            if _report_payload_has_data(payload):
                 return payload
         except Exception:
             continue
@@ -5489,6 +5489,19 @@ def _drop_supabase_report_cache(run_ids):
             SUPABASE_REPORT_CACHE["latest_expires_at"] = 0
 
 
+def _report_payload_has_data(payload):
+    if not isinstance(payload, dict):
+        return False
+    summary_rows = payload.get("summary")
+    drama_rows = payload.get("dramas_detail")
+    return bool(
+        (isinstance(summary_rows, list) and summary_rows)
+        or (isinstance(drama_rows, list) and drama_rows)
+        or _to_int(payload.get("accounts")) > 0
+        or _to_int(payload.get("dramas")) > 0
+    )
+
+
 def _save_report_to_supabase(payload, cache_payload=True):
     status = {
         "enabled": bool(SUPABASE_ENABLED),
@@ -5501,6 +5514,10 @@ def _save_report_to_supabase(payload, cache_payload=True):
         return status
     if not _supabase_configured():
         status["error"] = "SUPABASE_URL or SUPABASE_SERVICE_KEY is not configured"
+        return status
+    if not _report_payload_has_data(payload):
+        status["error"] = "report payload contains no account or drama data"
+        status["skipped"] = "empty_report"
         return status
     try:
         summary_rows = payload.get("summary") if isinstance(payload, dict) else []
@@ -5620,17 +5637,22 @@ def _supabase_latest_report_payload():
     if not _supabase_report_read_enabled():
         raise RuntimeError("Supabase report read is not configured")
     cached = _cached_supabase_report_payload(latest=True)
-    if cached:
+    if _report_payload_has_data(cached):
         return cached
+    if cached:
+        _clear_supabase_report_cache()
     rows = _supabase_request(
         "GET",
         "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at,raw"
-        "&source=neq.%s&order=generated_at.desc&limit=1" % urllib.parse.quote(ADMIN_CATALOG_SOURCE, safe=""),
+        "&source=neq.%s&accounts_count=gt.0&order=generated_at.desc&limit=1"
+        % urllib.parse.quote(ADMIN_CATALOG_SOURCE, safe=""),
         timeout=20,
     )
     if not isinstance(rows, list) or not rows:
         raise RuntimeError("Supabase report_runs is empty")
     payload = _supabase_report_payload_from_row(rows[0])
+    if not _report_payload_has_data(payload):
+        raise RuntimeError("Supabase latest report contains no account or drama data")
     _cache_supabase_report_payload(payload, run_id=rows[0].get("id"), latest=True)
     return payload
 
@@ -5666,7 +5688,7 @@ def _supabase_report_history(limit=None):
     rows = _supabase_request(
         "GET",
         "/report_runs?select=id,generated_at,accounts_count,dramas_count,created_at"
-        "&source=neq.%s&generated_at=gte.%s&order=generated_at.desc&limit=%s"
+        "&source=neq.%s&accounts_count=gt.0&generated_at=gte.%s&order=generated_at.desc&limit=%s"
         % (urllib.parse.quote(ADMIN_CATALOG_SOURCE, safe=""), cutoff, limit),
         timeout=20,
     )
@@ -5880,6 +5902,15 @@ def _run_scheduled_job(accounts):
         pass
     _release_drama_detail_cache()
     gc.collect()
+    if not rows and not drama_rows:
+        detail = ""
+        if errors:
+            first_error = errors[0] if isinstance(errors[0], dict) else {"error": errors[0]}
+            detail = str(first_error.get("error") or first_error.get("account") or "").strip()
+        raise RuntimeError(
+            "scheduled scrape returned no account or drama data; latest report was preserved"
+            + ((": " + detail) if detail else "")
+        )
     files, report_payload = _write_report_bundle(rows, drama_rows, errors)
     generated_at = report_payload.get("generated_at") or datetime.datetime.now(BEIJING_TZ).isoformat(timespec="seconds")
     drama_count = len(drama_rows)
